@@ -294,6 +294,6 @@ Les agents doivent :
 
 ## 12. Contacts et ressources
 
-- **Dépôt** : https://github.com/dorel14/libembedding
-- **Issues** : https://github.com/dorel14/libembedding/issues
+- **Dépôt** : https://github.com/dorel14/libembedding-ng
+- **Issues** : https://github.com/dorel14/libembedding-ng/issues
 - **PyPI** : https://pypi.org/project/libembedding-ng/

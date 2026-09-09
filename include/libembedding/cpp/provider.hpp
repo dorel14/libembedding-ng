@@ -13,7 +13,6 @@
 
 #include <libembedding/types.h>
 #include <libembedding/text_embedding.h>
-#include <libembedding/model_loader.h>
 #include <libembedding/model_registry.h>
 #include <libembedding/detail/status_helper.hpp>
 

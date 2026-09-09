@@ -24,7 +24,6 @@
 #include "types.h"
 #include "model_registry.h"
 #include "downloader.h"
-#include "model_loader.h"
 #include "text_embedding.h"          // Must come before benchmark (defines lembed_text_embedding_t)
 #include "sparse_text_embedding.h"
 #include "autotuner.h"

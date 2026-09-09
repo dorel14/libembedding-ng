@@ -1,4 +1,4 @@
-﻿"""Multi-worker text embedding pool for maximum throughput."""
+"""Multi-worker text embedding pool for maximum throughput."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
+from .autotune import _do_autotune
 from .text_embedding import TextEmbedding
 
 
@@ -46,9 +47,9 @@ class TextEmbeddingPool:
         autotune_max_samples: int = 100,
     ):
         if autotune:
-            tuned = TextEmbedding._do_autotune(model_name, provider,
-                                               texts=autotune_texts,
-                                               max_sample_size=autotune_max_samples)
+            tuned = _do_autotune(model_name, provider,
+                                 texts=autotune_texts,
+                                 max_sample_size=autotune_max_samples)
             n_workers = tuned.workers
             threads_per_worker = tuned.threads
             batch_size = tuned.batch_size

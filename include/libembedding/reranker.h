@@ -12,7 +12,6 @@
 #define LIBEMBEDDING_RERANKER_H
 
 #include "types.h"
-#include "model_loader.h"
 #include "llamacpp_backend.h"
 
 #ifdef __cplusplus
@@ -35,6 +34,13 @@ lembed_status_t lembed_reranker_create_from_path(
 /* Explicit GGUF loading */
 lembed_status_t lembed_reranker_create_from_gguf_path(
     const char* gguf_path,
+    const lembed_reranker_options_t* options,
+    lembed_reranker_t** out);
+
+/* Load GGUF model from HuggingFace (llama.cpp backend) */
+lembed_status_t lembed_reranker_create_from_gguf_model(
+    const char* repo,
+    const char* filename,
     const lembed_reranker_options_t* options,
     lembed_reranker_t** out);
 
@@ -69,6 +75,7 @@ void lembed_reranker_free(lembed_reranker_t* ctx);
 
 #include "model_registry.h"
 #include "downloader.h"
+#include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/tokenizer_impl.hpp"
 #include "detail/batch.hpp"
@@ -118,11 +125,16 @@ struct lembed_reranker {
 extern "C" {
 #endif
 
-static lembed_status_t lembed_reranker_create_onnx(
+static bool lembed__path_ends_with_gguf(const char* path) {
+    if (!path) return false;
+    std::string p = path;
+    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+    return p.size() > 4 && p.substr(p.size() - 4) == ".gguf";
+}
+
+static lembed_status_t lembed__reranker_create_onnx_impl(
         const lembed_reranker_options_t* options,
         lembed_reranker_t** out) {
-    if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
-
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_reranker_model_info(options->model, &info);
@@ -176,59 +188,41 @@ lembed_status_t lembed_reranker_create(
         lembed_reranker_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    try {
+    lembed_backend_t backend = (lembed_backend_t)options->backend;
+
+    /* Validate backend enum range */
+    if (backend < LEMBED_BACKEND_ONNX || backend > LEMBED_BACKEND_AUTO) {
+        lembed::detail::set_error("Invalid backend value in reranker options");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* If backend is explicitly ONNX, or AUTO and model is an ONNX enum, use ONNX path */
+    if (backend == LEMBED_BACKEND_ONNX || backend == LEMBED_BACKEND_AUTO) {
+        lembed_status_t s = lembed__reranker_create_onnx_impl(options, out);
+        if (s == LEMBED_OK || backend == LEMBED_BACKEND_ONNX) return s;
+        /* If AUTO and ONNX failed with MODEL_NOT_FOUND, fall through to GGUF */
+        if (s != LEMBED_ERROR_MODEL_NOT_FOUND) return s;
+    }
+
+    /* llama.cpp backend (explicit or AUTO fallback) */
+    if (backend == LEMBED_BACKEND_LLAMACPP || backend == LEMBED_BACKEND_AUTO) {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_reranker_model_info(options->model, &info);
-        if (s != LEMBED_OK) return s;
-
-        char* model_dir_cstr = nullptr;
-        s = lembed_ensure_reranker_model(options->model, options->cache_dir,
-                                         options->show_download_progress,
-                                         options->offline, &model_dir_cstr);
-        if (s != LEMBED_OK) return s;
-        std::string model_dir(model_dir_cstr);
-        lembed_free_string(model_dir_cstr);
-
-        auto* ctx = new lembed_reranker();
-        ctx->backend_type = LEMBED_BACKEND_ONNX;
-        ctx->max_length = (options->max_length > 0) ? options->max_length : info.max_tokens;
-        ctx->model_name_str = info.model_name;
-        ctx->num_threads = options->num_threads;
-        ctx->batch_size = (options->batch_size > 0) ? options->batch_size
-                                                     : LEMBED_DEFAULT_BATCH_SIZE;
-        ctx->provider = options->provider;
-        ctx->device_id = options->device_id;
-
-        std::string onnx_path = model_dir + "/" + info.model_file;
-        ctx->onnx.session.load_from_file(onnx_path.c_str(),
-                                    options->num_threads,
-                                    (int)options->provider);
-
-        std::string tok_path = model_dir + "/tokenizer.json";
-        ctx->onnx.tokenizer.load_from_file(tok_path, ctx->max_length);
-
-        ctx->desc.name = ctx->model_name_str.c_str();
-        ctx->desc.dimension = 0;
-        ctx->desc.max_length = ctx->max_length;
-        ctx->desc.pooling = LEMBED_POOLING_MEAN;
-        ctx->desc.num_threads = ctx->num_threads;
-        ctx->desc.batch_size = ctx->batch_size;
-        ctx->desc.provider = ctx->provider;
-        ctx->desc.device_id = ctx->device_id;
-
-        *out = ctx;
-        return LEMBED_OK;
-    } catch (const std::exception& e) {
-        lembed::detail::set_error(e.what());
-        return LEMBED_ERROR_ONNX_RUNTIME;
+        if (s == LEMBED_OK) {
+            /* Try to find a matching GGUF model by name or code */
+            const lembed_gguf_model_info_t* gguf_info = lembed_find_gguf_model(info.model_name);
+            if (!gguf_info) gguf_info = lembed_find_gguf_model(info.model_code);
+            if (gguf_info && gguf_info->gguf_url && gguf_info->gguf_url[0]) {
+                return lembed_reranker_create_from_gguf_path(gguf_info->gguf_url, options, out);
+            }
+        }
+        if (backend == LEMBED_BACKEND_LLAMACPP) {
+            lembed::detail::set_error("No GGUF model found for reranker and llama.cpp backend requested");
+            return LEMBED_ERROR_MODEL_NOT_FOUND;
+        }
     }
-}
 
-static bool lembed__path_ends_with_gguf(const char* path) {
-    if (!path) return false;
-    std::string p = path;
-    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
-    return p.size() > 4 && p.substr(p.size() - 4) == ".gguf";
+    return LEMBED_ERROR_MODEL_NOT_FOUND;
 }
 
 lembed_status_t lembed_reranker_create_from_path(
@@ -240,9 +234,6 @@ lembed_status_t lembed_reranker_create_from_path(
     if (lembed__path_ends_with_gguf(path)) {
         return lembed_reranker_create_from_gguf_path(path, options, out);
     }
-
-    /* ONNX directory loading */
-    if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
     try {
         std::string onnx_data = lembed::detail::read_file_to_string(

@@ -152,3 +152,63 @@ def test_similarity_functions():
     assert abs(cosine_similarity(c, d) - 0.0) < 1e-5
     assert abs(dot_product(c, d) - 0.0) < 1e-5
     assert abs(euclidean_distance(c, d) - 1.41421) < 1e-4
+
+
+def test_text_embedding_from_mode():
+    model = TextEmbedding.from_mode("balanced")
+    assert model.dim == 384
+    result = model.embed(["Hello world"])
+    assert result.shape == (1, 384)
+    model.close()
+
+
+def test_text_embedding_from_mode_fast():
+    model = TextEmbedding.from_mode("fast")
+    assert model.dim > 0
+    model.close()
+
+
+def test_text_embedding_from_mode_invalid():
+    with pytest.raises(ValueError, match="Unknown mode"):
+        TextEmbedding.from_mode("invalid_mode")
+
+
+def test_text_embedding_repr():
+    model = _bge_small()
+    r = repr(model)
+    assert "TextEmbedding" in r
+    assert f"dim={model.dim}" in r
+    model.close()
+
+
+def test_text_embedding_context_manager():
+    with _bge_small() as model:
+        assert model.dim == 384
+        result = model.embed(["test"])
+        assert result.shape == (1, 384)
+
+
+def test_text_embedding_stream():
+    model = _bge_small()
+    texts = ["Hello", "World", "Test"]
+    received = []
+
+    def callback(arr, dim, userdata):
+        received.append(arr)
+
+    model.embed_stream(texts, callback)
+    assert len(received) == 3
+    for arr in received:
+        assert arr.shape == (model.dim,)
+    model.close()
+
+
+def test_text_embedding_batched():
+    model = _bge_small()
+    texts = ["a", "b", "c", "d", "e"]
+    batches = list(model.embed_batched(texts, batch_size=2))
+    assert len(batches) == 5
+    for emb in batches:
+        assert emb.shape == (model.dim,)
+    model.close()
+

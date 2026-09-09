@@ -58,6 +58,12 @@ lembed_status_t lembed_ensure_gguf_model(
     int offline,                /* 1 = skip downloads, cache only */
     char** model_path_out);
 
+lembed_status_t lembed_resolve_gguf_path(
+    const char* name_or_path,   /* .gguf path, URL, or registry name */
+    const char* cache_dir,      /* NULL = default */
+    int offline,                /* 1 = skip downloads, cache only */
+    char** model_path_out);     /* caller must free with lembed_free_string() */
+
 void lembed_free_string(char* s);
 
 #ifdef __cplusplus
@@ -72,6 +78,9 @@ void lembed_free_string(char* s);
 #include <string>
 #include <filesystem>
 #include "detail/downloader_impl.hpp"
+#include "detail/download_manager.hpp"
+#include "gguf_registry.h"
+#include "model_registry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,42 +89,22 @@ extern "C" {
 /* Lookup additional files for a model from the registry.
  * Returns nullptr if no additional files are needed. */
 const char* const* lembed__get_additional_files(int model_enum, int model_type) {
-    (void)model_enum;
-    (void)model_type;
-    return nullptr;
+    return lembed::detail::get_additional_files(model_enum, model_type);
 }
 
-/* =========================================================================
- * Progress callback for GGUF downloads
- * ========================================================================= */
+/* Progress callback for GGUF downloads */
 static void gguf_download_progress(float fraction, void* userdata) {
-    (void)userdata;
-    int bar_width = 40;
-    int pos = (int)(bar_width * fraction);
-    fprintf(stderr, "\r[");
-    for (int i = 0; i < bar_width; ++i) {
-        if (i < pos) fprintf(stderr, "=");
-        else if (i == pos) fprintf(stderr, ">");
-        else fprintf(stderr, " ");
-    }
-    fprintf(stderr, "] %3.0f%%", fraction * 100.0f);
-    if (fraction >= 1.0f) fprintf(stderr, "\n");
-    fflush(stderr);
+    lembed::detail::gguf_download_progress(fraction, userdata);
 }
 
 lembed_status_t lembed_ensure_text_model(
         lembed_text_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
-    lembed_model_info_t info;
-    lembed_status_t s = lembed_get_text_model_info(model, &info);
-    if (s != LEMBED_OK) return s;
     try {
-        std::string dir = lembed::detail::ensure_model(
-            info.model_code, info.model_file,
-            lembed__get_additional_files((int)model, LEMBED__MODEL_TYPE_TEXT),
-            lembed::detail::get_cache_dir(cache_dir),
-            show_progress != 0, offline != 0);
+        std::string dir = lembed::detail::ensure_model_by_kind(
+            (int)model, LEMBED__MODEL_TYPE_TEXT,
+            cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
     } catch (const std::exception& e) {
@@ -128,15 +117,10 @@ lembed_status_t lembed_ensure_sparse_model(
         lembed_sparse_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
-    lembed_model_info_t info;
-    lembed_status_t s = lembed_get_sparse_model_info(model, &info);
-    if (s != LEMBED_OK) return s;
     try {
-        std::string dir = lembed::detail::ensure_model(
-            info.model_code, info.model_file,
-            lembed__get_additional_files((int)model, LEMBED__MODEL_TYPE_SPARSE),
-            lembed::detail::get_cache_dir(cache_dir),
-            show_progress != 0, offline != 0);
+        std::string dir = lembed::detail::ensure_model_by_kind(
+            (int)model, LEMBED__MODEL_TYPE_SPARSE,
+            cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
     } catch (const std::exception& e) {
@@ -145,19 +129,15 @@ lembed_status_t lembed_ensure_sparse_model(
     }
 }
 
+#ifndef LIBEMBEDDING_NO_IMAGE
 lembed_status_t lembed_ensure_image_model(
         lembed_image_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
-    lembed_model_info_t info;
-    lembed_status_t s = lembed_get_image_model_info(model, &info);
-    if (s != LEMBED_OK) return s;
     try {
-        std::string dir = lembed::detail::ensure_model(
-            info.model_code, info.model_file,
-            NULL,
-            lembed::detail::get_cache_dir(cache_dir),
-            show_progress != 0, offline != 0);
+        std::string dir = lembed::detail::ensure_model_by_kind(
+            (int)model, LEMBED__MODEL_TYPE_IMAGE,
+            cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
     } catch (const std::exception& e) {
@@ -165,20 +145,17 @@ lembed_status_t lembed_ensure_image_model(
         return LEMBED_ERROR_DOWNLOAD;
     }
 }
+
+#endif /* LIBEMBEDDING_NO_IMAGE */
 
 lembed_status_t lembed_ensure_reranker_model(
         lembed_reranker_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
-    lembed_model_info_t info;
-    lembed_status_t s = lembed_get_reranker_model_info(model, &info);
-    if (s != LEMBED_OK) return s;
     try {
-        std::string dir = lembed::detail::ensure_model(
-            info.model_code, info.model_file,
-            lembed__get_additional_files((int)model, LEMBED__MODEL_TYPE_RERANKER),
-            lembed::detail::get_cache_dir(cache_dir),
-            show_progress != 0, offline != 0);
+        std::string dir = lembed::detail::ensure_model_by_kind(
+            (int)model, LEMBED__MODEL_TYPE_RERANKER,
+            cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
     } catch (const std::exception& e) {
@@ -229,6 +206,91 @@ lembed_status_t lembed_ensure_gguf_model(
 
         *model_path_out = strdup(dest.c_str());
         return LEMBED_OK;
+    } catch (const std::exception& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_DOWNLOAD;
+    }
+}
+
+/* =========================================================================
+ * Resolve a GGUF path/name/URL to a local cached file.
+ * ========================================================================= */
+lembed_status_t lembed_resolve_gguf_path(
+        const char* name_or_path,
+        const char* cache_dir,
+        int offline,
+        char** model_path_out) {
+    if (!name_or_path || !name_or_path[0] || !model_path_out)
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    try {
+        std::string input(name_or_path);
+
+        /* Case 1: local .gguf file path */
+        if (input.size() > 5) {
+            std::string lower = input;
+            for (auto& c : lower) c = (char)tolower(c);
+            if (lower.substr(lower.size() - 5) == ".gguf" && lembed::detail::file_exists(input)) {
+                *model_path_out = strdup(input.c_str());
+                return LEMBED_OK;
+            }
+        }
+
+        /* Case 2: URL starting with http(s) */
+        if (input.find("http://") == 0 || input.find("https://") == 0) {
+            /* Extract repo and filename from URL like:
+             * https://huggingface.co/<repo>/resolve/main/<filename>.gguf */
+            size_t repo_start = input.find("huggingface.co/");
+            if (repo_start == std::string::npos) {
+                lembed::detail::set_error("Unsupported GGUF URL: " + input);
+                return LEMBED_ERROR_DOWNLOAD;
+            }
+            repo_start += strlen("huggingface.co/");
+            size_t repo_end = input.find("/resolve/main/", repo_start);
+            if (repo_end == std::string::npos) {
+                lembed::detail::set_error("Unsupported GGUF URL: " + input);
+                return LEMBED_ERROR_DOWNLOAD;
+            }
+            std::string repo = input.substr(repo_start, repo_end - repo_start);
+            std::string filename = input.substr(repo_end + strlen("/resolve/main/"));
+
+            return lembed_ensure_gguf_model(repo.c_str(), filename.c_str(),
+                                            cache_dir, 0, offline, model_path_out);
+        }
+
+        /* Case 3: registry name or HF repo/filename shorthand */
+        const lembed_gguf_model_info_t* info = lembed_find_gguf_model(input.c_str());
+        if (info && info->gguf_url && info->gguf_url[0]) {
+            /* Extract repo and filename from URL */
+            std::string url(info->gguf_url);
+            size_t repo_start = url.find("huggingface.co/");
+            if (repo_start != std::string::npos) {
+                repo_start += strlen("huggingface.co/");
+                size_t repo_end = url.find("/resolve/main/", repo_start);
+                if (repo_end != std::string::npos) {
+                    std::string repo = url.substr(repo_start, repo_end - repo_start);
+                    std::string filename = url.substr(repo_end + strlen("/resolve/main/"));
+                    return lembed_ensure_gguf_model(repo.c_str(), filename.c_str(),
+                                                    cache_dir, 0, offline, model_path_out);
+                }
+            }
+        }
+
+        /* Case 4: treat as HF repo shorthand "<repo>/<filename>" */
+        {
+            size_t slash = input.find('/');
+            if (slash != std::string::npos && slash > 0 && slash < input.size() - 1) {
+                std::string repo = input.substr(0, slash);
+                std::string filename = input.substr(slash + 1);
+                if (!filename.empty() && !repo.empty()) {
+                    return lembed_ensure_gguf_model(repo.c_str(), filename.c_str(),
+                                                    cache_dir, 0, offline, model_path_out);
+                }
+            }
+        }
+
+        lembed::detail::set_error("Cannot resolve GGUF model: " + input);
+        return LEMBED_ERROR_INVALID_ARGUMENT;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_DOWNLOAD;

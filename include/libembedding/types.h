@@ -270,7 +270,7 @@ typedef struct {
     int                         auto_workers;   /* 1 = auto-detect optimal workers/sessions */
     int                         cache_size;     /* 0 = disabled, >0 = LRU cache capacity */
     /* Backend selection */
-    int                         backend;       /* lembed_backend_t: ONNX, LLAMACPP, or AUTO */
+    lembed_backend_t            backend;       /* ONNX, LLAMACPP, or AUTO */
     /* ONNX batching strategy */
     int                         batch_strategy; /* lembed_batch_strategy_t (ONNX only) */
 } lembed_text_options_t;
@@ -319,6 +319,15 @@ typedef struct {
     int                         show_download_progress;
     int                         batch_size;
     int                         offline;
+    /* Backend selection */
+    lembed_backend_t            backend;       /* ONNX, LLAMACPP, or AUTO */
+    /* llama.cpp specific options */
+    int                         llama_n_ctx;  /* context size (0 = model default) */
+    int                         llama_n_gpu_layers; /* GPU layers for llama.cpp (-1 = all, 0 = CPU) */
+    int                         llama_verbose; /* 1 = enable llama.cpp logging */
+    int                         llama_n_batch; /* max tokens per llama_encode() (0 = model default) */
+    int                         auto_workers;   /* 1 = auto-detect optimal workers/sessions */
+    int                         cache_size;     /* 0 = disabled, >0 = LRU cache capacity */
 } lembed_reranker_options_t;
 
 /* User-defined model (bring-your-own ONNX) */
@@ -401,6 +410,10 @@ lembed_reranker_options_t lembed_reranker_options_default(void) {
     opts.provider = LEMBED_PROVIDER_CPU;
     opts.show_download_progress = 1;
     opts.batch_size = LEMBED_DEFAULT_BATCH_SIZE;
+    opts.backend = LEMBED_BACKEND_AUTO;
+    opts.llama_n_gpu_layers = 0;
+    opts.auto_workers = 0;
+    opts.cache_size = 0;
     return opts;
 }
 

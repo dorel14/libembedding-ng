@@ -1,0 +1,46 @@
+name: Encoding Check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  check-encoding:
+    name: Verify UTF-8 without BOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for UTF-8 BOM
+        run: |
+          if grep -rlP '^\xEF\xBB\xBF' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.txt' --include='*.ps1' --include='*.bat' --include='CMakeLists.txt' --exclude-dir=third_party --exclude-dir=.git; then
+            echo "Files with UTF-8 BOM found:"
+            grep -rlP '^\xEF\xBB\xBF' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.txt' --include='*.ps1' --include='*.bat' --include='CMakeLists.txt' --exclude-dir=third_party --exclude-dir=.git
+            exit 1
+          fi
+          echo "No UTF-8 BOM found."
+
+      - name: Check for non-UTF-8 encodings
+        run: |
+          # Check for Latin-1 encoded files (heuristic: presence of isolated Ã or Â bytes)
+          if grep -rlP '[\x80-\xFF]' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.txt' --include='*.ps1' --include='*.bat' --include='CMakeLists.txt' --exclude-dir=third_party --exclude-dir=.git | while read -r f; do
+            if ! file -b --mime-encoding "$f" | grep -q 'utf-8\|us-ascii\|binary'; then
+              echo "Non-UTF-8 file: $f ($(file -b --mime-encoding "$f"))"
+              exit 1
+            fi
+          done; then
+            exit 1
+          fi
+          echo "All source files are UTF-8 or ASCII."
+
+      - name: Check for mixed line endings
+        run: |
+          if grep -rlP '\r\n' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --exclude-dir=third_party --exclude-dir=.git | grep -v '\.ps1$\|\.bat$' | grep -v 'windows' ; then
+            echo "Files with CRLF line endings found (excluding .ps1/.bat):"
+            grep -rlP '\r\n' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --exclude-dir=third_party --exclude-dir=.git | grep -v '\.ps1$\|\.bat$' | grep -v 'windows'
+            exit 1
+          fi
+          echo "No mixed line endings found."

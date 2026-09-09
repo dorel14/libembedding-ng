@@ -166,13 +166,11 @@ def autotune_unified(
 
     resolved_name = model_name
     if task == "embedding":
-        try:
-            idx = resolve_text_model(model_name)
+        idx = resolve_text_model(model_name)
+        if idx >= 0:
             info = ffi.new("lembed_model_info_t *")
             lib.lembed_get_text_model_info(idx, info)
             resolved_name = ffi.string(info.model_code).decode("utf-8")
-        except Exception:
-            pass
 
     check_status(lib.lembed_autotune_unified(task_map[task], resolved_name.encode("utf-8"), mode, result))
 

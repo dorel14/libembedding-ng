@@ -12,7 +12,6 @@
 #define LIBEMBEDDING_SPARSE_TEXT_EMBEDDING_H
 
 #include "types.h"
-#include "model_loader.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +41,12 @@ void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx
 
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 
+/* Load from local directory */
+lembed_status_t lembed_sparse_text_embedding_create_from_path(
+    const char* dir_path,
+    const lembed_sparse_options_t* options,
+    lembed_sparse_embedding_ctx_t** out);
+
 #ifdef __cplusplus
 }
 #endif
@@ -53,6 +58,7 @@ void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 
 #include "model_registry.h"
 #include "downloader.h"
+#include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/tokenizer_impl.hpp"
 #include "detail/sparse_postprocess.hpp"

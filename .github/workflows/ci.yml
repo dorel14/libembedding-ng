@@ -1,0 +1,41 @@
+name: CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python:
+        required: false
+        type: string
+        default: "3.12"
+
+jobs:
+  version-sync:
+    name: Version sync check
+    uses: ./.github/workflows/version-sync.yml
+
+  encoding-check:
+    name: Encoding check
+    uses: ./.github/workflows/encoding-check.yml
+
+  cpp-tests:
+    name: C++ unit tests (${{ matrix.name }})
+    needs: [version-sync, encoding-check]
+    uses: ./.github/workflows/tests.yml
+
+  python-tests:
+    name: Python tests (${{ matrix.name }})
+    needs: [version-sync, encoding-check]
+    uses: ./.github/workflows/build-wheel.yml
+    with:
+      os: ${{ matrix.os }}
+      python: ${{ inputs.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-x86_64
+          - os: macos-14
+            name: macos-arm64
+          - os: windows-2022
+            name: windows-x86_64

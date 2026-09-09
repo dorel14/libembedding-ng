@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - C/C++ Embedding Library (header-only on Linux/macOS, shared lib/DLL on Windows)
  * config.h - Version and feature configuration
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.5.8
  *
  * SPDX-License-Identifier: MIT
  */
@@ -12,9 +12,9 @@
 #define LIBEMBEDDING_CONFIG_H
 
 #define LIBEMBEDDING_VERSION_MAJOR 1
-#define LIBEMBEDDING_VERSION_MINOR 4
-#define LIBEMBEDDING_VERSION_PATCH 0
-#define LIBEMBEDDING_VERSION_STRING "1.4.0"
+#define LIBEMBEDDING_VERSION_MINOR 5
+#define LIBEMBEDDING_VERSION_PATCH 8
+#define LIBEMBEDDING_VERSION_STRING "1.5.8"
 
 /* Feature toggles (can be defined before including headers) */
 

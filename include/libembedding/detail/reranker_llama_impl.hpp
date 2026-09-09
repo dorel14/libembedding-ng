@@ -38,7 +38,7 @@ extern "C" {
 #endif
 
 /* =========================================================================
- * llama.cpp backend: creation from GGUF path
+ * llama.cpp backend: creation from GGUF path/name/URL
  * ========================================================================= */
 lembed_status_t lembed_reranker_create_from_gguf_path(
         const char* gguf_path,
@@ -48,18 +48,27 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
     try {
+        char* resolved_path = nullptr;
+        lembed_status_t rs = lembed_resolve_gguf_path(
+            gguf_path,
+            options->cache_dir,
+            options->offline,
+            &resolved_path);
+        if (rs != LEMBED_OK) return rs;
+
         auto* ctx = new lembed_reranker();
         ctx->backend_type = LEMBED_BACKEND_LLAMACPP;
         ctx->max_length = (options->max_length > 0) ? options->max_length : 512;
-        ctx->model_name_str = std::filesystem::path(gguf_path).filename().string();
+        ctx->model_name_str = std::filesystem::path(resolved_path).filename().string();
         ctx->num_threads = (options->num_threads > 0) ? options->num_threads : 4;
         ctx->batch_size = (options->batch_size > 0) ? options->batch_size
                                                      : LEMBED_DEFAULT_BATCH_SIZE;
         ctx->provider = LEMBED_PROVIDER_LLAMACPP;
         ctx->device_id = options->device_id;
 
-        ctx->llama.session.load_from_file(gguf_path, ctx->num_threads,
+        ctx->llama.session.load_from_file(resolved_path, ctx->num_threads,
                                           512, 0, 0, false);
+        lembed_free_string(resolved_path);
         if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
 
         ctx->desc.name = ctx->model_name_str.c_str();
@@ -77,6 +86,27 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_LLAMA;
     }
+}
+
+lembed_status_t lembed_reranker_create_from_gguf_model(
+        const char* repo, const char* filename,
+        const lembed_reranker_options_t* options,
+        lembed_reranker_t** out) {
+    if (!repo || !repo[0] || !filename || !filename[0] || !out)
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    char* cached_path = nullptr;
+    lembed_status_t s = lembed_ensure_gguf_model(
+        repo, filename,
+        options ? options->cache_dir : nullptr,
+        options ? options->show_download_progress : 0,
+        options ? options->offline : 0,
+        &cached_path);
+    if (s != LEMBED_OK) return s;
+
+    s = lembed_reranker_create_from_gguf_path(cached_path, options, out);
+    lembed_free_string(cached_path);
+    return s;
 }
 
 /* =========================================================================

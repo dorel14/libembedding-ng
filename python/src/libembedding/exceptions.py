@@ -1,4 +1,4 @@
-﻿"""Exception hierarchy mapped from lembed_status_t.
+"""Exception hierarchy mapped from lembed_status_t.
 
 Auteur: David Orel
 Version: 1.4.0

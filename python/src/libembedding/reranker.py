@@ -1,4 +1,4 @@
-﻿"""High-level document reranker API.
+"""High-level document reranker API.
 
 Auteur: David Orel
 Version: 1.4.0
@@ -10,6 +10,7 @@ import warnings
 
 from ._binding import ffi, lib
 from ._status import check_status
+from .backend import backend_to_enum, _BACKEND_ONNX
 from .exceptions import ModelNotFoundError
 from .models import (
     _PROVIDER_MAP,
@@ -34,6 +35,7 @@ class Reranker:
         batch_size: Internal batch size (default 256).
         offline: If True, use cached models only (default False).
         show_download_progress: Show download progress bar.
+        backend: Backend to use ("auto", "onnx", or "llama").
         num_threads: Deprecated; use ``threads``.
     """
 
@@ -49,6 +51,7 @@ class Reranker:
         batch_size: int = 256,
         offline: bool = False,
         show_download_progress: bool = True,
+        backend: str = "auto",
         num_threads: int | None = None,
     ):
         if num_threads is not None:
@@ -71,14 +74,19 @@ class Reranker:
         opts.batch_size = batch_size
         opts.offline = int(offline)
         opts.show_download_progress = int(show_download_progress)
+        opts.backend = backend_to_enum(backend)
 
         ctx_ptr = ffi.new("lembed_reranker_t **")
+
+        backend_enum = opts.backend
 
         try:
             model_idx = resolve_reranker_model(model_name)
             opts.model = model_idx
             check_status(lib.lembed_reranker_create(ffi.addressof(opts), ctx_ptr))
         except ModelNotFoundError:
+            if backend_enum == _BACKEND_ONNX:
+                raise
             if _is_local_path(model_name):
                 if model_name.lower().endswith(".gguf"):
                     check_status(lib.lembed_reranker_create_from_gguf_path(
@@ -87,7 +95,8 @@ class Reranker:
                     check_status(lib.lembed_reranker_create_from_path(
                         model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
             else:
-                raise
+                check_status(lib.lembed_reranker_create_from_gguf_path(
+                    model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
 
         self._ctx = ffi.gc(ctx_ptr[0], lib.lembed_reranker_free)
         self._batch_size = batch_size
@@ -101,7 +110,7 @@ class Reranker:
     def auto(profile: str = "balanced", **kwargs) -> Reranker:
         """Create a Reranker with automatic configuration based on profile.
 
-        This is the recommended way to create a Reranker â€” it automatically
+        This is the recommended way to create a Reranker Ã¢â‚¬â€ it automatically
         selects the optimal model and configuration for your hardware.
 
         Args:
@@ -402,7 +411,7 @@ def Reranker_auto(
 ) -> Reranker:
     """Create a Reranker with automatic configuration based on profile.
 
-    This is the recommended way to create a Reranker â€” it automatically
+    This is the recommended way to create a Reranker Ã¢â‚¬â€ it automatically
     selects the optimal model and configuration for your hardware.
 
     Args:

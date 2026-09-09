@@ -1,4 +1,4 @@
-﻿"""Native similarity functions operating on raw float arrays.
+"""Native similarity functions operating on raw float arrays.
 
 Auteur: David Orel
 Version: 1.4.0

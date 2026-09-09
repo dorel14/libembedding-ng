@@ -121,6 +121,12 @@ lembed_status_t lembed_text_embedding_create(
         lembed_text_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    /* Validate backend enum range */
+    if (options->backend < LEMBED_BACKEND_ONNX || options->backend > LEMBED_BACKEND_AUTO) {
+        lembed::detail::set_error("Invalid backend value in text embedding options");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_text_model_info(options->model, &info);

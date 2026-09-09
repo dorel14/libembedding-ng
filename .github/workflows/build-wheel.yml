@@ -35,7 +35,13 @@ jobs:
       - name: Install Python build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install cffi numpy build wheel pytest pytest-timeout
+          pip install cffi numpy build wheel pytest pytest-timeout ruff pyright pytest-cov
+
+      - name: Lint and typecheck Python sources
+        shell: bash
+        run: |
+          ruff check python/src
+          pyright python/src
 
       # ── Platform-specific system dependencies ────────────────────
       - name: Install system dependencies (Linux)
@@ -291,7 +297,7 @@ jobs:
           fi
           echo "Installing $WHEEL"
           pip install "$WHEEL"
-          pytest tests/ -v --timeout=120
+          pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
       - name: Upload repaired wheel artifact

@@ -1,92 +1,35 @@
-# libembedding
+# libembedding-ng
 
-> **Forked from [pacifio/libembedding](https://github.com/pacifio/libembedding).**
-> This fork extends the original C/C++ core with **Windows support (native DLL)**,
-> **PyPI packaging under the name `libembedding-ng`**, local model loading, runtime
-> introspection (`stats()` / `desc()`), similarity helpers, streaming embeddings, a
-> multi-worker pool, an autotuner and automatic model selection. See
-> [CHANGELOG.md](CHANGELOG.md) for the full history.
+**Local-first embedding and reranking engine for C/C++ and Python.**
 
-A fast embedding library with both **C/C++** and **Python** APIs for generating text embeddings, sparse embeddings, image embeddings, and document reranking using ONNX Runtime. **5-8x faster than fastembed** with 3.5x less memory.
+libembedding-ng provides a unified runtime for ONNX Runtime and llama.cpp models,
+supporting dense embeddings, sparse embeddings, image embeddings and reranking
+through a single API.
 
-```bash
-pip install libembedding-ng
-```
+Designed for search engines, RAG systems, vector databases and AI applications,
+it runs entirely locally with no external services required.
 
-> The PyPI package is published as **`libembedding-ng`** to avoid clashing with the
-> original `libembedding` project on PyPI. The Python import name remains `libembedding`.
+---
 
-Inspired by [fastembed](https://github.com/qdrant/fastembed) (Python) and [fastembed-rs](https://github.com/qdrant/fastembed-rs) (Rust).
+## What it is
 
-### Python
+libembedding-ng is a **local inference engine specialized in embeddings and reranking**.
 
-```python
-from libembedding import TextEmbedding
+It is not a general-purpose ML runtime. It is a focused, production-grade stack
+for turning text, images and documents into vectors — with zero network dependency
+once models are cached.
 
-model = TextEmbedding("BAAI/bge-small-en-v1.5")
-embeddings = model.embed(["Hello world", "How are you?"])
-print(embeddings.shape)  # (2, 384)
-```
+Unlike generic serving frameworks, libembedding-ng gives you:
 
-### C/C++
+- **One API for ONNX and GGUF** — switch backends without changing application code
+- **Native C/C++ core** with **Python bindings** — same backend, two ergonomics
+- **First-class Windows support** — native DLL, CMake build, no WSL required
+- **Complete modality coverage** — dense, sparse, vision, and reranking in one library
+- **Production helpers built-in** — autotuning, session pooling, streaming, benchmarking
 
-```c
-#include <libembedding/text_embedding.h>
+No Rust toolchain. No external inference server. No mandatory cloud dependency.
 
-lembed_text_options_t opts = lembed_text_options_default();
-lembed_text_embedding_t* embedder = NULL;
-lembed_text_embedding_create(&opts, &embedder);
-
-const char* texts[] = { "Hello world", "How are you?" };
-lembed_embeddings_t result = {0};
-lembed_text_embedding_embed(embedder, texts, 2, 0, &result);
-// result.data = float[2][384], L2-normalized
-
-lembed_embeddings_free(&result);
-lembed_text_embedding_free(embedder);
-```
-
-## Features
-
-- **44 text embedding models** (BGE, MiniLM, Nomic, E5, CLIP, Jina, GTE, Snowflake, ModernBERT, EmbeddingGemma, etc.) with quantized variants
-- **2 sparse embedding models** (SPLADE++, BGE-M3)
-- **6 image embedding models** (CLIP ViT-B-32, ResNet-50, Unicom, Nomic Vision, CLIP ViT-B-32 INT8 quantized)
-- **5 reranker models** (BGE Reranker, Jina Reranker, Jina V1 Turbo INT8 quantized)
-- **llama.cpp / GGUF backend support** — run any `.gguf` embedding model (Q4_K_M, Q8_0, etc.)
-- **Unified auto-tuner** — single API (`autotune_unified`) for tuning text, sparse, image, and reranker workloads
-- **Autotune cache with hardware fingerprint** — results cached by CPU + OS + RAM + software version for instant re-configuration
-- **Automatic model selection** — `auto_select_model()` picks the best model for your hardware and use case
-- **Quantized image and reranker models** (INT8, ~4x smaller, minimal accuracy impact)
-- **Python bindings** via `pip install libembedding-ng` -- drop-in fastembed replacement
-- Automatic model downloading and caching from HuggingFace Hub
-- Pure C API (`extern "C"`) for maximum FFI compatibility
-- **Dual distribution**: header-only `INTERFACE` library on Linux/macOS (STB-style `#define LIBEMBEDDING_IMPLEMENTATION`), plus a **compiled shared library** for FFI/bindings and a native **Windows DLL** (built by CMake, exposed to Python through cffi)
-- CLS and Mean pooling with L2 normalization
-- Batch processing with configurable batch sizes
-- CPU, CUDA, CoreML, DirectML, TensorRT execution providers
-- Custom/user-defined model support (bring your own ONNX)
-- Local model loading from a directory (`model.onnx` + `tokenizer.json`, optional `config.json`)
-- Runtime introspection: `desc()`, `model_name()`, `max_length()`, `stats()` (texts, batches, latency)
-- Similarity helpers: cosine, dot product, euclidean distance
-- Streaming embeddings (`embed_stream`) for constant-memory processing of large corpora
-- Multi-worker `TextEmbeddingPool` (inter-session parallelism, up to ~4x throughput)
-- Autotuner and automatic model selection for optimal CPU configuration
-- **Unified benchmark** — compare ONNX vs llama.cpp backends on the same corpus
-- Offline mode (cache-only, no downloads)
-
-## Requirements
-
-| Dependency | Required | Notes |
-|---|---|---|
-| **ONNX Runtime** >= 1.16 | Yes | Bundled dans les wheels PyPI et sur Windows. Sur macOS/Linux, copié automatiquement à côté des exécutables au build. |
-| **llama.cpp** | Yes | Fetched via CMake `FetchContent` (v0.3.0). Always enabled — provides the GGUF backend. |
-| **libcurl** >= 7.0 | Optional | Pour le téléchargement de modèles. Copié automatiquement à côté des exécutables sur toutes les plateformes. Désactivé avec `-DLIBEMBEDDING_NO_DOWNLOAD=ON` |
-| **cJSON** | Bundled | Included in `third_party/` |
-| **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
-| **CMake** >= 3.18 | Build only | |
-| **C++17 compiler** | Build only | GCC 7+, Clang 5+, MSVC 2017+ |
-
-No Rust toolchain required. The tokenizer is implemented natively in C++ (supports WordPiece and BPE models via `tokenizer.json`).
+---
 
 ## Quick Start
 
@@ -119,11 +62,144 @@ ranked = reranker.rerank("What is deep learning?", [
 print(ranked[0].score, ranked[0].index)  # highest relevance first
 ```
 
+### C/C++
+
+```c
+#include <libembedding/text_embedding.h>
+
+lembed_text_options_t opts = lembed_text_options_default();
+lembed_text_embedding_t* embedder = NULL;
+lembed_text_embedding_create(&opts, &embedder);
+
+const char* texts[] = { "Hello world", "How are you?" };
+lembed_embeddings_t result = {0};
+lembed_text_embedding_embed(embedder, texts, 2, 0, &result);
+// result.data = float[2][384], L2-normalized
+
+lembed_embeddings_free(&result);
+lembed_text_embedding_free(embedder);
+```
+
+---
+
+## Why libembedding-ng
+
+### Unified ONNX + GGUF runtime
+
+Most embedding libraries lock you into one backend. libembedding-ng lets you run
+ONNX models and GGUF models through the **same API**:
+
+```python
+# Same code path, different model format
+onnx_model = TextEmbedding("BAAI/bge-small-en-v1.5")          # ONNX Runtime
+gguf_model = TextEmbedding.from_gguf(                          # llama.cpp
+    "Xenova/all-MiniLM-L6-v2-GGUF",
+    filename="all-MiniLM-L6-v2-Q4_K_M.gguf",
+    provider="llama.cpp",
+)
+```
+
+This matters because GGUF quantized models are smaller, faster on CPU, and avoid
+ONNX Runtime dependencies — while ONNX remains the best choice for GPU and
+maximum throughput.
+
+### Native performance, two languages
+
+The core is written in C/C++17 with a pure C API (`extern "C"`) for maximum FFI
+compatibility. Python bindings use `cffi` to call into the same native code path
+with minimal overhead (~13%).
+
+- **Linux / macOS** — header-only INTERFACE library (STB-style `LIBEMBEDDING_IMPLEMENTATION`)
+- **Windows** — native DLL built by CMake, exposed to Python through cffi
+- **No Rust, no Go, no external server** — just C/C++ and Python
+
+### Complete modality coverage
+
+| Modality | Backend | Models |
+|----------|---------|--------|
+| Dense text | ONNX / GGUF | BGE, MiniLM, Nomic, E5, GTE, ModernBERT, EmbeddingGemma, ... |
+| Sparse text | ONNX | SPLADE++, BGE-M3 |
+| Image | ONNX | CLIP ViT-B-32, ResNet-50, Nomic Vision, Unicom |
+| Reranking | ONNX | BGE Reranker, Jina Reranker (FP32 + INT8 quantized) |
+
+### Production-grade tooling
+
+- **Autotuner** — single API (`autotune_unified`) for text, sparse, image, and reranker workloads
+- **Autotune cache with hardware fingerprint** — instant re-configuration across machines with similar hardware
+- **Automatic model selection** — `auto_select_model()` picks the best model for your hardware
+- **Session pooling** — `TextEmbeddingPool` for inter-session parallelism (up to ~4x throughput)
+- **Streaming embeddings** — `embed_stream` for constant-memory processing of large corpora
+- **Unified benchmark** — compare ONNX vs llama.cpp backends on the same corpus
+- **Runtime introspection** — `desc()`, `model_name()`, `max_length()`, `stats()`
+
+### Local-first, no strings attached
+
+- Load models from disk (`model.onnx` + `tokenizer.json`) — no registry required
+- Offline mode — `offline=1` prevents any network access
+- Bring your own ONNX model — `create_custom()` accepts raw bytes
+- GGUF models run entirely through llama.cpp — no ONNX Runtime needed
+
+---
+
+## Features
+
+- **44 text embedding models** (BGE, MiniLM, Nomic, E5, CLIP, Jina, GTE, Snowflake, ModernBERT, EmbeddingGemma, etc.) with quantized variants
+- **2 sparse embedding models** (SPLADE++, BGE-M3)
+- **6 image embedding models** (CLIP ViT-B-32, ResNet-50, Unicom, Nomic Vision, CLIP ViT-B-32 INT8 quantized)
+- **5 reranker models** (BGE Reranker, Jina Reranker, Jina V1 Turbo INT8 quantized)
+- **llama.cpp / GGUF backend** — run any `.gguf` embedding model (Q4_K_M, Q8_0, etc.)
+- **Unified auto-tuner** — single API (`autotune_unified`) for tuning text, sparse, image, and reranker workloads
+- **Autotune cache with hardware fingerprint** — results cached by CPU + OS + RAM + software version for instant re-configuration
+- **Automatic model selection** — `auto_select_model()` picks the best model for your hardware and use case
+- **Quantized image and reranker models** (INT8, ~4x smaller, minimal accuracy impact)
+- **Python bindings** via `pip install libembedding-ng` — drop-in fastembed replacement
+- Automatic model downloading and caching from HuggingFace Hub
+- Pure C API (`extern "C"`) for maximum FFI compatibility
+- **Dual distribution**: header-only `INTERFACE` library on Linux/macOS (STB-style `#define LIBEMBEDDING_IMPLEMENTATION`), plus a **compiled shared library** for FFI/bindings and a native **Windows DLL** (built by CMake, exposed to Python through cffi)
+- CLS and Mean pooling with L2 normalization
+- Batch processing with configurable batch sizes
+- CPU, CUDA, CoreML, DirectML, TensorRT execution providers
+- Custom/user-defined model support (bring your own ONNX)
+- Local model loading from a directory (`model.onnx` + `tokenizer.json`, optional `config.json`)
+- Runtime introspection: `desc()`, `model_name()`, `max_length()`, `stats()` (texts, batches, latency)
+- Similarity helpers: cosine, dot product, euclidean distance
+- Streaming embeddings (`embed_stream`) for constant-memory processing of large corpora
+- Multi-worker `TextEmbeddingPool` (inter-session parallelism, up to ~4x throughput)
+- Autotuner and automatic model selection for optimal CPU configuration
+- **Unified benchmark** — compare ONNX vs llama.cpp backends on the same corpus
+- Offline mode (cache-only, no downloads)
+
+---
+
+## Requirements
+
+| Dependency | Required | Notes |
+|---|---|---|
+| **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
+| **llama.cpp** | Yes | Fetched via CMake `FetchContent` (v0.3.0). Always enabled — provides the GGUF backend. |
+| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON` |
+| **cJSON** | Bundled | Included in `third_party/` |
+| **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
+| **CMake** >= 3.18 | Build only | |
+| **C++17 compiler** | Build only | GCC 7+, Clang 5+, MSVC 2017+ |
+
+No Rust toolchain required. The tokenizer is implemented natively in C++ (supports WordPiece and BPE models via `tokenizer.json`).
+
+---
+
+## Installation
+
+### Python
+
+```bash
+pip install libembedding-ng
+```
+
 ### C/C++ Build
 
 ```bash
-./build.sh           # Release build
-./build.sh Debug     # Debug build
+./build.ps1           # Release build (Windows PowerShell)
+./build.ps1 Debug     # Debug build
 ```
 
 Or manually:
@@ -136,17 +212,19 @@ cmake --build . --parallel
 
 ### Run Tests
 
-```bash
-./run_tests.sh                # Unit tests only (no network)
-./run_tests.sh --integration  # Include integration tests (downloads models)
+```powershell
+.\run_tests.ps1                # Unit tests only (no network)
+.\run_tests.ps1 --integration  # Include integration tests (downloads models)
 ```
 
 ### Run Examples
 
-```bash
-./run_examples.sh basic_embedding
-./run_examples.sh batch_embedding
+```powershell
+.\run_examples.ps1 basic_embedding
+.\run_examples.ps1 batch_embedding
 ```
+
+---
 
 ## Integration Guide
 
@@ -206,6 +284,8 @@ void my_function(void) {
 
 > **Note:** On Linux/macOS, files that `#define LIBEMBEDDING_IMPLEMENTATION` must be compiled as C++ (`.cpp`); files that only call the C API (without the implementation define) can be plain C. On Windows, libembedding is consumed as a prebuilt `libembedding.dll` (built by CMake) and linked through its import library / cffi bindings, so no in-project implementation file is required.
 
+---
+
 ## Performance Recommendations
 
 ### llama.cpp Backend
@@ -248,6 +328,8 @@ model = TextEmbedding.from_mode("balanced")
 | 6 | 2 | naive | 87.6 docs/s |
 
 Key takeaway: intra-session multithreading beyond 1 thread degrades throughput for embedding models. Prefer more single-threaded sessions.
+
+---
 
 ## C API Reference
 
@@ -632,24 +714,10 @@ const char* ver = lembed_llama_version();          /* version string */
 /* Load a GGUF model from a local file */
 lembed_text_options_t opts = lembed_text_options_default();
 opts.provider = LEMBED_PROVIDER_LLAMACPP;
-opts.llama_n_gpu_layers = 0;  /* 0 = CPU only, -1 = all layers on GPU */
 
 lembed_text_embedding_t* embedder = NULL;
 lembed_text_embedding_create_from_gguf_path(
     "/path/to/model.Q4_K_M.gguf", &opts, &embedder);
-
-/* Or download from HuggingFace (downloads the .gguf file to cache) */
-char* model_path = NULL;
-lembed_ensure_gguf_model(
-    "Xenova/all-MiniLM-L6-v2-GGUF",
-    "all-MiniLM-L6-v2-Q4_K_M.gguf",
-    NULL,  /* cache_dir = default */
-    1,     /* show_progress */
-    0,     /* offline */
-    &model_path);
-
-lembed_text_embedding_create_from_gguf_path(model_path, &opts, &embedder);
-lembed_free_string(model_path);
 
 /* List recommended GGUF models */
 const lembed_gguf_model_info_t* models;
@@ -856,6 +924,8 @@ CMake options:
 | `LIBEMBEDDING_BUILD_BENCHMARKS` | OFF | Build benchmark executables |
 | `LIBEMBEDDING_BUILD_TESTS` | ON | Build unit tests |
 
+---
+
 ## Benchmarks
 
 Measured on Apple M-series (macOS arm64) with `all-MiniLM-L6-v2` (384-dim). Median of 10 runs, 1 warmup, pre-cached models.
@@ -905,6 +975,8 @@ cd ../benchmarks && ./run_benchmarks.sh
 pip install libembedding
 PYTHONPATH=../python/src python3 bench_python_compare.py
 ```
+
+---
 
 ## Performance Characteristics
 
@@ -959,6 +1031,8 @@ pool.close()
 | Single (4 threads) | 94 | 1.0x |
 | Pool (8 workers) | 180 | ~4x |
 
+---
+
 ## Architecture
 
 ```
@@ -967,31 +1041,31 @@ pool.close()
                      |   (umbrella header)   |
                      +-----------+-----------+
                                  |
-      +--------+--------+---+---+---+--------+--------+
-      |        |        |       |   |        |        |
-   types.h  error.h  model   text  image  sparse  reranker.h
-                    registry emb.  emb.   emb.
-                       .h    .h    .h     .h
-                              |       |        |
-                    +---------+-----------+-----------+
-                    |       detail/ (C++ internals)   |
-                    |                                 |
-                    |  onnx_session_impl.hpp          |
-                    |  llama_session_impl.hpp (llama.cpp) |
-                    |  tokenizer_impl.hpp (built-in)  |
-                    |  pooling.hpp / normalize.hpp    |
-                    |  downloader_impl.hpp            |
-                    |  sparse_postprocess.hpp         |
-                    |  image_preprocess.hpp           |
-                    +---------------------------------+
-                                |
-                    +-----------+-----------+-----------+
-                    |    External deps      |           |
-                    |  ONNX Runtime (C API) |  llama.cpp  |
-                    |  cJSON (bundled)      |  (optional) |
-                    |  stb_image (bundled)  |           |
-                    |  libcurl (optional)   |           |
-                    +-----------------------------+--------+
+       +--------+--------+---+---+---+--------+--------+
+       |        |        |       |   |        |        |
+    types.h  error.h  model   text  image  sparse  reranker.h
+                     registry emb.  emb.   emb.
+                        .h    .h    .h     .h
+                               |       |        |
+                     +---------+-----------+-----------+
+                     |       detail/ (C++ internals)   |
+                     |                                 |
+                     |  onnx_session_impl.hpp          |
+                     |  llama_session_impl.hpp (llama.cpp) |
+                     |  tokenizer_impl.hpp (built-in)  |
+                     |  pooling.hpp / normalize.hpp    |
+                     |  downloader_impl.hpp            |
+                     |  sparse_postprocess.hpp         |
+                     |  image_preprocess.hpp           |
+                     +---------------------------------+
+                                 |
+                     +-----------+-----------+-----------+
+                     |    External deps      |           |
+                     |  ONNX Runtime (C API) |  llama.cpp  |
+                     |  cJSON (bundled)      |  (optional) |
+                     |  stb_image (bundled)  |           |
+                     |  libcurl (optional)   |           |
+                     +-----------------------------+--------+
 ```
 
 ---
@@ -1016,6 +1090,8 @@ except LlamaError as e:
 ```
 
 The `LlamaError` exception is raised for llama.cpp-specific failures. Use `TextEmbedding.supports_llamacpp()` to check at runtime.
+
+---
 
 ## License
 

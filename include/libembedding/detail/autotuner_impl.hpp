@@ -16,7 +16,9 @@
 #include "autotune_bench_text.hpp"
 #include "autotune_bench_reranker.hpp"
 #include "autotune_bench_sparse.hpp"
+#ifndef LIBEMBEDDING_NO_IMAGE
 #include "autotune_bench_image.hpp"
+#endif
 
 #include <cstring>
 
@@ -63,6 +65,7 @@ lembed_status_t lembed_autotune_unified(
             return LEMBED_OK;
         }
         case LEMBED_TASK_IMAGE: {
+#ifndef LIBEMBEDDING_NO_IMAGE
             lembed_image_tuning_result_t image_result = {0};
             lembed_status_t s = lembed_image_autotune(model_name, mode, &image_result);
             if (s != LEMBED_OK) return s;
@@ -72,6 +75,9 @@ lembed_status_t lembed_autotune_unified(
             result->latency_ms = image_result.latency_ms;
             result->memory_mb = image_result.memory_mb;
             return LEMBED_OK;
+#else
+            return LEMBED_ERROR_UNSUPPORTED;
+#endif
         }
         case LEMBED_TASK_SPARSE: {
             lembed_sparse_tuning_result_t sparse_result = {0};
@@ -129,6 +135,7 @@ lembed_status_t lembed_autotune_unified_config(
             return LEMBED_OK;
         }
         case LEMBED_TASK_IMAGE: {
+#ifndef LIBEMBEDDING_NO_IMAGE
             lembed_image_tuning_result_t image_result = {0};
             lembed_status_t s = lembed_image_autotune(model_name, LEMBED_AUTOTUNE_QUICK, &image_result);
             if (s != LEMBED_OK) return s;
@@ -138,6 +145,9 @@ lembed_status_t lembed_autotune_unified_config(
             result->latency_ms = image_result.latency_ms;
             result->memory_mb = image_result.memory_mb;
             return LEMBED_OK;
+#else
+            return LEMBED_ERROR_UNSUPPORTED;
+#endif
         }
         case LEMBED_TASK_SPARSE:
             return LEMBED_ERROR_UNSUPPORTED;

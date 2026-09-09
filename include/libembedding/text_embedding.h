@@ -9,7 +9,6 @@
 #define LIBEMBEDDING_TEXT_EMBEDDING_H
 
 #include "types.h"
-#include "model_loader.h"
 #include "llamacpp_backend.h"
 
 #ifdef __cplusplus
@@ -63,6 +62,12 @@ void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stat
 /* Destroy context */
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
 
+/* Load from local directory */
+lembed_status_t lembed_text_embedding_create_from_path(
+    const char* dir_path,
+    const lembed_text_options_t* options,
+    lembed_text_embedding_t** out);
+
 /* Load from GGUF file (llama.cpp backend) */
 lembed_status_t lembed_text_embedding_create_from_gguf_path(
     const char* gguf_path,
@@ -85,6 +90,7 @@ lembed_status_t lembed_text_embedding_create_from_gguf_model(
 
 /* ---- Implementation ---- */
 #ifdef LIBEMBEDDING_IMPLEMENTATION
+#include "detail/model_loader_impl.hpp"
 #include "detail/text_embedding_impl.hpp"
 #endif
 

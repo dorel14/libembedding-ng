@@ -1,4 +1,4 @@
-﻿"""High-level sparse text embedding API.
+"""High-level sparse text embedding API.
 
 Auteur: David Orel
 Version: 1.4.0

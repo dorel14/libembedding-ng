@@ -1,0 +1,50 @@
+name: Version Sync Check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  check-versions:
+    name: Verify C/Python versions match
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract Python version from pyproject.toml
+        id: py-version
+        run: |
+          PY_VERSION=$(grep -oP '^version = "\K[^"]+' python/pyproject.toml)
+          echo "version=$PY_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Extract C version from config.h
+        id: c-version
+        run: |
+          C_VERSION=$(grep -oP 'LIBEMBEDDING_VERSION_STRING "\K[^"]+' include/libembedding/config.h)
+          echo "version=$C_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Extract CMake version
+        id: cmake-version
+        run: |
+          CMAKE_VERSION=$(grep -oP '^\s*VERSION\s+\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+          echo "version=$CMAKE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions
+        run: |
+          PY="${{ steps.py-version.outputs.version }}"
+          C="${{ steps.c-version.outputs.version }}"
+          CMAKE="${{ steps.cmake-version.outputs.version }}"
+          if [ "$PY" != "$C" ] || [ "$PY" != "$CMAKE" ]; then
+            echo "Version mismatch detected!"
+            echo "  Python (pyproject.toml): $PY"
+            echo "  C API (config.h):        $C"
+            echo "  CMake (CMakeLists.txt):  $CMAKE"
+            echo ""
+            echo "Run the version sync script to fix:"
+            echo "  bash scripts/sync_version.sh ${PY}"
+            exit 1
+          fi
+          echo "All versions match: ${PY}"

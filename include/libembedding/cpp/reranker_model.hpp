@@ -12,7 +12,6 @@
 #define LIBEMBEDDING_CPP_RERANKER_MODEL_HPP
 
 #include <libembedding/reranker.h>
-#include <libembedding/model_loader.h>
 #include <libembedding/cpp/provider.hpp>
 #include <libembedding/detail/status_helper.hpp>
 

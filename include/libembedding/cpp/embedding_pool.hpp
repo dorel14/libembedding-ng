@@ -12,7 +12,6 @@
 #define LIBEMBEDDING_CPP_EMBEDDING_POOL_HPP
 
 #include <libembedding/text_embedding.h>
-#include <libembedding/model_loader.h>
 #include <libembedding/cpp/provider.hpp>
 
 #include <condition_variable>

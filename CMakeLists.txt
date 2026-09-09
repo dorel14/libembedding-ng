@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 cmake_policy(SET CMP0144 NEW)
+set(LIBEMBEDDING_VERSION "1.5.8")
 project(libembedding
-    VERSION 1.4.0
+    VERSION ${LIBEMBEDDING_VERSION}
     DESCRIPTION "C/C++ embedding library using ONNX Runtime (header-only INTERFACE on Linux/macOS, shared library/DLL on Windows)"
     LANGUAGES C CXX
 )
@@ -53,7 +54,7 @@ if(WIN32)
     endif()
     include_directories(${CURL_INCLUDE_DIR})
 
-    # ðŸŸ¢ AJOUT CRUCIAL : CrÃ©er la cible manquante attendue par les tests et exemples
+    # CRITICAL: Create the missing target expected by tests and examples
     if(NOT TARGET ONNXRuntime::ONNXRuntime)
         add_library(ONNXRuntime::ONNXRuntime UNKNOWN IMPORTED)
         set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
@@ -62,7 +63,7 @@ if(WIN32)
         )
     endif()
 
-    # DÃ©sactiver globalement les macros min/max conflictuelles de Windows
+    # Disable conflicting min/max macros globally on Windows
     add_compile_definitions(NOMINMAX)
 else()
     find_package(CURL REQUIRED)
@@ -128,16 +129,16 @@ add_subdirectory(${LLAMA_CPP_DIR} ${CMAKE_BINARY_DIR}/llama.cpp-build EXCLUDE_FR
 
 
 # =========================================================================
-# Main library target (ForcÃ© en DLL SHARED pour Windows/Python cffi)
+# Main library target (Forced as SHARED DLL for Windows/Python cffi)
 # =========================================================================
 if(WIN32)
-    # On crÃ©e une vraie DLL. Si un fichier cpp d'implÃ©mentation existe (ex: src/libembedding.cpp),
-    # ajoutez-le ici Ã  la place de ""
+    # Create a real DLL. If a cpp implementation file exists (ex: src/libembedding.cpp),
+    # add it here instead of ""
     add_library(libembedding SHARED "${CMAKE_CURRENT_SOURCE_DIR}/python/csrc/libembedding_shlib.cpp")
 
     set_target_properties(libembedding PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
 
-    # On force CMake Ã  accepter une bibliothÃ¨que partagÃ©e sans fichiers sources initiaux
+    # Force CMake to accept a shared library without initial source files
     # car elle va lier ONNXRuntime et CURL
     set_target_properties(libembedding PROPERTIES LINKER_LANGUAGE CXX)
 
@@ -193,7 +194,7 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # =========================================================================
-# Configuration des Inclusions et Liaisons (AdaptÃ©e Windows/DLL)
+# Configuration of Includes and Links (Adapted for Windows/DLL)
 # =========================================================================
 if(WIN32)
     # Mode DLL (SHARED) pour Windows

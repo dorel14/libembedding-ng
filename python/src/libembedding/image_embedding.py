@@ -1,4 +1,4 @@
-﻿"""High-level image embedding API.
+"""High-level image embedding API.
 
 Auteur: David Orel
 Version: 1.4.0

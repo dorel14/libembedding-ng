@@ -1,4 +1,4 @@
-﻿"""Model name resolution and registry queries.
+"""Model name resolution and registry queries.
 
 Auteur: David Orel
 Version: 1.4.0

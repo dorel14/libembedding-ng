@@ -116,7 +116,7 @@ class TextEmbedding:
                 ctx_ptr = ffi.new("lembed_text_embedding_t **")
                 check_status(lib.lembed_text_embedding_create_from_gguf_model(
                     repo.encode("utf-8"), filename.encode("utf-8"),
-                    ffi.addressof(opts), ctx_ptr))
+                    opts, ctx_ptr))
                 self._ctx = ctx_ptr[0]
         else:
             # ONNX backend (default)

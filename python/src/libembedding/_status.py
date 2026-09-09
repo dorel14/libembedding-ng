@@ -1,4 +1,4 @@
-﻿"""Status code checking â€” raises Python exceptions from C status codes.
+"""Status code checking Ã¢â‚¬â€ raises Python exceptions from C status codes.
 
 Auteur: David Orel
 Version: 1.4.0

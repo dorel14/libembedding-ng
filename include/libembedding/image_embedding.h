@@ -12,7 +12,6 @@
 #define LIBEMBEDDING_IMAGE_EMBEDDING_H
 
 #include "types.h"
-#include "model_loader.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -71,6 +70,7 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 
 #include "model_registry.h"
 #include "downloader.h"
+#include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/image_preprocess.hpp"
 #include "detail/normalize.hpp"

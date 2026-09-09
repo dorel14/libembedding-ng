@@ -320,6 +320,9 @@ typedef struct {
 
 #define LEMBED__MODEL_TYPE_TEXT     0
 #define LEMBED__MODEL_TYPE_SPARSE   1
+#ifndef LIBEMBEDDING_NO_IMAGE
+#define LEMBED__MODEL_TYPE_IMAGE    2
+#endif
 #define LEMBED__MODEL_TYPE_RERANKER 3
 
 static const lembed__additional_files_entry_t lembed__additional_files[] = {

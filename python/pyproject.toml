@@ -13,7 +13,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [
-    { name = "Adib" },
+    { name = "David Orel" },
 ]
 keywords = [
     "embeddings",
@@ -57,9 +57,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dorel14/libembedding"
-Repository = "https://github.com/dorel14/libembedding"
-Issues = "https://github.com/dorel14/libembedding/issues"
+Homepage = "https://github.com/dorel14/libembedding-ng"
+Repository = "https://github.com/dorel14/libembedding-ng"
+Issues = "https://github.com/dorel14/libembedding-ng/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

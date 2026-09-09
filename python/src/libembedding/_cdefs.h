@@ -210,7 +210,7 @@ typedef struct {
     int                         llama_n_batch;
     int                         auto_workers;
     int                         cache_size;
-    int                         backend;       /* lembed_backend_t: ONNX, LLAMACPP, or AUTO */
+    lembed_backend_t            backend;       /* ONNX, LLAMACPP, or AUTO */
     int                         batch_strategy; /* lembed_batch_strategy_t (ONNX only) */
 } lembed_text_options_t;
 
@@ -245,6 +245,15 @@ typedef struct {
     int                         show_download_progress;
     int                         batch_size;
     int                         offline;
+    /* Backend selection */
+    lembed_backend_t            backend;       /* ONNX, LLAMACPP, or AUTO */
+    /* llama.cpp specific options */
+    int                         llama_n_ctx;  /* context size (0 = model default) */
+    int                         llama_n_gpu_layers; /* GPU layers for llama.cpp (-1 = all, 0 = CPU) */
+    int                         llama_verbose; /* 1 = enable llama.cpp logging */
+    int                         llama_n_batch; /* max tokens per llama_encode() (0 = model default) */
+    int                         auto_workers;   /* 1 = auto-detect optimal workers/sessions */
+    int                         cache_size;     /* 0 = disabled, >0 = LRU cache capacity */
 } lembed_reranker_options_t;
 
 typedef struct {
@@ -326,6 +335,7 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 lembed_status_t lembed_reranker_create(const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_create_from_path(const char* path, const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_create_from_gguf_path(const char* gguf_path, const lembed_reranker_options_t* options, lembed_reranker_t** out);
+lembed_status_t lembed_reranker_create_from_gguf_model(const char* repo, const char* filename, const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_rerank(lembed_reranker_t* ctx, const char* query, const char* const* documents, int num_documents, int batch_size, lembed_rerank_results_t* result);
 const lembed_model_desc_t* lembed_reranker_desc(const lembed_reranker_t* ctx);
 const char* lembed_reranker_model_name(const lembed_reranker_t* ctx);

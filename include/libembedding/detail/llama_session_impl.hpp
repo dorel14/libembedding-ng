@@ -30,17 +30,21 @@
 
 namespace lembed { namespace detail {
 
-inline void llama_check(int err_code, const char* context) {
-    if (err_code != 0) {
-        throw std::runtime_error(std::string(context) + " failed");
-    }
-}
+inline std::string llama_last_error;
 
 inline void llama_log_callback(ggml_log_level level, const char* text, void* userdata) {
     (void)userdata;
     if (level == GGML_LOG_LEVEL_ERROR) {
         fprintf(stderr, "[llama.cpp] %s", text);
+        llama_last_error = text;
     }
+}
+
+inline void llama_ensure_log_callback() {
+    static std::once_flag log_init;
+    std::call_once(log_init, []() {
+        llama_log_set(llama_log_callback, nullptr);
+    });
 }
 
 class LlamaSession {
@@ -69,16 +73,23 @@ public:
                         int n_gpu_layers = 0, int n_batch = 0, bool verbose = false) {
         static std::once_flag backend_init;
         std::call_once(backend_init, [verbose]() {
-            llama_log_set(verbose ? llama_log_callback : nullptr, nullptr);
+            llama_ensure_log_callback();
             llama_backend_init();
         });
 
+        llama_last_error.clear();
         struct llama_model_params mparams = llama_model_default_params();
         mparams.n_gpu_layers = (n_gpu_layers < 0) ? 999 : n_gpu_layers;
 
         model_ = llama_load_model_from_file(model_path, mparams);
         if (!model_) {
-            throw std::runtime_error(std::string("Failed to load GGUF model: ") + model_path);
+            std::string msg = "Failed to load GGUF model: ";
+            msg += model_path;
+            if (!llama_last_error.empty()) {
+                msg += " | llama.cpp error: ";
+                msg += llama_last_error;
+            }
+            throw std::runtime_error(msg);
         }
 
         vocab_ = llama_model_get_vocab(model_);
@@ -269,15 +280,24 @@ public:
 
         static std::once_flag backend_init;
         std::call_once(backend_init, [verbose]() {
-            llama_log_set(verbose ? llama_log_callback : nullptr, nullptr);
+            llama_ensure_log_callback();
             llama_backend_init();
         });
 
+        llama_last_error.clear();
         struct llama_model_params mparams = llama_model_default_params();
         mparams.n_gpu_layers = (n_gpu_layers < 0) ? 999 : n_gpu_layers;
 
         model_ = llama_load_model_from_file(model_path, mparams);
-        if (!model_) throw std::runtime_error(std::string("Failed to load GGUF: ") + model_path);
+        if (!model_) {
+            std::string msg = "Failed to load GGUF: ";
+            msg += model_path;
+            if (!llama_last_error.empty()) {
+                msg += " | llama.cpp error: ";
+                msg += llama_last_error;
+            }
+            throw std::runtime_error(msg);
+        }
 
         vocab_ = llama_model_get_vocab(model_);
         n_embd_ = llama_model_n_embd(model_);

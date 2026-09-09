@@ -1,4 +1,4 @@
-﻿"""Data types for libembedding results.
+"""Data types for libembedding results.
 
 Auteur: David Orel
 Version: 1.4.0

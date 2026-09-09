@@ -23,12 +23,15 @@ Makefile
 
 # Compiled
 *.o
+*.obj
 *.a
 *.so
 *.dylib
 *.dll
 *.lib
 *.pdb
+*.exp
+*.ilk
 *.tlog
 
 # Model cache

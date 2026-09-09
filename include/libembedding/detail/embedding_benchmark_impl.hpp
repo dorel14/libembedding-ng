@@ -1,6 +1,6 @@
-﻿/*
+/*
  * libembedding - detail/embedding_benchmark_impl.hpp
- * Model selection: constraints Ã¢â€ â€™ Pareto Ã¢â€ â€™ scoring Ã¢â€ â€™ selection
+ * Model selection: constraints -> Pareto -> scoring -> selection
  *
  * Auteur: David Orel
  * Version: 1.4.0

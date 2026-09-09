@@ -523,32 +523,38 @@ int main(int argc, char* argv[]) {
         size_t mem_before = get_process_memory_mb();
 
         for (const auto& wc : worker_configs) {
+            printf("  [ONNX] Creating %d session(s) for config %s (%d threads each)...\n",
+                   wc.sessions, wc.label.c_str(), wc.threads_per_session);
+            fflush(stdout);
+
+            std::vector<lembed_reranker_t*> sessions;
+            sessions.reserve(wc.sessions);
+            for (int s = 0; s < wc.sessions; s++) {
+                lembed_reranker_options_t opts = lembed_reranker_options_default();
+                opts.model = LEMBED_RERANKER_MODEL_DEFAULT;
+                opts.batch_size = 32;
+                opts.num_threads = wc.threads_per_session;
+
+                int idx = lembed_find_reranker_model_by_code(onnx_model);
+                if (idx >= 0) opts.model = (lembed_reranker_model_t)idx;
+
+                lembed_reranker_t* session = nullptr;
+                if (lembed_reranker_create(&opts, &session) == LEMBED_OK) {
+                    sessions.push_back(session);
+                }
+            }
+
+            if (sessions.empty()) {
+                printf("FAILED to create sessions\n");
+                continue;
+            }
+
+            printf("  [ONNX] %d session(s) created.\n", (int)sessions.size());
+
             for (int n_batch : n_batch_values) {
                 for (int top_k : top_k_values) {
                     printf("  [ONNX] config=%s n_batch=%d top_k=%d... ", wc.label.c_str(), n_batch, top_k);
                     fflush(stdout);
-
-                    std::vector<lembed_reranker_t*> sessions;
-                    sessions.reserve(wc.sessions);
-                    for (int s = 0; s < wc.sessions; s++) {
-                        lembed_reranker_options_t opts = lembed_reranker_options_default();
-                        opts.model = LEMBED_RERANKER_MODEL_DEFAULT;
-                        opts.batch_size = n_batch;
-                        opts.num_threads = wc.threads_per_session;
-
-                        int idx = lembed_find_reranker_model_by_code(onnx_model);
-                        if (idx >= 0) opts.model = (lembed_reranker_model_t)idx;
-
-                        lembed_reranker_t* session = nullptr;
-                        if (lembed_reranker_create(&opts, &session) == LEMBED_OK) {
-                            sessions.push_back(session);
-                        }
-                    }
-
-                    if (sessions.empty()) {
-                        printf("FAILED to create sessions\n");
-                        continue;
-                    }
 
                     for (int w = 0; w < warmup_iterations; w++) {
                         for (const auto& query : queries) {
@@ -592,10 +598,10 @@ int main(int argc, char* argv[]) {
 
                     printf("QPS=%.1f avg=%.2fms pair=%.4fms mem=%zumb\n",
                            qps, avg_latency, ms_per_pair, mem_used);
-
-                    for (auto* sess : sessions) lembed_reranker_free(sess);
                 }
             }
+
+            for (auto* sess : sessions) lembed_reranker_free(sess);
         }
 
         printf("\n  Running quality test...\n");
@@ -621,31 +627,38 @@ int main(int argc, char* argv[]) {
 
         for (const char* gguf_model : gguf_models) {
             printf("Loading GGUF model: %s...\n", gguf_model);
+            size_t mem_before = get_process_memory_mb();
 
             for (const auto& wc : worker_configs) {
+                printf("  [llama] Creating %d session(s) for config %s (%d threads each)...\n",
+                       wc.sessions, wc.label.c_str(), wc.threads_per_session);
+                fflush(stdout);
+
+                std::vector<lembed_reranker_t*> sessions;
+                sessions.reserve(wc.sessions);
+                for (int s = 0; s < wc.sessions; s++) {
+                    lembed_reranker_options_t opts = lembed_reranker_options_default();
+                    opts.batch_size = 32;
+                    opts.num_threads = wc.threads_per_session;
+
+                    lembed_reranker_t* session = nullptr;
+                    if (lembed_reranker_create_from_gguf_path(gguf_model, &opts, &session) == LEMBED_OK) {
+                        sessions.push_back(session);
+                    }
+                }
+
+                if (sessions.empty()) {
+                    printf("  [llama] FAILED to create sessions for config %s\n", wc.label.c_str());
+                    continue;
+                }
+
+                printf("  [llama] %d session(s) created.\n", (int)sessions.size());
+
                 for (int n_batch : n_batch_values) {
                     for (int top_k : top_k_values) {
                         printf("  [llama] model=%s config=%s n_batch=%d top_k=%d... ",
                                gguf_model, wc.label.c_str(), n_batch, top_k);
                         fflush(stdout);
-
-                        std::vector<lembed_reranker_t*> sessions;
-                        sessions.reserve(wc.sessions);
-                        for (int s = 0; s < wc.sessions; s++) {
-                            lembed_reranker_options_t opts = lembed_reranker_options_default();
-                            opts.batch_size = n_batch;
-                            opts.num_threads = wc.threads_per_session;
-
-                            lembed_reranker_t* session = nullptr;
-                            if (lembed_reranker_create_from_gguf_path(gguf_model, &opts, &session) == LEMBED_OK) {
-                                sessions.push_back(session);
-                            }
-                        }
-
-                        if (sessions.empty()) {
-                            printf("FAILED to create sessions\n");
-                            continue;
-                        }
 
                         for (int w = 0; w < warmup_iterations; w++) {
                             for (const auto& query : queries) {
@@ -661,7 +674,6 @@ int main(int argc, char* argv[]) {
                         double qps = benchmark_workers(sessions, queries, documents, n_batch, num_iterations);
                         auto latencies = benchmark_single(sessions[0], queries, documents, n_batch, num_iterations);
 
-                        size_t mem_before = get_process_memory_mb();
                         size_t mem_after = get_process_memory_mb();
                         size_t mem_used = (mem_after > mem_before) ? (mem_after - mem_before) : mem_after;
 
@@ -690,10 +702,10 @@ int main(int argc, char* argv[]) {
 
                         printf("QPS=%.1f avg=%.2fms pair=%.4fms mem=%zumb\n",
                                qps, avg_latency, ms_per_pair, mem_used);
-
-                        for (auto* sess : sessions) lembed_reranker_free(sess);
                     }
                 }
+
+                for (auto* sess : sessions) lembed_reranker_free(sess);
             }
 
             printf("\n  Running quality test for %s...\n", gguf_model);

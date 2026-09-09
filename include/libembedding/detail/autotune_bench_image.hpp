@@ -11,6 +11,7 @@
 #ifndef LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_IMAGE_HPP
 #define LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_IMAGE_HPP
 
+#ifndef LIBEMBEDDING_NO_IMAGE
 #include "libembedding/autotuner.h"
 #include "autotune_cache.hpp"
 
@@ -175,6 +176,8 @@ extern "C" lembed_status_t lembed_image_autotune(
 }
 
 }} /* namespace lembed::detail */
+
+#endif /* LIBEMBEDDING_NO_IMAGE */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_IMAGE_HPP */
 
