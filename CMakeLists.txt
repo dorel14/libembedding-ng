@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 cmake_policy(SET CMP0144 NEW)
-set(LIBEMBEDDING_VERSION "1.5.8")
+set(LIBEMBEDDING_VERSION "1.6.0")
 project(libembedding
     VERSION ${LIBEMBEDDING_VERSION}
     DESCRIPTION "C/C++ embedding library using ONNX Runtime (header-only INTERFACE on Linux/macOS, shared library/DLL on Windows)"
@@ -254,59 +254,51 @@ endif()
 # Helper: copy runtime DLLs next to executables on Windows
 # =========================================================================
 if(WIN32)
-    set(_LEMBED_ONNX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/lib")
+    set(_LEMBED_ONNX_DIR "${PROJECT_SOURCE_DIR}/third_party/onnxruntime/lib")
     function(copy_runtime_dlls target_name)
-        set(_dll_names "")
-        set(_dll_dirs "")
+        set(_dlls "")
 
         # ONNX Runtime DLLs
-        list(APPEND _dll_names onnxruntime.dll)
-        list(APPEND _dll_names onnxruntime_providers_shared.dll)
-        list(APPEND _dll_dirs "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/lib")
+        foreach(_dll onnxruntime.dll onnxruntime_providers_shared.dll)
+            if(EXISTS "${_LEMBED_ONNX_DIR}/${_dll}")
+                list(APPEND _dlls "${_LEMBED_ONNX_DIR}/${_dll}")
+            endif()
+        endforeach()
 
         # Curl DLL
         if(DEFINED CURL_LIBRARY)
             get_filename_component(_curl_lib_dir "${CURL_LIBRARY}" DIRECTORY)
             if(EXISTS "${_curl_lib_dir}/../bin/libcurl-x64.dll")
-                list(APPEND _dll_dirs "${_curl_lib_dir}/../bin")
-                list(APPEND _dll_names libcurl-x64.dll)
+                list(APPEND _dlls "${_curl_lib_dir}/../bin/libcurl-x64.dll")
             elseif(EXISTS "${_curl_lib_dir}/libcurl.dll")
-                list(APPEND _dll_names libcurl.dll)
+                list(APPEND _dlls "${_curl_lib_dir}/libcurl.dll")
             endif()
         endif()
 
-        # llama.cpp runtime DLLs (from build output)
-        foreach(_cfg Release Debug RelWithDebInfo MinSizeRel)
-            set(_candidate_dir "${CMAKE_BINARY_DIR}/bin/${_cfg}")
-            if(EXISTS "${_candidate_dir}/llama.dll")
-                list(APPEND _dll_dirs "${_candidate_dir}")
-                list(APPEND _dll_names llama.dll ggml.dll ggml-cpu.dll ggml-base.dll)
-                break()
+        # llama.cpp runtime DLLs
+        foreach(_target llama ggml ggml-cpu ggml-base)
+            if(TARGET ${_target})
+                list(APPEND _dlls "$<TARGET_FILE:${_target}>")
             endif()
         endforeach()
 
-        # libembedding.dll from build output
-        foreach(_cfg Release Debug RelWithDebInfo MinSizeRel)
-            set(_candidate_dir "${CMAKE_BINARY_DIR}/${_cfg}")
-            if(EXISTS "${_candidate_dir}/libembedding.dll")
-                list(APPEND _dll_dirs "${_candidate_dir}")
-                list(APPEND _dll_names libembedding.dll)
-                break()
-            endif()
-        endforeach()
+        # libembedding.dll
+        if(TARGET libembedding)
+            list(APPEND _dlls "$<TARGET_FILE:libembedding>")
+        endif()
 
-        foreach(_dll ${_dll_names})
-            foreach(_dir ${_dll_dirs})
-                if(EXISTS "${_dir}/${_dll}")
-                    add_custom_command(TARGET ${target_name} POST_BUILD
-                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                            "${_dir}/${_dll}"
-                            "$<TARGET_FILE_DIR:${target_name}>"
-                    )
-                endif()
-            endforeach()
+        list(REMOVE_DUPLICATES _dlls)
+        foreach(_dll ${_dlls})
+            add_custom_command(TARGET ${target_name} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_dll}"
+                    "$<TARGET_FILE_DIR:${target_name}>"
+            )
         endforeach()
     endfunction()
+
+    # Copy runtime DLLs next to libembedding.dll
+    copy_runtime_dlls(libembedding)
 endif()
 
 # =========================================================================
