@@ -54,8 +54,6 @@ TextEmbedding(
 
 #### Méthodes et propriétés
 
-#### Méthodes et propriétés
-
 | Membre | Type | Description |
 |--------|------|-------------|
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed les textes. Retourne un tableau de forme `(n, dim)` en `float32`. L2-normalisé. |

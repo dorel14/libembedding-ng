@@ -20,7 +20,7 @@ Bienvenue dans la documentation de **libembedding**, une bibliothèque d'embeddi
 | **Performance** | [performance_tuning.html](performance_tuning.html) | Workers, threads, bucketing, cache, modes, baseline |
 | **Usage avancé** | [advanced_usage.html](advanced_usage.html) | Scheduler, cache LRU, modes FAST/BALANCED/QUALITY, modèles GGUF/llama.cpp |
 | **Exceptions** | [api_reference.html#gestion-des-erreurs](api_reference.html#gestion-des-erreurs) | Hiérarchie des exceptions Python |
-| **English** | [en/](en/index.html) | English documentation |
+| **English** | [en/index.html](en/index.html) | English documentation |
 
 ## Vue d'ensemble
 

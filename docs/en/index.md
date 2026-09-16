@@ -17,7 +17,7 @@ Welcome to the **libembedding** documentation, a fast embedding library with bot
 | **Python API** | [api_reference.html](api_reference.html) | Complete reference of Python classes |
 | **Models** | [models.html](models.html) | Catalog of available models (text, image, sparse, reranker) |
 | **Performance** | [performance_tuning.html](performance_tuning.html) | Session pool, auto-tuning, automatic model selection |
- | **Advanced usage** | [advanced_usage.html](advanced_usage.html) | Local models, providers, cache, offline mode, context managers, GGUF/llama.cpp models |
+| **Advanced usage** | [advanced_usage.html](advanced_usage.html) | Local models, providers, cache, offline mode, context managers, GGUF/llama.cpp models |
 | **Error handling** | [api_reference.html#error-handling](api_reference.html#error-handling) | Python exception hierarchy |
 | **Français** | [../index.html](../index.html) | Documentation française |
 

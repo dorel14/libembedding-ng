@@ -131,7 +131,7 @@ for m in libembedding.list_text_models():
 | `microsoft/resnet-50` | 2048 | ResNet-50 |
 | `open-metric-learning/unicom-vit-b-16` | 768 | Unicom ViT-B/16 |
 | `open-metric-learning/unicom-vit-b-32` | 512 | Unicom ViT-B/32 |
- | `nomic-ai/nomic-embed-vision-v1.5` | 768 | Nomic embed vision v1.5 |
+| `nomic-ai/nomic-embed-vision-v1.5` | 768 | Nomic embed vision v1.5 |
 | `Xenova/clip-vit-base-patch32` | 512 | CLIP ViT-B/32 INT8 quantized |
 
 ---
@@ -169,6 +169,8 @@ for (int i = 0; i < count; i++) {
 ```
 
 ---
+
+## Sparse models (2 models)
 
 | HuggingFace name | Dim | Max tokens | Description |
 |------------------|-----|-----------|-------------|
