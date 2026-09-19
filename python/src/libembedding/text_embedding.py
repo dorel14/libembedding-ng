@@ -8,22 +8,20 @@ import numpy as np
 
 from ._binding import ffi, lib
 from ._status import check_status
-from .models import (
-    resolve_text_model,
-    list_text_models,
-    _PROVIDER_MAP,
-    _POOLING_ENUM,
-    _desc_from_c,
-    _is_local_path,
-    _is_gguf_model,
-)
-from .types import ModelDesc, Stats, TuningResult
+from .backend import _BACKEND_ENUM
 from .exceptions import ModelNotFoundError
-from .autotune import autotune, _sample_corpus
-from .backend import detect_backend, _BACKEND_ENUM
+from .models import (
+    _POOLING_ENUM,
+    _QUANTIZATION_ENUM,
+    _desc_from_c,
+    _is_gguf_model,
+    _is_local_path,
+    resolve_text_model,
+)
+from .types import ModelDesc, Stats
 
 _MODE_TO_MODEL = {
-    "fast": "paraphrase-ml-minilm-l12-v2-q",
+    "fast": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
     "balanced": "BAAI/bge-small-en-v1.5",
     "quality": "BAAI/bge-base-en-v1.5",
 }
@@ -47,6 +45,9 @@ class TextEmbedding:
         auto_workers: If True, auto-detect optimal worker/session count
             for llama.cpp backend.
         cache_size: Size of LRU embedding cache (0 = disabled).
+        quantization: Override model quantization mode ("none", "static",
+            "dynamic"). If None, uses the model's default.
+        num_threads: Deprecated; use ``threads``.
     """
 
     def __init__(
@@ -64,6 +65,7 @@ class TextEmbedding:
         pooling: str = "mean",
         auto_workers: bool = False,
         cache_size: int = 0,
+        quantization: str | None = None,
         num_threads: int | None = None,
     ):
         if num_threads is not None:
@@ -73,6 +75,14 @@ class TextEmbedding:
                 stacklevel=2,
             )
             threads = num_threads
+
+        quant_enum = lib.LEMBED_QUANTIZATION_NONE
+        if quantization is not None:
+            quant_enum = _QUANTIZATION_ENUM.get(quantization.lower())
+            if quant_enum is None:
+                raise ValueError(
+                    f"Unknown quantization '{quantization}'. Use: {list(_QUANTIZATION_ENUM.keys())}"
+                )
 
         self._ctx = None
         self._dim = 0
@@ -87,6 +97,7 @@ class TextEmbedding:
             else:
                 # Try local path
                 import os
+
                 if os.path.isfile(model_name):
                     repo = ""
                     filename = model_name
@@ -108,15 +119,20 @@ class TextEmbedding:
             if os.path.isfile(filename):
                 # Local GGUF file
                 ctx_ptr = ffi.new("lembed_text_embedding_t **")
-                check_status(lib.lembed_text_embedding_create_from_gguf_path(
-                    filename.encode("utf-8"), opts, ctx_ptr))
+                check_status(
+                    lib.lembed_text_embedding_create_from_gguf_path(
+                        filename.encode("utf-8"), opts, ctx_ptr
+                    )
+                )
                 self._ctx = ctx_ptr[0]
             else:
                 # Download from HuggingFace
                 ctx_ptr = ffi.new("lembed_text_embedding_t **")
-                check_status(lib.lembed_text_embedding_create_from_gguf_model(
-                    repo.encode("utf-8"), filename.encode("utf-8"),
-                    opts, ctx_ptr))
+                check_status(
+                    lib.lembed_text_embedding_create_from_gguf_model(
+                        repo.encode("utf-8"), filename.encode("utf-8"), opts, ctx_ptr
+                    )
+                )
                 self._ctx = ctx_ptr[0]
         else:
             # ONNX backend (default)
@@ -133,34 +149,54 @@ class TextEmbedding:
                 code = ffi.string(info.model_code).decode("utf-8")
                 file_name = ffi.string(info.model_file).decode("utf-8")
 
-                from .autotune import clear_autotune_cache
+
                 model_dir = ffi.new("char **")
-                check_status(lib.lembed_ensure_text_model(
-                    idx,
-                    cache_dir.encode("utf-8") if cache_dir else ffi.NULL,
-                    1 if show_download_progress else 0,
-                    1 if offline else 0,
-                    model_dir,
-                ))
+                check_status(
+                    lib.lembed_ensure_text_model(
+                        idx,
+                        cache_dir.encode("utf-8") if cache_dir else ffi.NULL,
+                        1 if show_download_progress else 0,
+                        1 if offline else 0,
+                        model_dir,
+                    )
+                )
                 model_dir_ptr = model_dir[0]
                 model_dir = ffi.string(model_dir_ptr).decode("utf-8")
                 lib.lembed_free_string(model_dir_ptr)
 
-            opts = ffi.new("lembed_text_options_t *")
-            opts.provider = _BACKEND_ENUM.get(provider, 0)
-            opts.num_threads = threads
-            opts.batch_size = batch_size
-            opts.max_length = max_length
-            opts.dim = dim
-            opts.pooling = _POOLING_ENUM.get(pooling, 0)
-            opts.offline = 1 if offline else 0
-            opts.show_download_progress = 1 if show_download_progress else 0
-            opts.auto_workers = 1 if auto_workers else 0
-            opts.cache_size = cache_size
-
-            ctx_ptr = ffi.new("lembed_text_embedding_t **")
-            check_status(lib.lembed_text_embedding_create(
-                opts, ctx_ptr))
+            if _is_local_path(model_name):
+                opts = ffi.new("lembed_text_options_t *")
+                opts.provider = _BACKEND_ENUM.get(provider, 0)
+                opts.num_threads = threads
+                opts.batch_size = batch_size
+                opts.max_length = max_length
+                opts.dim = dim
+                opts.pooling = _POOLING_ENUM.get(pooling, 0)
+                opts.offline = 1 if offline else 0
+                opts.show_download_progress = 1 if show_download_progress else 0
+                opts.auto_workers = 1 if auto_workers else 0
+                opts.cache_size = cache_size
+                ctx_ptr = ffi.new("lembed_text_embedding_t **")
+                check_status(
+                    lib.lembed_text_embedding_create_from_path(
+                        model_dir.encode("utf-8"), opts, ctx_ptr
+                    )
+                )
+            else:
+                opts = ffi.new("lembed_text_options_v2_t *")
+                opts.base.provider = _BACKEND_ENUM.get(provider, 0)
+                opts.base.num_threads = threads
+                opts.base.batch_size = batch_size
+                opts.base.max_length = max_length
+                opts.base.dim = dim
+                opts.base.pooling = _POOLING_ENUM.get(pooling, 0)
+                opts.base.offline = 1 if offline else 0
+                opts.base.show_download_progress = 1 if show_download_progress else 0
+                opts.base.auto_workers = 1 if auto_workers else 0
+                opts.base.cache_size = cache_size
+                opts.quantization = quant_enum
+                ctx_ptr = ffi.new("lembed_text_embedding_t **")
+                check_status(lib.lembed_text_embedding_create_v2(opts, ctx_ptr))
             self._ctx = ctx_ptr[0]
 
         self._dim = lib.lembed_text_embedding_dim(self._ctx)
@@ -188,8 +224,8 @@ class TextEmbedding:
 
     def info(self) -> ModelDesc:
         """Get runtime model descriptor."""
-        desc_ptr = lib.lembed_text_embedding_desc(self._ctx)
-        return _desc_from_c(desc_ptr)
+        desc_ptr = lib.lembed_text_embedding_desc_v2(self._ctx)
+        return _desc_from_c(desc_ptr.base, desc_ptr)
 
     @classmethod
     def from_mode(cls, mode: str = "balanced", **kwargs):
@@ -204,7 +240,9 @@ class TextEmbedding:
         """
         mode = mode.lower()
         if mode not in _MODE_TO_MODEL:
-            raise ValueError(f"Unknown mode: {mode}. Choose from {list(_MODE_TO_MODEL.keys())}")
+            raise ValueError(
+                f"Unknown mode: {mode}. Choose from {list(_MODE_TO_MODEL.keys())}"
+            )
         return cls(_MODE_TO_MODEL[mode], **kwargs)
 
     def embed(self, texts: list[str], batch_size: int | None = None) -> np.ndarray:
@@ -229,8 +267,7 @@ class TextEmbedding:
 
         result = ffi.new("lembed_embeddings_t *")
         bs = 0 if batch_size is None else batch_size
-        check_status(lib.lembed_text_embedding_embed(
-            self._ctx, c_texts, n, bs, result))
+        check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, bs, result))
 
         dim = result.dim
         total = result.num_embeddings * dim
@@ -238,7 +275,9 @@ class TextEmbedding:
         lib.lembed_embeddings_free(result)
         return arr.reshape(n, dim)
 
-    def embed_stream(self, texts: list[str], callback, batch_size: int | None = None) -> None:
+    def embed_stream(
+        self, texts: list[str], callback, batch_size: int | None = None
+    ) -> None:
         """Embed texts as a stream.
 
         Args:
@@ -263,17 +302,18 @@ class TextEmbedding:
             arr = np.frombuffer(ffi.buffer(data, dim * 4), dtype=np.float32).copy()
             callback(arr, dim, userdata)
 
-        lib.lembed_text_embedding_embed_stream(
-            self._ctx, c_texts, n, bs, cb, ffi.NULL)
+        lib.lembed_text_embedding_embed_stream(self._ctx, c_texts, n, bs, cb, ffi.NULL)
 
     def stats(self) -> Stats:
         """Get runtime statistics."""
-        result = ffi.new("lembed_stats_t *")
-        lib.lembed_text_embedding_stats(self._ctx, result)
+        result = ffi.new("lembed_stats_v2_t *")
+        lib.lembed_text_embedding_stats_v2(self._ctx, result)
         return Stats(
-            texts_embedded=result.texts_embedded,
-            batches_run=result.batches_run,
-            avg_latency_ms=result.avg_latency_ms,
+            texts_embedded=result.base.texts_embedded,
+            batches_run=result.base.batches_run,
+            avg_latency_ms=result.base.avg_latency_ms,
+            cache_hits=result.cache_hits,
+            cache_misses=result.cache_misses,
         )
 
     def embed_batched(self, texts: list[str], batch_size: int | None = None):
@@ -288,14 +328,17 @@ class TextEmbedding:
             actual_bs = 32
 
         for i in range(0, n, actual_bs):
-            batch = texts[i:i + actual_bs]
+            batch = texts[i : i + actual_bs]
             embeddings = self.embed(batch, batch_size=actual_bs)
             for emb in embeddings:
                 yield emb
 
     def close(self) -> None:
         """Release the underlying C resources."""
-        self._ctx = None
+        if self._ctx is not None:
+            lib.lembed_text_embedding_free(self._ctx)
+            self._ctx = None
+            self._ctx = None
 
     def __enter__(self):
         return self
@@ -308,5 +351,4 @@ class TextEmbedding:
 
 
 # Re-export TextEmbeddingPool from pool module
-from .pool import TextEmbeddingPool  # noqa: E402, F401
-
+from .pool import TextEmbeddingPool  # noqa: F401

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Session Pool benchmark for llama.cpp backend
  * Tests N independent sessions processing texts in parallel.
  * Each session has its own context (KV cache) sharing the same model weights.

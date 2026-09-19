@@ -47,16 +47,19 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
     if (!gguf_path || !gguf_path[0] || !options || !out)
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    lembed_reranker_t* ctx = nullptr;
+    char* resolved_path = nullptr;
+    lembed_status_t rs = LEMBED_OK;
+
     try {
-        char* resolved_path = nullptr;
-        lembed_status_t rs = lembed_resolve_gguf_path(
+        rs = lembed_resolve_gguf_path(
             gguf_path,
             options->cache_dir,
             options->offline,
             &resolved_path);
-        if (rs != LEMBED_OK) return rs;
+        if (rs != LEMBED_OK) goto cleanup;
 
-        auto* ctx = new lembed_reranker();
+        ctx = new lembed_reranker();
         ctx->backend_type = LEMBED_BACKEND_LLAMACPP;
         ctx->max_length = (options->max_length > 0) ? options->max_length : 512;
         ctx->model_name_str = std::filesystem::path(resolved_path).filename().string();
@@ -69,6 +72,7 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
         ctx->llama.session.load_from_file(resolved_path, ctx->num_threads,
                                           512, 0, 0, false);
         lembed_free_string(resolved_path);
+        resolved_path = nullptr;
         if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
 
         ctx->desc.name = ctx->model_name_str.c_str();
@@ -82,8 +86,15 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
 
         *out = ctx;
         return LEMBED_OK;
+
+cleanup:
+        if (ctx) delete ctx;
+        if (resolved_path) lembed_free_string(resolved_path);
+        return rs;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        if (ctx) delete ctx;
+        if (resolved_path) lembed_free_string(resolved_path);
         return LEMBED_ERROR_LLAMA;
     }
 }

@@ -1,7 +1,7 @@
 """High-level image embedding API.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 from __future__ import annotations
@@ -79,16 +79,20 @@ class ImageEmbedding:
         try:
             model_idx = resolve_image_model(model_name)
             opts.model = model_idx
-            check_status(lib.lembed_image_embedding_create(
-                ffi.addressof(opts), ctx_ptr))
+            check_status(
+                lib.lembed_image_embedding_create(ffi.addressof(opts), ctx_ptr)
+            )
         except ModelNotFoundError:
             if _is_local_path(model_name):
-                check_status(lib.lembed_image_embedding_create_from_path(
-                    model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
+                check_status(
+                    lib.lembed_image_embedding_create_from_path(
+                        model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr
+                    )
+                )
             else:
                 raise
 
-        self._ctx = ffi.gc(ctx_ptr[0], lib.lembed_image_embedding_free)
+        self._ctx = ctx_ptr[0]
         self._dim = lib.lembed_image_embedding_dim(self._ctx)
         self._batch_size = batch_size
 
@@ -115,9 +119,13 @@ class ImageEmbedding:
     def name(self) -> str:
         """Model name or local path."""
         name_ptr = lib.lembed_image_embedding_model_name(self._ctx)
-        return ffi.string(name_ptr).decode("utf-8", errors="replace") if name_ptr else ""
+        return (
+            ffi.string(name_ptr).decode("utf-8", errors="replace") if name_ptr else ""
+        )
 
-    def embed_files(self, paths: list[str], *, batch_size: int | None = None) -> np.ndarray:
+    def embed_files(
+        self, paths: list[str], *, batch_size: int | None = None
+    ) -> np.ndarray:
         """Embed images from file paths.
 
         Returns:
@@ -145,7 +153,9 @@ class ImageEmbedding:
         finally:
             lib.lembed_embeddings_free(result)
 
-    def embed_bytes(self, images: list[bytes], *, batch_size: int | None = None) -> np.ndarray:
+    def embed_bytes(
+        self, images: list[bytes], *, batch_size: int | None = None
+    ) -> np.ndarray:
         """Embed images from raw bytes (JPEG, PNG, etc.).
 
         Returns:
@@ -192,7 +202,10 @@ class ImageEmbedding:
 
     def close(self) -> None:
         """Release the underlying C resources."""
-        self._ctx = None
+        if self._ctx is not None:
+            lib.lembed_image_embedding_free(self._ctx)
+            self._ctx = None
+            self._ctx = None
 
     def __enter__(self):
         return self
@@ -239,4 +252,3 @@ def image_autotune(
         latency_ms=result.latency_ms,
         memory_mb=result.memory_mb,
     )
-

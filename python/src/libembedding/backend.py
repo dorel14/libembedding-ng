@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .models import _is_local_path, _is_gguf_model
+from .models import _is_gguf_model, _is_local_path
 
 # Backend enum values (must match types.h)
 _BACKEND_ONNX = 0
@@ -13,8 +13,10 @@ _BACKEND_AUTO = 2
 
 # Mapping from string to enum
 _BACKEND_ENUM = {
+    "cpu": _BACKEND_ONNX,
     "onnx": _BACKEND_ONNX,
     "llama": _BACKEND_LLAMACPP,
+    "llamacpp": _BACKEND_LLAMACPP,
     "auto": _BACKEND_AUTO,
 }
 
@@ -33,9 +35,10 @@ def detect_backend(model_name: str, backend: str = "auto") -> str:
         return backend
 
     # Explicit file extension
-    if model_name.endswith(".gguf"):
+    lowered = model_name.lower()
+    if lowered.endswith(".gguf"):
         return "llama"
-    if model_name.endswith(".onnx"):
+    if lowered.endswith(".onnx"):
         return "onnx"
 
     # Local path detection

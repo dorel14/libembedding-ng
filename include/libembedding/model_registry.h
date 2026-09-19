@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - C Header-Only Embedding Library
  * model_registry.h - Model registry query API
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

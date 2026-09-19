@@ -868,7 +868,7 @@ float dist = lembed_euclidean_distance(vec_a, vec_b, dim);
 
 ```c
 #include <libembedding/config.h>
-const char* version = lembed_version();  /* e.g. "1.4.0" */
+const char* version = lembed_version();  /* e.g. "1.6.0" */
 ```
 
 ---
@@ -1090,6 +1090,17 @@ except LlamaError as e:
 ```
 
 The `LlamaError` exception is raised for llama.cpp-specific failures. Use `TextEmbedding.supports_llamacpp()` to check at runtime.
+
+---
+
+## Documentation
+
+Full documentation is available on **GitHub Pages** (bilingual FR/EN):
+
+- **English**: https://dorel14.github.io/libembedding/
+- **Français**: https://dorel14.github.io/libembedding/
+
+The docs cover installation, quick start, API reference, model catalog, performance tuning, and advanced usage (local models, providers, cache, offline mode, GGUF/llama.cpp, LRU cache, dynamic scheduler, FAST/BALANCED/QUALITY modes).
 
 ---
 

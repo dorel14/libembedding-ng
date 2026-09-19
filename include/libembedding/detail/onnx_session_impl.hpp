@@ -78,7 +78,8 @@ public:
     /* Create session from file path */
     void load_from_file(const char* model_path,
                         int num_threads = 0,
-                        int provider = 0 /* CPU */) {
+                        int provider = 0 /* CPU */,
+                        int quantization = 0) {
         const OrtApi* api = ort_api();
         OrtSessionOptions* opts = nullptr;
 
@@ -97,6 +98,7 @@ public:
 
         /* Execution provider */
         configure_provider(api, opts, provider);
+        apply_quantization_config(api, opts, quantization);
 
         #if defined(_WIN32) || defined(WIN32)
             std::wstring path_w;
@@ -118,7 +120,8 @@ public:
     /* Create session from memory buffer */
     void load_from_memory(const void* data, size_t size,
                           int num_threads = 0,
-                          int provider = 0) {
+                          int provider = 0,
+                          int quantization = 0) {
         const OrtApi* api = ort_api();
         OrtSessionOptions* opts = nullptr;
 
@@ -133,6 +136,7 @@ public:
         }
 
         configure_provider(api, opts, provider);
+        apply_quantization_config(api, opts, quantization);
 
         ort_check(api->CreateSessionFromArray(ort_env(), data, size, opts, &session_));
         api->ReleaseSessionOptions(opts);
@@ -385,19 +389,40 @@ private:
         }
     }
 
-    void configure_provider(const OrtApi* api, OrtSessionOptions* opts, int provider) {
-        (void)api; (void)opts; (void)provider;
-        /* Provider configuration:
-         * 0 = CPU (default, no extra setup needed)
-         * 1 = CUDA
-         * 2 = CoreML
-         * 3 = DirectML
-         * 4 = TensorRT
-         *
-         * For non-CPU providers, the user must have the corresponding
-         * ONNX Runtime provider library installed. We attempt to append
-         * the provider and fall back silently to CPU on failure.
-         */
+/* =========================================================================
+ * Quantization configuration for quantized ONNX models.
+ * Uses ORT session config entries (compatible with ORT >= 1.16).
+ * For ORT >= 1.22+, consider migrating to OrtQuantizationConfig API.
+ * ========================================================================= */
+    void apply_quantization_config(const OrtApi* api, OrtSessionOptions* opts, int quantization) {
+        switch (quantization) {
+            case 1: /* LEMBED_QUANTIZATION_STATIC */
+                ort_check(api->AddSessionConfigEntry(opts, "session.disable_quant_qdq", "0"));
+                ort_check(api->AddSessionConfigEntry(opts, "session.enable_quant_qdq_cleanup", "1"));
+                break;
+
+            case 2: /* LEMBED_QUANTIZATION_DYNAMIC */
+                ort_check(api->AddSessionConfigEntry(opts, "session.disable_prepacking", "0"));
+                break;
+
+            default: /* LEMBED_QUANTIZATION_NONE */
+                break;
+        }
+    }
+
+    /* =========================================================================
+     * Provider configuration
+     * 0 = CPU (default, no extra setup needed)
+     * 1 = CUDA
+     * 2 = CoreML
+     * 3 = DirectML
+     * 4 = TensorRT
+     *
+     * For non-CPU providers, the user must have the corresponding
+     * ONNX Runtime provider library installed. We attempt to append
+     * the provider and fall back silently to CPU on failure.
+     * ========================================================================= */
+    void apply_provider_config(const OrtApi* api, OrtSessionOptions* opts, lembed_execution_provider_t provider) {
 #ifdef ORT_API_VERSION
         switch (provider) {
             case 1: { /* CUDA */

@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - detail/gguf_registry_impl.hpp
  * GGUF model registry implementation
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

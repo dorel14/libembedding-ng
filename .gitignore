@@ -33,6 +33,8 @@ Makefile
 *.exp
 *.ilk
 *.tlog
+*.pyc
+*.pyo
 
 # Model cache
 *.gguf
@@ -42,6 +44,11 @@ libembedding_cache/
 # Benchmark artifacts
 benchmarks/bench_fastembed_rs/target/
 benchmarks/results/
+
+# Jekyll documentation build
+docs/_site/
+.jekyll-metadata
+.jekyll-cache/
 
 # Python binding artifacts
 python/src/libembedding/*.dylib

@@ -2,48 +2,36 @@
 nav_exclude: true
 ---
 
-# libembedding Documentation
+# Home
 
-Welcome to the **libembedding** documentation, a fast embedding library with both **C/C++** and **Python** APIs powered by ONNX Runtime.
+> **Français:** [Accueil](../index.html)
 
-> **Forked from [pacifio/libembedding](https://github.com/pacifio/libembedding).**
-> This fork adds Windows support (native DLL), PyPI packaging as `libembedding-ng`, local model loading, runtime introspection, similarity helpers, streaming, a multi-worker pool, an autotuner and automatic model selection, llama.cpp/GGUF backend support, length bucketing, LRU cache, dynamic scheduler, and FAST/BALANCED/QUALITY modes.
+libembedding is a C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
 
-## Documentation structure
+## Features
 
-| Section | File | Description |
-|---------|------|-------------|
-| **Getting started** | [getting_started.html](getting_started.html) | Installation, prerequisites and quick start |
-| **Python API** | [api_reference.html](api_reference.html) | Complete reference of Python classes |
-| **Models** | [models.html](models.html) | Catalog of available models (text, image, sparse, reranker) |
-| **Performance** | [performance_tuning.html](performance_tuning.html) | Session pool, auto-tuning, automatic model selection |
- | **Advanced usage** | [advanced_usage.html](advanced_usage.html) | Local models, providers, cache, offline mode, context managers, GGUF/llama.cpp models |
-| **Error handling** | [api_reference.html#error-handling](api_reference.html#error-handling) | Python exception hierarchy |
-| **Français** | [../index.html](../index.html) | Documentation française |
+| Feature | Description |
+|---------|-------------|
+| **Text embeddings** | 44 text models (quantized and FP32) |
+| **Sparse embeddings** | SPLADE++ and BGE-M3 sparse |
+| **Image embeddings** | CLIP, ResNet, Unicom, Nomic Vision |
+| **Reranking** | BGE, Jina rerankers |
+| **Auto-tuning** | Find optimal config (workers, threads, batch) |
+| **LRU Cache** | Thread-safe cache for frequent embeddings |
+| **Multi-backend** | ONNX Runtime + llama.cpp |
+| **Similarity** | Cosine, dot product, Euclidean |
 
-## Overview
+## Navigation
 
-```python
-from libembedding import TextEmbedding, SparseTextEmbedding, Reranker
-import numpy as np
-
-# Dense embeddings
-model = TextEmbedding("BAAI/bge-small-en-v1.5")
-embeddings = model.embed(["Hello world", "How are you?"])
-print(embeddings.shape)  # (2, 384)
-
-# Sparse embeddings
-sparse = SparseTextEmbedding()
-results = sparse.embed(["machine learning"])
-print(results[0].indices.shape, results[0].values.shape)
-
-# Reranking
-reranker = Reranker("BAAI/bge-reranker-base")
-ranked = reranker.rerank("What is deep learning?", [
-    "Deep learning uses neural networks",
-    "The weather is sunny today",
-])
-print(ranked[0].score, ranked[0].index)
-```
-
-**Performance**: 5-8x faster than fastembed, 3.5x less memory.
+- [Getting Started](getting_started.html) — Installation and first usage
+- [Python API Reference](api_reference.html) — Complete Python API reference
+- [Available Models](models.html) — List of supported models
+- [Performance Tuning](performance_tuning.html) — Optimizations and configs
+- [Advanced Usage](advanced_usage.html) — Cache, modes, workers, autotune
+- [Similarity](similarity.html) — Vector comparison
+- [Embedding Cache](python/cache.html) — Embedding cache
+- [Benchmark](python/benchmark.html) — Backend comparison
+- [Backend Detection](python/backend.html) — Auto-detection
+- [Runtime Statistics](python/stats.html) — Runtime metrics
+- [C API](c_api/similarity.html) — C API reference
+- [Documentation française](index.html)

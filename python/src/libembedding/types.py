@@ -1,7 +1,7 @@
 """Data types for libembedding results.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 from dataclasses import dataclass
@@ -49,8 +49,10 @@ class ModelDesc:
     pooling: str  # "cls" or "mean"
     num_threads: int
     batch_size: int
-    provider: str
-    device_id: int
+    provider: str = "cpu"
+    device_id: int = 0
+    quantization: str = "none"
+    cache_size: int = 0
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,8 @@ class Stats:
     texts_embedded: int
     batches_run: int
     avg_latency_ms: float
+    cache_hits: int = 0
+    cache_misses: int = 0
 
 
 @dataclass(frozen=True)
@@ -141,4 +145,3 @@ class ModelSelectionResult:
     latency_ms: float
     memory_mb: float
     score: float
-

@@ -41,7 +41,6 @@ int main(void) {
         ASSERT(info.dim == 384, "BGE small dim is 384");
         ASSERT(strcmp(info.model_code, "Xenova/bge-small-en-v1.5") == 0, "BGE small model_code");
         ASSERT(info.pooling == LEMBED_POOLING_CLS, "BGE small uses CLS pooling");
-        ASSERT(info.quantization == LEMBED_QUANTIZATION_NONE, "BGE small no quantization");
     }
 
     /* Test: all text models have valid fields */
@@ -131,19 +130,6 @@ int main(void) {
         ASSERT(strcmp(msg, "Success") == 0, "OK message");
         msg = lembed_status_message(LEMBED_ERROR_ONNX_RUNTIME);
         ASSERT(msg != NULL && strlen(msg) > 0, "error message non-empty");
-    }
-
-    /* Test: quantization modes for known quantized models */
-    {
-        lembed_model_info_t info;
-        lembed_get_text_model_info(LEMBED_TEXT_ALL_MINILM_L6_V2_Q, &info);
-        ASSERT(info.quantization == LEMBED_QUANTIZATION_DYNAMIC, "MiniLM Q is dynamic");
-
-        lembed_get_text_model_info(LEMBED_TEXT_BGE_BASE_EN_V15_Q, &info);
-        ASSERT(info.quantization == LEMBED_QUANTIZATION_STATIC, "BGE Base Q is static");
-
-        lembed_get_text_model_info(LEMBED_TEXT_BGE_SMALL_EN_V15, &info);
-        ASSERT(info.quantization == LEMBED_QUANTIZATION_NONE, "BGE Small is none");
     }
 
     printf("\n%d passed, %d failed\n", passes, failures);

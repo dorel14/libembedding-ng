@@ -1,7 +1,7 @@
 """High-level document reranker API.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 from __future__ import annotations
@@ -10,10 +10,11 @@ import warnings
 
 from ._binding import ffi, lib
 from ._status import check_status
-from .backend import backend_to_enum, _BACKEND_ONNX
+from .backend import _BACKEND_ONNX, backend_to_enum
 from .exceptions import ModelNotFoundError
 from .models import (
     _PROVIDER_MAP,
+    _QUANTIZATION_ENUM,
     _desc_from_c,
     _is_local_path,
     list_reranker_models,
@@ -37,6 +38,9 @@ class Reranker:
         show_download_progress: Show download progress bar.
         backend: Backend to use ("auto", "onnx", or "llama").
         num_threads: Deprecated; use ``threads``.
+        quantization: Override model quantization mode ("none", "static",
+            "dynamic"). If None, uses the model's default.
+        cache_size: Size of LRU cache for rerank scores (0 = disabled).
     """
 
     def __init__(
@@ -53,6 +57,8 @@ class Reranker:
         show_download_progress: bool = True,
         backend: str = "auto",
         num_threads: int | None = None,
+        quantization: str | None = None,
+        cache_size: int = 0,
     ):
         if num_threads is not None:
             warnings.warn(
@@ -61,6 +67,14 @@ class Reranker:
                 stacklevel=2,
             )
             threads = num_threads
+
+        quant_enum = lib.LEMBED_QUANTIZATION_NONE
+        if quantization is not None:
+            quant_enum = _QUANTIZATION_ENUM.get(quantization.lower())
+            if quant_enum is None:
+                raise ValueError(
+                    f"Unknown quantization '{quantization}'. Use: {list(_QUANTIZATION_ENUM.keys())}"
+                )
 
         opts = lib.lembed_reranker_options_default()
         opts.provider = _PROVIDER_MAP[provider.lower()]
@@ -75,6 +89,7 @@ class Reranker:
         opts.offline = int(offline)
         opts.show_download_progress = int(show_download_progress)
         opts.backend = backend_to_enum(backend)
+        opts.cache_size = cache_size
 
         ctx_ptr = ffi.new("lembed_reranker_t **")
 
@@ -83,22 +98,34 @@ class Reranker:
         try:
             model_idx = resolve_reranker_model(model_name)
             opts.model = model_idx
-            check_status(lib.lembed_reranker_create(ffi.addressof(opts), ctx_ptr))
+            v2_opts = ffi.new("lembed_reranker_options_v2_t *")
+            v2_opts.base = opts
+            v2_opts.quantization = quant_enum
+            check_status(lib.lembed_reranker_create_v2(v2_opts, ctx_ptr))
         except ModelNotFoundError:
             if backend_enum == _BACKEND_ONNX:
                 raise
             if _is_local_path(model_name):
                 if model_name.lower().endswith(".gguf"):
-                    check_status(lib.lembed_reranker_create_from_gguf_path(
-                        model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
+                    check_status(
+                        lib.lembed_reranker_create_from_gguf_path(
+                            model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr
+                        )
+                    )
                 else:
-                    check_status(lib.lembed_reranker_create_from_path(
-                        model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
+                    check_status(
+                        lib.lembed_reranker_create_from_path(
+                            model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr
+                        )
+                    )
             else:
-                check_status(lib.lembed_reranker_create_from_gguf_path(
-                    model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
+                check_status(
+                    lib.lembed_reranker_create_from_gguf_path(
+                        model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr
+                    )
+                )
 
-        self._ctx = ffi.gc(ctx_ptr[0], lib.lembed_reranker_free)
+        self._ctx = ctx_ptr[0]
         self._batch_size = batch_size
 
     @staticmethod
@@ -110,7 +137,7 @@ class Reranker:
     def auto(profile: str = "balanced", **kwargs) -> Reranker:
         """Create a Reranker with automatic configuration based on profile.
 
-        This is the recommended way to create a Reranker Ã¢â‚¬â€ it automatically
+        This is the recommended way to create a Reranker -- it automatically
         selects the optimal model and configuration for your hardware.
 
         Args:
@@ -166,27 +193,33 @@ class Reranker:
 
     def info(self) -> ModelDesc:
         """Return runtime model descriptor."""
-        desc_ptr = lib.lembed_reranker_desc(self._ctx)
-        return _desc_from_c(desc_ptr)
+        desc_ptr = lib.lembed_reranker_desc_v2(self._ctx)
+        return _desc_from_c(desc_ptr.base, desc_ptr)
 
     @property
     def name(self) -> str:
         """Model name or local path."""
         name_ptr = lib.lembed_reranker_model_name(self._ctx)
-        return ffi.string(name_ptr).decode("utf-8", errors="replace") if name_ptr else ""
+        return (
+            ffi.string(name_ptr).decode("utf-8", errors="replace") if name_ptr else ""
+        )
 
     def stats(self) -> Stats:
         """Return runtime usage statistics."""
-        s = ffi.new("lembed_stats_t *")
-        lib.lembed_reranker_stats(self._ctx, s)
+        s = ffi.new("lembed_stats_v2_t *")
+        lib.lembed_reranker_stats_v2(self._ctx, s)
         return Stats(
-            texts_embedded=s.texts_embedded,
-            batches_run=s.batches_run,
-            avg_latency_ms=s.avg_latency_ms,
+            texts_embedded=s.base.texts_embedded,
+            batches_run=s.base.batches_run,
+            avg_latency_ms=s.base.avg_latency_ms,
+            cache_hits=s.cache_hits,
+            cache_misses=s.cache_misses,
         )
 
     def close(self) -> None:
-        self._ctx = None
+        if self._ctx is not None:
+            lib.lembed_reranker_free(self._ctx)
+            self._ctx = None
 
     def __enter__(self):
         return self
@@ -223,7 +256,9 @@ def reranker_autotune(
         "memory": lib.LEMBED_OBJECTIVE_MEMORY,
     }
     if objective not in obj_map:
-        raise ValueError(f"Unknown objective '{objective}'. Use: {list(obj_map.keys())}")
+        raise ValueError(
+            f"Unknown objective '{objective}'. Use: {list(obj_map.keys())}"
+        )
 
     result = ffi.new("lembed_reranker_tuning_result_t *")
 
@@ -239,7 +274,11 @@ def reranker_autotune(
             code = model_code
             break
 
-    check_status(lib.lembed_reranker_autotune(code.encode("utf-8"), mode, obj_map[objective], result))
+    check_status(
+        lib.lembed_reranker_autotune(
+            code.encode("utf-8"), mode, obj_map[objective], result
+        )
+    )
 
     return RerankerTuningResult(
         threads=result.threads,
@@ -284,7 +323,9 @@ def reranker_autotune_constrained(
         "memory": lib.LEMBED_OBJECTIVE_MEMORY,
     }
     if objective not in obj_map:
-        raise ValueError(f"Unknown objective '{objective}'. Use: {list(obj_map.keys())}")
+        raise ValueError(
+            f"Unknown objective '{objective}'. Use: {list(obj_map.keys())}"
+        )
 
     result = ffi.new("lembed_reranker_tuning_result_t *")
 
@@ -300,8 +341,16 @@ def reranker_autotune_constrained(
             code = model_code
             break
 
-    check_status(lib.lembed_reranker_autotune_constrained(
-        code.encode("utf-8"), mode, obj_map[objective], min_tokens, max_latency_ms, result))
+    check_status(
+        lib.lembed_reranker_autotune_constrained(
+            code.encode("utf-8"),
+            mode,
+            obj_map[objective],
+            min_tokens,
+            max_latency_ms,
+            result,
+        )
+    )
 
     return RerankerTuningResult(
         threads=result.threads,
@@ -317,6 +366,7 @@ def reranker_autotune_constrained(
 def reranker_auto_config(
     model_name: str = "jinaai/jina-reranker-v1-turbo-en-quantized",
     target_latency_ms: float = 500.0,
+    objective: str = "balanced",
 ) -> RerankerTuningResult:
     """Auto-configure reranker to fit within a latency budget.
 
@@ -345,7 +395,20 @@ def reranker_auto_config(
             code = model_code
             break
 
-    check_status(lib.lembed_reranker_auto_config(code.encode("utf-8"), target_latency_ms, result))
+    obj_map = {
+        "latency": lib.LEMBED_OBJECTIVE_LATENCY,
+        "throughput": lib.LEMBED_OBJECTIVE_THROUGHPUT,
+        "balanced": lib.LEMBED_OBJECTIVE_BALANCED,
+        "memory": lib.LEMBED_OBJECTIVE_MEMORY,
+    }
+    if objective not in obj_map:
+        raise ValueError(f"Unknown objective '{objective}'")
+
+    check_status(
+        lib.lembed_reranker_auto_config(
+            code.encode("utf-8"), target_latency_ms, obj_map[objective], result
+        )
+    )
 
     return RerankerTuningResult(
         threads=result.threads,
@@ -389,10 +452,16 @@ def reranker_auto_config_profile(
         "quality": lib.LEMBED_PROFILE_QUALITY,
     }
     if profile not in profile_map:
-        raise ValueError(f"Unknown profile '{profile}'. Use: {list(profile_map.keys())}")
+        raise ValueError(
+            f"Unknown profile '{profile}'. Use: {list(profile_map.keys())}"
+        )
 
     result = ffi.new("lembed_reranker_tuning_result_t *")
-    check_status(lib.lembed_reranker_auto_config_profile(model_name.encode("utf-8"), profile_map[profile], result))
+    check_status(
+        lib.lembed_reranker_auto_config_profile(
+            model_name.encode("utf-8"), profile_map[profile], result
+        )
+    )
 
     return RerankerTuningResult(
         threads=result.threads,
@@ -411,7 +480,7 @@ def Reranker_auto(
 ) -> Reranker:
     """Create a Reranker with automatic configuration based on profile.
 
-    This is the recommended way to create a Reranker Ã¢â‚¬â€ it automatically
+    This is the recommended way to create a Reranker -- it automatically
     selects the optimal model and configuration for your hardware.
 
     Args:
@@ -439,8 +508,24 @@ def Reranker_auto(
     }
     model_name = model_map.get(profile, "jinaai/jina-reranker-v1-turbo-en-quantized")
 
-    # Get optimal config
-    config = reranker_auto_config_profile(profile, model_name)
+    if kwargs.get("offline", False):
+        defaults = {
+            "fast": (4, 32, 512),
+            "balanced": (4, 32, 512),
+            "quality": (4, 16, 1024),
+        }
+        threads, batch_size, max_tokens = defaults.get(profile, (4, 32, 512))
+        config = RerankerTuningResult(
+            threads=threads,
+            batch_size=batch_size,
+            max_tokens=max_tokens,
+            throughput_docs_sec=0.0,
+            latency_ms=0.0,
+            p95_latency_ms=0.0,
+            memory_mb=0.0,
+        )
+    else:
+        config = reranker_auto_config_profile(profile, model_name)
 
     # Create reranker with optimal config
     return Reranker(
@@ -450,4 +535,3 @@ def Reranker_auto(
         max_length=config.max_tokens,
         **kwargs,
     )
-

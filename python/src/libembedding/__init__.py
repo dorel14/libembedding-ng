@@ -4,15 +4,17 @@ import logging
 
 try:
     from importlib.metadata import PackageNotFoundError, version
+
     __version__ = version("libembedding-ng")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
+from ._binding import lib
 from .autotune import (
-    autotune,
     auto_select_model,
-    clear_autotune_cache,
+    autotune,
     autotune_unified,
+    clear_autotune_cache,
 )
 from .backend import detect_backend
 from .benchmark import (
@@ -27,7 +29,7 @@ from .benchmark import (
     clear_cache,
     detect_hardware,
 )
-from ._binding import lib
+from .cache import EmbeddingCache, cache_config_default
 from .exceptions import LembedError, LlamaError
 from .image_embedding import ImageEmbedding, image_autotune
 from .models import (
@@ -94,11 +96,6 @@ LEMBED_PROFILE_BALANCED = lib.LEMBED_PROFILE_BALANCED
 LEMBED_PROFILE_QUALITY = lib.LEMBED_PROFILE_QUALITY
 
 __all__ = [
-    "Benchmark",
-    "BenchmarkResult",
-    "ComparisonResult",
-    "CorpusType",
-    "HardwareInfo",
     "LEMBED_AUTOTUNE_FULL",
     "LEMBED_AUTOTUNE_QUICK",
     "LEMBED_OBJECTIVE_BALANCED",
@@ -112,6 +109,12 @@ __all__ = [
     "LEMBED_TASK_IMAGE",
     "LEMBED_TASK_RERANKING",
     "LEMBED_TASK_SPARSE",
+    "Benchmark",
+    "BenchmarkResult",
+    "ComparisonResult",
+    "CorpusType",
+    "EmbeddingCache",
+    "HardwareInfo",
     "Metrics",
     "ModelDesc",
     "ModelInfo",
@@ -131,6 +134,7 @@ __all__ = [
     "auto_select_model",
     "autotune",
     "autotune_unified",
+    "cache_config_default",
     "cache_path",
     "clear_autotune_cache",
     "clear_cache",

@@ -1,7 +1,7 @@
 """Native similarity functions operating on raw float arrays.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 from __future__ import annotations
@@ -42,4 +42,3 @@ def euclidean_distance(a: np.ndarray, b: np.ndarray) -> float:
     return lib.lembed_euclidean_distance(
         ffi.from_buffer("float[]", a), ffi.from_buffer("float[]", b), a.shape[0]
     )
-

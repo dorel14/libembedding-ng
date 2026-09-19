@@ -1,7 +1,7 @@
-"""Status code checking Ã¢â‚¬â€ raises Python exceptions from C status codes.
+"""Status code checking -- raises Python exceptions from C status codes.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 from ._binding import ffi, lib
@@ -36,9 +36,9 @@ _STATUS_MAP = {
 def check_status(status: int) -> None:
     if status == 0:
         return
-    msg = ffi.string(lib.lembed_status_message(status)).decode("utf-8", errors="replace")
+    msg = ffi.string(lib.lembed_status_message(status)).decode(
+        "utf-8", errors="replace"
+    )
     detail = ffi.string(lib.lembed_last_error()).decode("utf-8", errors="replace")
     exc_cls = _STATUS_MAP.get(status, LembedError)
     raise exc_cls(status, msg, detail)
-
-

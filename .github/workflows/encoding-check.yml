@@ -26,12 +26,14 @@ jobs:
       - name: Check for non-UTF-8 encodings
         run: |
           # Check for Latin-1 encoded files (heuristic: presence of isolated Ã or Â bytes)
-          if grep -rlP '[\x80-\xFF]' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.txt' --include='*.ps1' --include='*.bat' --include='CMakeLists.txt' --exclude-dir=third_party --exclude-dir=.git | while read -r f; do
+          non_utf8=0
+          while IFS= read -r f; do
             if ! file -b --mime-encoding "$f" | grep -q 'utf-8\|us-ascii\|binary'; then
               echo "Non-UTF-8 file: $f ($(file -b --mime-encoding "$f"))"
-              exit 1
+              non_utf8=1
             fi
-          done; then
+          done < <(grep -rlP '[\x80-\xFF]' . --include='*.py' --include='*.h' --include='*.hpp' --include='*.c' --include='*.cpp' --include='*.yml' --include='*.yaml' --include='*.md' --include='*.txt' --include='*.ps1' --include='*.bat' --include='CMakeLists.txt' --exclude-dir=third_party --exclude-dir=.git --exclude-dir=.venv --exclude-dir=build --exclude-dir=build2 --exclude-dir=build3 --exclude-dir=build4)
+          if [ "$non_utf8" -ne 0 ]; then
             exit 1
           fi
           echo "All source files are UTF-8 or ASCII."

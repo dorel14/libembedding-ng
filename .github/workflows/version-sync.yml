@@ -30,6 +30,9 @@ jobs:
         id: cmake-version
         run: |
           CMAKE_VERSION=$(grep -oP '^\s*VERSION\s+\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+          if [ -z "$CMAKE_VERSION" ]; then
+            CMAKE_VERSION=$(grep -oP 'set\(LIBEMBEDDING_VERSION "\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+          fi
           echo "version=$CMAKE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Compare versions

@@ -131,6 +131,9 @@ jobs:
           PY=$(grep -oP '^version = "\K[^"]+' python/pyproject.toml)
           C=$(grep -oP 'LIBEMBEDDING_VERSION_STRING "\K[^"]+' include/libembedding/config.h)
           CMAKE=$(grep -oP '^\s*VERSION\s+\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+          if [ -z "$CMAKE" ]; then
+            CMAKE=$(grep -oP 'set\(LIBEMBEDDING_VERSION "\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+          fi
           if [ "$PY" != "$C" ] || [ "$PY" != "$CMAKE" ]; then
             echo "Version mismatch! PY=$PY C=$C CMAKE=$CMAKE"
             exit 1

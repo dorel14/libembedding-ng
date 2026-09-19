@@ -2,12 +2,12 @@
  * libembedding - embedding_benchmark.h
  * Model selection autotuner by objective
  *
- * Pipeline: Hard constraints â†’ Pareto frontier â†’ Objective scoring â†’ Selection
+ * Pipeline: Hard constraints -> Pareto frontier -> Objective scoring -> Selection
  *
  * Uses unified types from unified_benchmark.h
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -89,7 +89,4 @@ const char* lembed_benchmark_default_cache_dir(void);
 #define LIBEMBEDDING_EMBEDDING_BENCHMARK_IMPL
 #include "detail/embedding_benchmark_impl.hpp"
 #endif
-
-
-
 

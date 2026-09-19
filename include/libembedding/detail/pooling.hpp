@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - detail/pooling.hpp
  * CLS and Mean pooling implementations
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -27,10 +27,10 @@ namespace lembed { namespace detail {
 inline void pool_cls(const float* tensor, int batch, int seq_len, int dim,
                      int ndim, float* out) {
     if (ndim == 2) {
-        /* Already [batch, dim] â€” just copy */
+        /* Already [batch, dim] - just copy */
         std::memcpy(out, tensor, (size_t)batch * dim * sizeof(float));
     } else {
-        /* [batch, seq_len, dim] â€” take [:,0,:] */
+        /* [batch, seq_len, dim] - take [:,0,:] */
         for (int b = 0; b < batch; b++) {
             const float* src = tensor + (size_t)b * seq_len * dim;
             float* dst = out + (size_t)b * dim;
@@ -48,10 +48,10 @@ inline void pool_cls(const float* tensor, int batch, int seq_len, int dim,
  * out: flat [batch x dim] pre-allocated
  */
 inline void pool_mean(const float* tensor, const int64_t* mask,
-                      int batch, int seq_len, int dim,
-                      int ndim, float* out) {
+                       int batch, int seq_len, int dim,
+                       int ndim, float* out) {
     if (ndim == 2) {
-        /* Already pooled â€” just copy */
+        /* Already pooled - just copy */
         std::memcpy(out, tensor, (size_t)batch * dim * sizeof(float));
         return;
     }
@@ -84,7 +84,4 @@ inline void pool_mean(const float* tensor, const int64_t* mask,
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_POOLING_HPP */
-
-
-
 

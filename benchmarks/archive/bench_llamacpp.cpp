@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding llama.cpp backend benchmark harness
  * Measures model load time, single-text latency, and batch throughput.
  * Outputs JSON to stdout for comparison with ONNX backend.

@@ -5,7 +5,7 @@
  * Same corpus, same metrics, same protocol for both backends.
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -64,7 +64,7 @@ typedef struct {
     int         num_errors;
 } lembed_benchmark_metrics_t;
 
-/* Result for one model Ã— backend */
+/* Result for one model × backend */
 typedef struct {
     char        model_name[128];
     char        model_path[512];

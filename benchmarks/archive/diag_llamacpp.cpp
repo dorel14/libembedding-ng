@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Test diagnostique : verifie si les embeddings sont reellement calcules
  * Toute sortie va sur stderr (non bufferise) pour ne rien perdre en cas de crash
  */
