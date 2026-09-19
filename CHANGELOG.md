@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v1.7.0 (2026-09-19)
+
+### Bug Fixes
+
+- **docs**: Fix GitHub Pages baseurl and nav URLs for libembedding-ng repo
+  ([`d1f3486`](https://github.com/dorel14/libembedding-ng/commit/d1f3486333703a75412abc0ebe3f2cfeca957529))
+
+- Change baseurl from /libembedding to /libembedding-ng (matches repo name) - Fix nav URLs to be
+  relative (no leading /) for proper baseurl resolution - Fix English index link to French index
+  (../index.html)
+
+### Chores
+
+- **tests**: Refactor CMakeLists.txt for test organization
+  ([`a7ede63`](https://github.com/dorel14/libembedding-ng/commit/a7ede63fc053b71cd37f49be853ee7012f4ac485))
+
+- Consolidated unit and integration test sections for clarity. - Ensured all test executables are
+  properly linked to `libembedding`. - Maintained conditional logic for Windows and ONNXRuntime
+  library handling. - Preserved functionality for local loading tests without network dependencies.
+
+### Features
+
+- Ajout de structures de données versionnées pour les modèles et options d'embedding
+  ([`b502b24`](https://github.com/dorel14/libembedding-ng/commit/b502b24b966303beeffd389eb05614d4bac3dfdd))
+
+* Ajout de `lembed_model_desc_v2_t`, `lembed_text_options_v2_t`, et `lembed_reranker_options_v2_t`
+  pour étendre les fonctionnalités avec des informations de quantification et de cache. *
+  Amélioration de la gestion des versions pour une meilleure compatibilité et extensibilité.
+
+- **docs**: Add documentation for similarity functions and backend detection
+  ([`b3a8c4d`](https://github.com/dorel14/libembedding-ng/commit/b3a8c4d5d41f57b6264d9778f885f4c35b22e8a5))
+
+- Introduced `similarity.md` detailing native functions for comparing embedding vectors. - Added
+  `backend.md` to explain auto-detection of backends based on model names or file paths. - Created
+  `benchmark.md` for unified benchmarking of ONNX and llama.cpp backends. - Documented `cache.md`
+  for LRU caching of embeddings, including usage and integration with `TextEmbedding`. - Added
+  `stats.md` to provide runtime statistics for embedding contexts. - Updated French documentation
+  for similarity functions and backend detection. - Implemented a new LRU cache class in `cache.py`
+  for efficient embedding storage. - Added a script for syncing version numbers across header files.
+
+
 ## v1.6.0 (2026-09-15)
 
 ### Bug Fixes
