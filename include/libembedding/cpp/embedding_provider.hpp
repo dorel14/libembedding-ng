@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - cpp/embedding_provider.hpp
  * Inline factory for EmbeddingProvider (header-only)
  *
  * Author: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

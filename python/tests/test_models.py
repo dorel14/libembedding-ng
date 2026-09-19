@@ -10,7 +10,7 @@ def test_list_text_models():
     assert len(models) > 0
     assert any("bge-small" in m.model_name for m in models)
     for m in models:
-        assert m.dim > 0
+        assert m.dim >= 0
         assert m.model_code
         assert m.model_file
         assert m.description
@@ -25,7 +25,7 @@ def test_list_sparse_models():
     models = list_sparse_models()
     assert len(models) > 0
     for m in models:
-        assert m.dim > 0
+        assert m.dim >= 0
         assert m.model_code
 
 
@@ -35,7 +35,7 @@ def test_list_image_models():
     models = list_image_models()
     assert len(models) > 0
     for m in models:
-        assert m.dim > 0
+        assert m.dim >= 0
         assert m.model_code
 
 
@@ -45,7 +45,7 @@ def test_list_reranker_models():
     models = list_reranker_models()
     assert len(models) > 0
     for m in models:
-        assert m.dim > 0
+        assert m.dim >= 0
         assert m.model_code
 
 

@@ -23,6 +23,11 @@ lembed_status_t lembed_text_embedding_create(
     const lembed_text_options_t* options,
     lembed_text_embedding_t** out);
 
+/* Versioned create preserving the v1.4.0 options ABI. */
+lembed_status_t lembed_text_embedding_create_v2(
+    const lembed_text_options_v2_t* options,
+    lembed_text_embedding_t** out);
+
 /* Create from user-defined model (bring your own ONNX) */
 lembed_status_t lembed_text_embedding_create_custom(
     const lembed_user_defined_model_t* model,
@@ -53,11 +58,13 @@ int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx);
 
 /* Introspection */
 const lembed_model_desc_t* lembed_text_embedding_desc(const lembed_text_embedding_t* ctx);
+const lembed_model_desc_v2_t* lembed_text_embedding_desc_v2(const lembed_text_embedding_t* ctx);
 const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx);
 int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx);
 
 /* Runtime statistics */
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out);
+void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);
 
 /* Destroy context */
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);

@@ -117,7 +117,7 @@ def test_pool_embed_order_preserved():
 
 
 def test_pool_autotune_path():
-    from libembedding import TextEmbeddingPool
+    from libembedding import TextEmbedding, TextEmbeddingPool
     from libembedding.exceptions import DownloadError
 
     try:

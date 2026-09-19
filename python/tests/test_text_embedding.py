@@ -4,6 +4,7 @@ import warnings
 
 import numpy as np
 import pytest
+from libembedding import TextEmbedding
 
 
 def _bge_small(**kwargs):
@@ -50,11 +51,13 @@ def test_text_embedding_empty():
 
 def test_text_embedding_cosine_similarity():
     model = _bge_small()
-    result = model.embed([
-        "The cat sat on the mat",
-        "A kitten was sitting on a rug",
-        "Quantum physics is complex",
-    ])
+    result = model.embed(
+        [
+            "The cat sat on the mat",
+            "A kitten was sitting on a rug",
+            "Quantum physics is complex",
+        ]
+    )
     sim_similar = np.dot(result[0], result[1])
     sim_different = np.dot(result[0], result[2])
     assert sim_similar > sim_different
@@ -211,4 +214,3 @@ def test_text_embedding_batched():
     for emb in batches:
         assert emb.shape == (model.dim,)
     model.close()
-

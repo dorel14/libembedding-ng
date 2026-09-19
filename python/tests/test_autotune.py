@@ -5,13 +5,10 @@ They are marked with @pytest.mark.network or skipped gracefully.
 """
 
 import pytest
-
 from libembedding.autotune import (
-    _do_autotune,
-    autotune,
     auto_select_model,
-    clear_autotune_cache,
     autotune_unified,
+    clear_autotune_cache,
 )
 from libembedding.exceptions import LembedError
 
@@ -67,8 +64,9 @@ def test_autotune_unified_invalid_task():
 
 
 def test_autotune_unified_reranking_no_default():
-    with pytest.raises(ValueError, match="No default model"):
-        autotune_unified("reranking")
+    result = autotune_unified("reranking")
+    assert result.task == "reranking"
+    assert result.max_tokens >= 1
 
 
 def test_autotune_unified_sparse_no_default():

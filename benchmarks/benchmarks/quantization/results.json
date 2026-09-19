@@ -1,0 +1,74 @@
+[
+  {
+    "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+    "quantization": "none",
+    "batch_size": 64,
+    "texts_per_second": 99.60167298846072,
+    "latency_ms_per_doc": 10.039992000092752,
+    "peak_memory_mb": 0.0,
+    "dim": 384,
+    "num_docs": 100,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+    "quantization": "static",
+    "batch_size": 64,
+    "texts_per_second": 110.8820042522798,
+    "latency_ms_per_doc": 9.018595999805257,
+    "peak_memory_mb": 0.0,
+    "dim": 384,
+    "num_docs": 100,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+    "quantization": "dynamic",
+    "batch_size": 64,
+    "texts_per_second": 98.41336012515133,
+    "latency_ms_per_doc": 10.161222000024281,
+    "peak_memory_mb": 0.0,
+    "dim": 384,
+    "num_docs": 100,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "none",
+    "batch_size": 64,
+    "texts_per_second": 112.26607958863313,
+    "latency_ms_per_doc": 8.907410000101663,
+    "peak_memory_mb": 0.0,
+    "dim": 384,
+    "num_docs": 100,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "static",
+    "batch_size": 64,
+    "texts_per_second": 103.99446915623159,
+    "latency_ms_per_doc": 9.6158960001776,
+    "peak_memory_mb": 0.0,
+    "dim": 384,
+    "num_docs": 100,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "dynamic",
+    "batch_size": 64,
+    "texts_per_second": 106.99611197270728,
+    "latency_ms_per_doc": 9.346134000224993,
+    "peak_memory_mb": 0.0,
+    "dim": 384,
+    "num_docs": 100,
+    "success": true,
+    "error": ""
+  }
+]

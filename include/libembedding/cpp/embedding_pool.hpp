@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - cpp/embedding_pool.hpp
  * Session pool for parallel embedding processing
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

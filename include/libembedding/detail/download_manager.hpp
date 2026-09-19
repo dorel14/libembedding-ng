@@ -16,10 +16,10 @@
 #include <string>
 #include <stdexcept>
 
-#include "types.h"
-#include "model_registry.h"
-#include "downloader.h"
-#include "detail/downloader_impl.hpp"
+#include "libembedding/types.h"
+#include "libembedding/model_registry.h"
+#include "libembedding/downloader.h"
+#include "downloader_impl.hpp"
 
 namespace lembed { namespace detail {
 

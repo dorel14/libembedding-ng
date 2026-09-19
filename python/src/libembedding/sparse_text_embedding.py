@@ -1,7 +1,7 @@
 """High-level sparse text embedding API.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 from __future__ import annotations
@@ -84,16 +84,20 @@ class SparseTextEmbedding:
         try:
             model_idx = resolve_sparse_model(model_name)
             opts.model = model_idx
-            check_status(lib.lembed_sparse_text_embedding_create(
-                ffi.addressof(opts), ctx_ptr))
+            check_status(
+                lib.lembed_sparse_text_embedding_create(ffi.addressof(opts), ctx_ptr)
+            )
         except ModelNotFoundError:
             if _is_local_path(model_name):
-                check_status(lib.lembed_sparse_text_embedding_create_from_path(
-                    model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr))
+                check_status(
+                    lib.lembed_sparse_text_embedding_create_from_path(
+                        model_name.encode("utf-8"), ffi.addressof(opts), ctx_ptr
+                    )
+                )
             else:
                 raise
 
-        self._ctx = ffi.gc(ctx_ptr[0], lib.lembed_sparse_text_embedding_free)
+        self._ctx = ctx_ptr[0]
         self._batch_size = batch_size
         self._sparse_opts = opts
 
@@ -107,7 +111,9 @@ class SparseTextEmbedding:
         """Configured internal batch size."""
         return self._batch_size
 
-    def embed(self, texts: list[str], *, batch_size: int | None = None) -> list[SparseEmbedding]:
+    def embed(
+        self, texts: list[str], *, batch_size: int | None = None
+    ) -> list[SparseEmbedding]:
         """Embed texts into sparse vectors.
 
         Returns:
@@ -125,7 +131,9 @@ class SparseTextEmbedding:
 
         result = ffi.new("lembed_sparse_embeddings_t *")
         check_status(
-            lib.lembed_sparse_text_embedding_embed(self._ctx, c_texts, n, bs, ffi.NULL, result)
+            lib.lembed_sparse_text_embedding_embed(
+                self._ctx, c_texts, n, bs, ffi.NULL, result
+            )
         )
 
         try:
@@ -152,7 +160,9 @@ class SparseTextEmbedding:
     def name(self) -> str:
         """Model name or local path."""
         name_ptr = lib.lembed_sparse_text_embedding_model_name(self._ctx)
-        return ffi.string(name_ptr).decode("utf-8", errors="replace") if name_ptr else ""
+        return (
+            ffi.string(name_ptr).decode("utf-8", errors="replace") if name_ptr else ""
+        )
 
     def stats(self) -> Stats:
         """Return runtime usage statistics."""
@@ -165,7 +175,9 @@ class SparseTextEmbedding:
         )
 
     def close(self) -> None:
-        self._ctx = None
+        if self._ctx is not None:
+            lib.lembed_sparse_text_embedding_free(self._ctx)
+            self._ctx = None
 
     def __enter__(self):
         return self
@@ -215,4 +227,3 @@ def sparse_autotune(
         latency_ms=result.latency_ms,
         memory_mb=result.memory_mb,
     )
-

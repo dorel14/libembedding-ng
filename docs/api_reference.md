@@ -17,15 +17,17 @@ Génère des embeddings denses (vecteurs) à partir de textes.
 TextEmbedding(
     model_name="BAAI/bge-small-en-v1.5",
     provider="cpu",
-    device_id=0,
-    cache_dir=None,
-    max_length=0,
     threads=0,
     batch_size=256,
     offline=False,
     show_download_progress=True,
+    cache_dir=None,
+    max_length=0,
     dim=0,
     pooling="mean",
+    auto_workers=False,
+    cache_size=0,
+    quantization=None,
     num_threads=None,  # déprécié
 )
 ```
@@ -36,33 +38,31 @@ TextEmbedding(
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `"BAAI/bge-small-en-v1.5"` | Nom HuggingFace, code de repo, ou chemin local vers un répertoire contenant `model.onnx` + `tokenizer.json` |
 | `provider` | `str` | `"cpu"` | Provider d'exécution : `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`, `"llamacpp"` |
-| `device_id` | `int` | `0` | Index du device pour les providers GPU |
-| `cache_dir` | `str \| None` | `None` | Répertoire de cache des modèles (`None` = `~/.cache/libembedding`) |
-| `max_length` | `int` | `0` | Longueur max en tokens (`0` = défaut du modèle) |
 | `threads` | `int` | `0` | Nombre de threads (`0` = auto) |
 | `batch_size` | `int` | `256` | Taille de batch interne pour l'inférence |
 | `offline` | `bool` | `False` | `True` = utilise uniquement le cache, pas de téléchargement |
 | `show_download_progress` | `bool` | `True` | Affiche la barre de progression de téléchargement |
+| `cache_dir` | `str \| None` | `None` | Répertoire de cache des modèles (`None` = `~/.cache/libembedding`) |
+| `max_length` | `int` | `0` | Longueur max en tokens (`0` = défaut du modèle) |
 | `dim` | `int` | `0` | Dimension de l'embedding pour modèles locaux sans `config.json` |
 | `pooling` | `str` | `"mean"` | Stratégie de pooling pour modèles locaux : `"cls"` ou `"mean"` |
-| `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
-| `autotune` | `bool` | `False` | `True` = auto-tune `threads` et `batch_size` pour meilleures performances. Voir [performance_tuning.html](performance_tuning.html) |
-| `autotune_texts` | `list[str] \| None` | `None` | Corpus personnalisé pour l'autotune (plus précis que corpus synthétique) |
-| `autotune_max_samples` | `int` | `100` | Nombre max de textes échantillonnés pour l'autotune (si `autotune_texts` fourni) |
 | `auto_workers` | `bool` | `False` | `True` = auto-détection du nombre optimal de sessions/workers pour llama.cpp |
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
-
-#### Méthodes et propriétés
+| `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"` (None = défaut du modèle) |
+| `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
 
 | Membre | Type | Description |
 |--------|------|-------------|
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed les textes. Retourne un tableau de forme `(n, dim)` en `float32`. L2-normalisé. |
+| `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
+| `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
 | `dim` | `int` (property) | Dimension de l'embedding |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `info()` | `ModelDesc` | Descripteur du modèle chargé |
+| `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources C sous-jacentes |
 | `list_supported_models()` | `list[ModelInfo]` | (static) Liste tous les modèles de texte supportés |
 | `__enter__()` | `self` | Support du context manager |
@@ -107,6 +107,11 @@ SparseTextEmbedding(
     batch_size=256,
     offline=False,
     show_download_progress=True,
+    top_terms=0,
+    min_weight=0.0,
+    quantization=None,
+    backend="auto",
+    cache_size=0,
     num_threads=None,  # déprécié
 )
 ```
@@ -126,6 +131,7 @@ SparseTextEmbedding(
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
 | `info()` | `ModelDesc` | Descripteur du modèle |
+| `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
 | `list_supported_models()` | `list[ModelInfo]` | (static) Liste les modèles sparse |
 
@@ -208,6 +214,9 @@ Reranker(
     batch_size=256,
     offline=False,
     show_download_progress=True,
+    backend="auto",
+    quantization=None,
+    cache_size=0,
     num_threads=None,  # déprécié
 )
 ```
@@ -219,7 +228,7 @@ Reranker(
 | `BAAI/bge-reranker-base` | BGE Reranker base (défaut) |
 | `BAAI/bge-reranker-v2-m3` | BGE Reranker v2 multilingue |
 | `jinaai/jina-reranker-v1-turbo-en` | Jina Reranker v1 turbo |
- | `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 multilingue |
+| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 multilingue |
 | `jinaai/jina-reranker-v1-turbo-en` (quantized) | Jina Reranker v1 turbo English (INT8) |
 
 #### Méthodes et propriétés
@@ -230,8 +239,10 @@ Reranker(
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
 | `info()` | `ModelDesc` | Descripteur du modèle |
+| `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
 | `list_supported_models()` | `list[ModelInfo]` | (static) Liste les modèles reranker |
+| `auto(profile="balanced", **kwargs)` | `Reranker` | (static) Crée un Reranker auto-configuré par profil |
 
 #### Exemple
 
@@ -269,9 +280,16 @@ class TextEmbeddingPool:
     batch_size: int = 256
     provider: str = "cpu"
     offline: bool = False
+    show_download_progress: bool = True
+    cache_dir: str | None = None
+    max_length: int = 0
+    dim: int = 0
+    pooling: str = "mean"
     autotune: bool = False            # auto-tune tous les paramètres
     autotune_texts: list[str] = None  # corpus pour l'autotune
     autotune_max_samples: int = 100   # taille d'échantillon max
+    cache_size: int = 0               # LRU cache par worker (0 = désactivé)
+    quantization: str | None = None   # mode de quantification
 ```
 
 **Méthodes :**
@@ -424,14 +442,112 @@ class ModelInfo:
 ```python
 @dataclass(frozen=True)
 class ModelDesc:
-    name:        str
-    dimension:   int
-    max_length:  int
-    pooling:     str   # "cls" ou "mean"
+    name: str
+    dimension: int
+    max_length: int
+    pooling: str   # "cls" ou "mean"
     num_threads: int
-    batch_size:  int
-    provider:    str
-    device_id:   int
+    batch_size: int
+    provider: str
+    device_id: int
+    quantization: str = "none"
+    cache_size: int = 0
+```
+
+---
+
+### Stats
+
+Statistiques d'utilisation runtime pour un contexte d'embedding.
+
+```python
+@dataclass(frozen=True)
+class Stats:
+    texts_embedded: int    # total texts processed
+    batches_run: int       # total ONNX batches executed
+    avg_latency_ms: float  # average latency per embed() call (ms)
+    cache_hits: int = 0    # LRU cache hits (0 if disabled)
+    cache_misses: int = 0  # LRU cache misses (0 if disabled)
+```
+
+Disponible via la méthode `.stats()` sur `TextEmbedding`, `Reranker`, `ImageEmbedding` et `SparseTextEmbedding`.
+
+### EmbeddingCache
+
+Cache LRU thread-safe pour les embeddings denses. Peut être utilisé standalone ou via le paramètre `cache_size` des constructeurs.
+
+```python
+from libembedding import EmbeddingCache
+
+cache = EmbeddingCache(capacity=4096, ttl_seconds=0, dim=0)
+cache.put("text", np.array([...], dtype=np.float32))
+vec = cache.get("text")  # np.ndarray | None
+cache.clear()
+```
+
+| Méthode | Retour | Description |
+|---------|--------|-------------|
+| `put(text, vec)` | `None` | Stocker un embedding |
+| `get(text, dim=None)` | `np.ndarray \| None` | Récupérer un embedding |
+| `clear()` | `None` | Supprimer toutes les entrées |
+| `capacity` | `int` | Capacité maximale |
+| `current_size` | `int` | Nombre actuel d'entrées |
+| `close()` | `None` | Libérer les ressources C |
+
+---
+
+## Fonctions de similarité
+
+Comparaison native de vecteurs d'embedding.
+
+| Fonction | Description |
+|----------|-------------|
+| `cosine_similarity(a, b)` | Similarité cosinus |
+| `dot_product(a, b)` | Produit scalaire |
+| `euclidean_distance(a, b)` | Distance euclidienne (L2) |
+
+```python
+from libembedding import cosine_similarity, dot_product, euclidean_distance
+import numpy as np
+
+a = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+b = np.array([0.4, 0.5, 0.6], dtype=np.float32)
+
+sim = cosine_similarity(a, b)
+dp = dot_product(a, b)
+dist = euclidean_distance(a, b)
+```
+
+---
+
+## Benchmark unifié
+
+Comparaison des backends ONNX et llama.cpp avec auto-tuning.
+
+| Classe/Constante | Description |
+|------------------|-------------|
+| `Benchmark` | Benchmark avec auto-tuning et comparaison multi-backends |
+| `BenchmarkResult` | Résultat pour un modèle x backend |
+| `ComparisonResult` | Résultats de comparaison avec recommandation |
+| `Metrics` | Métriques d'un benchmark (throughput, latencies, mémoire) |
+| `HardwareInfo` | Informations hardware détectées |
+| `CorpusType` | Catégories de corpus (SHORT, MEDIUM, LONG, MIXED, MULTILINGUAL, EDGE_CASES) |
+| `Objective` | Objectifs d'optimisation (LATENCY, THROUGHPUT, BALANCED, MEMORY) |
+
+```python
+from libembedding import Benchmark, Objective, detect_backend, cache_path, clear_cache
+
+# Détection backend
+backend = detect_backend("BAAI/bge-small-en-v1.5")
+
+# Benchmark
+bench = Benchmark()
+result = bench.autotune("path/to/model.gguf", "llama.cpp", objective=Objective.BALANCED)
+comparison = bench.compare_all(onnx_path="model.onnx", gguf_path="model.gguf")
+
+# Utilitaires
+path = cache_path()
+clear_cache()
 ```
 
 ---

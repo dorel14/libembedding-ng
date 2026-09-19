@@ -2,8 +2,8 @@
 
 > **Fork** : [dorel14/libembedding](https://github.com/dorel14/libembedding) (fork de [pacifio/libembedding](https://github.com/pacifio/libembedding))  
 > **License** : MIT  
-> **Version courante** : 1.4.0  
-> **Dernière mise à jour** : 2026-09-04
+> **Version courante** : 1.6.0  
+> **Dernière mise à jour** : 2026-09-16
 
 ---
 

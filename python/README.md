@@ -101,17 +101,17 @@ for m in libembedding.list_text_models():
 ```python
 TextEmbedding(
     model_name="BAAI/bge-small-en-v1.5",  # HuggingFace model name, repo code, or local dir path
-    provider="cpu",                         # "cpu", "cuda", "coreml", "directml", "tensorrt", "llamacpp"
+    provider="cpu",  # "cpu", "cuda", "coreml", "directml", "tensorrt", "llamacpp"
     device_id=0,
-    cache_dir=None,                         # None = ~/.cache/libembedding
-    max_length=0,                           # 0 = model default
-    threads=0,                              # 0 = auto
-    batch_size=256,                         # internal batch size for embedding
-    offline=False,                          # True = use cache only, never download
+    cache_dir=None,  # None = ~/.cache/libembedding
+    max_length=0,  # 0 = model default
+    threads=0,  # 0 = auto
+    batch_size=256,  # internal batch size for embedding
+    offline=False,  # True = use cache only, never download
     show_download_progress=True,
-    dim=0,                                  # embedding dim for local models without config.json
-    pooling="mean",                         # "cls" or "mean" for local models
-    num_threads=0,                          # deprecated, use threads
+    dim=0,  # embedding dim for local models without config.json
+    pooling="mean",  # "cls" or "mean" for local models
+    num_threads=0,  # deprecated, use threads
 )
 ```
 
@@ -184,8 +184,8 @@ import numpy as np
 a = np.array([1.0, 2.0, 3.0], dtype=np.float32)
 b = np.array([1.0, 2.0, 3.0], dtype=np.float32)
 
-print(cosine_similarity(a, b))   # 1.0 (identical)
-print(dot_product(a, b))         # 14.0
+print(cosine_similarity(a, b))  # 1.0 (identical)
+print(dot_product(a, b))  # 14.0
 print(euclidean_distance(a, b))  # 0.0
 ```
 
@@ -197,9 +197,7 @@ Process large document sets without allocating a single result array:
 from libembedding import TextEmbedding
 
 with TextEmbedding("BAAI/bge-small-en-v1.5") as model:
-    for embedding in model.embed_stream(
-        ["doc1", "doc2", ...], batch_size=32
-    ):
+    for embedding in model.embed_stream(["doc1", "doc2", ...], batch_size=32):
         # Each iteration yields a single (dim,) numpy array
         process(embedding)
 ```
@@ -210,9 +208,11 @@ with TextEmbedding("BAAI/bge-small-en-v1.5") as model:
 with TextEmbedding("BAAI/bge-small-en-v1.5") as model:
     model.embed(["text 1", "text 2", "text 3"])
     stats = model.stats()
-    print(f"Embedded {stats.texts_embedded} texts "
-          f"({stats.batches_run} batches), "
-          f"avg latency {stats.avg_latency_ms:.2f}ms")
+    print(
+        f"Embedded {stats.texts_embedded} texts "
+        f"({stats.batches_run} batches), "
+        f"avg latency {stats.avg_latency_ms:.2f}ms"
+    )
 ```
 
 ### Data Types

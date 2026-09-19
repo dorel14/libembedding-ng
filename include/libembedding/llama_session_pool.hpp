@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - llama_session_pool.hpp
  * Public header for LlamaSessionPool (llama.cpp backend)
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

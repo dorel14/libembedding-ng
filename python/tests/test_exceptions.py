@@ -1,19 +1,18 @@
 """Unit tests for libembedding exception hierarchy."""
 
-import pytest
 
 from libembedding.exceptions import (
-    LembedError,
-    InvalidArgumentError,
-    OutOfMemoryError,
-    OnnxRuntimeError,
-    TokenizerError,
-    DownloadError,
-    IOError,
-    ModelNotFoundError,
-    UnsupportedError,
     BatchSizeError,
+    DownloadError,
+    InvalidArgumentError,
+    IOError,
+    LembedError,
     LlamaError,
+    ModelNotFoundError,
+    OnnxRuntimeError,
+    OutOfMemoryError,
+    TokenizerError,
+    UnsupportedError,
 )
 
 

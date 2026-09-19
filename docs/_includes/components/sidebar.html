@@ -1,15 +1,13 @@
 {%- comment -%}
   Sidebar override for libembedding docs.
-  Replaces the theme's sidebar entirely so the language-aware navigation is
-  always used (the theme's default pulls site_nav via include_cached, which can
-  ignore project overrides on GitHub Pages).
-  Language is detected from the page URL prefix (/en/ = English).
-  Navigation entries are defined in _data/fr_nav.yml and _data/en_nav.yml.
+  Provides language-aware navigation: detects /en/ prefix to switch
+  between fr_nav and en_nav data files. Falls back gracefully if data
+  files are missing.
 {%- endcomment -%}
 
 <header class="side-bar">
   <div class="site-header">
-    <a href="{{ '/' | relative_url }}" class="site-title lh-tight">{% include title.html %}</a>
+    <a href="{{ '/' | relative_url }}" class="site-title lh-tight">libembedding</a>
     <button id="menu-button" class="site-button btn-reset" aria-label="Menu" aria-expanded="false">
       <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><use xlink:href="#svg-menu"></use></svg>
     </button>
@@ -36,11 +34,10 @@
   </nav>
 
   <div class="d-md-block d-none site-footer">
-    {% capture nav_footer_custom %}{% include nav_footer_custom.html %}{% endcapture %}
-    {% if nav_footer_custom != "" %}
-      {{ nav_footer_custom }}
-    {% else %}
-      This site uses <a href="https://github.com/just-the-docs/just-the-docs">Just the Docs</a>, a documentation theme for Jekyll.
-    {% endif %}
+    <p class="text-small">
+      <a href="https://github.com/dorel14/libembedding">GitHub</a> |
+      <a href="https://pypi.org/project/libembedding-ng/">PyPI</a> |
+      <a href="https://github.com/pacifio/libembedding">Upstream</a>
+    </p>
   </div>
 </header>

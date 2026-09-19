@@ -1,4 +1,4 @@
-﻿/*
+/*
  * llama.cpp matrix benchmark: token length x threads
  * Tests performance by text length and thread count
  */

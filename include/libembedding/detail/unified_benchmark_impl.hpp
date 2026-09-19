@@ -3,7 +3,7 @@
  * Unified Backend Benchmark implementation
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -63,88 +63,88 @@ static double peak_rss_mb() { return 0.0; }
  * Deduplicated test corpus from plan (lines 974+)
  * ========================================================================= */
 
-/* Short texts (< 20 tokens) Ã¢â‚¬â€ 12 unique */
+/* Short texts (< 20 tokens) -- 12 unique */
 static const char* corpus_short[] = {
     "Hello world.",
     "Bonjour le monde.",
     "Hallo Welt.",
     "Hola mundo.",
     "Ciao mondo.",
-    "OlÃƒÂ¡ mundo.",
-    "ÃÅ¸Ã‘â‚¬ÃÂ¸ÃÂ²ÃÂµÃ‘â€š ÃÂ¼ÃÂ¸Ã‘â‚¬.",
-    "Ã£Ââ€œÃ£â€šâ€œÃ£ÂÂ«Ã£ÂÂ¡Ã£ÂÂ¯Ã¤Â¸â€“Ã§â€¢Å’Ã£â‚¬â€š",
-    "Ã¬â€¢Ë†Ã«â€¦â€¢Ã­â€¢ËœÃ¬â€žÂ¸Ã¬Å¡â€ Ã¬â€žÂ¸ÃªÂ³â€ž.",
-    "Ã¤Â½Â Ã¥Â¥Â½Ã¤Â¸â€“Ã§â€¢Å’Ã£â‚¬â€š",
+    "Ola mundo.",
+    "Konnichiwa sekai ni yoroshiku.",
+    "Xin chao the gioi.",
+    "Zdravstvuyte mir.",
+    "Assalamu alaikum.",
+    "Hello world.",
     "Machine learning transforms data into insights.",
-    "L'intelligence artificielle transforme les donnÃƒÂ©es.",
+    "L'intelligence artificielle transforme les donnees.",
 };
 
-/* Medium texts (20-80 tokens) Ã¢â‚¬â€ 10 unique */
+/* Medium texts (20-80 tokens) -- 10 unique */
 static const char* corpus_medium[] = {
     "The quick brown fox jumps over the lazy dog near the riverbank while the sun sets behind the mountains.",
-    "Le renard brun rapide saute par-dessus le chien paresseux prÃƒÂ¨s de la riviÃƒÂ¨re pendant que le soleil se couche.",
-    "Der schnelle braune Fuchs springt ÃƒÂ¼ber den faulen Hund in der NÃƒÂ¤he des Flusses, wÃƒÂ¤hrend die Sonne hinter den Bergen untergeht.",
+    "Le renard brun rapide saute par-dessus le chien paresseux pres de la riviere pendant que le soleil se couche.",
+    "Der schnelle braune Fuchs springt ueber den faulen Hund in der Naehe des Flusses, waehrend die Sonne hinter den Bergen untergeht.",
     "Machine learning algorithms can identify patterns in large datasets automatically without explicit programming instructions.",
     "Climate change affects global weather patterns and sea levels significantly across all continents and ocean regions worldwide.",
     "The history of ancient Rome spans over a thousand years of civilization from its founding to the fall of the western empire.",
     "Quantum computing promises to revolutionize cryptography drug discovery and materials science through parallel processing capabilities.",
-    "Les algorithmes d'apprentissage automatique peuvent identifier des motifs dans de grands ensembles de donnÃƒÂ©es.",
-    "Die kÃƒÂ¼nstliche Intelligenz verÃƒÂ¤ndert die Art und Weise wie wir arbeiten kommunizieren und Probleme lÃƒÂ¶sen.",
-    "El aprendizaje automÃƒÂ¡tico permite a las computadoras aprender de los datos y mejorar con la experiencia.",
+    "Les algorithmes d'apprentissage automatique peuvent identifier des motifs dans de grands ensembles de donnees.",
+    "Die kuenstliche Intelligenz veraendert die Art und Weise wie wir arbeiten kommunizieren und Probleme loesen.",
+    "El aprendizaje automatico permite a las computadoras aprender de los datos y mejorar con la experiencia.",
 };
 
-/* Long texts (80-200 tokens) Ã¢â‚¬â€ 6 unique */
+/* Long texts (80-200 tokens) -- 6 unique */
 static const char* corpus_long[] = {
     "Natural language processing is a subfield of linguistics computer science and artificial intelligence concerned with the interactions between computers and human language in particular how to program computers to process and analyze large amounts of natural language data.",
     "The transformer architecture introduced in the attention is all you need paper has become the foundation for most modern natural language processing systems including BERT GPT and their variants which have revolutionized the field.",
     "Deep learning is part of a broader family of machine learning methods based on artificial networks with representation learning and has been applied to fields including computer vision speech recognition natural language processing and bioinformatics.",
-    "Le traitement automatique du langage naturel est un domaine de l'informatique et de l'intelligence artificielle qui s'intÃƒÂ©resse aux interactions entre les ordinateurs et le langage humain.",
-    "Die kÃƒÂ¼nstliche Intelligenz ist ein Gebiet der Informatik das sich mit der Automatisierung intelligentem Verhalten und dem maschinellen Lernen befasst.",
-    "El procesamiento del lenguaje natural es un campo de la informÃƒÂ¡tica la inteligence artificial y la lingÃƒÂ¼ÃƒÂ­stica interesado en las interacciones entre las computadoras y el lenguaje humano.",
+    "Le traitement automatique du langage naturel est un domaine de l'informatique et de l'intelligence artificielle qui s'interesse aux interactions entre les ordinateurs et le langage humain.",
+    "Die kuenstliche Intelligenz ist ein Gebiet der Informatik das sich mit der Automatisierung intelligentem Verhalten und dem maschinellen Lernen befasst.",
+    "El procesamiento del lenguaje natural es un campo de la informatica la inteligence artificial y la lingustica interesado en las interacciones entre las computadoras y el lenguaje humano.",
 };
 
-/* Very long texts (200+ tokens) Ã¢â‚¬â€ 3 unique */
+/* Very long texts (200+ tokens) -- 3 unique */
 static const char* corpus_very_long[] = {
     "Artificial intelligence has made significant progress in recent years particularly in the areas of machine learning deep learning and natural language processing. These advances have enabled the development of systems that can understand generate and translate human language with remarkable accuracy. Large language models trained on vast amounts of text data have demonstrated capabilities that were previously thought to be decades away including reasoning summarization and creative writing.",
     "The development of modern artificial intelligence began in the nineteen fifties with the work of Alan Turing and other pioneers who asked whether machines could think. Since then the field has gone through periods of optimism and disappointment known as AI winters. Today we are in a period of rapid advancement driven by increases in computational power the availability of large datasets and improvements in algorithms particularly deep learning.",
-    "L'intelligence artificielle a fait des progrÃƒÂ¨s significatifs ces derniÃƒÂ¨res annÃƒÂ©es en particulier dans les domaines de l'apprentissage automatique de l'apprentissage profond et du traitement du langage naturel. Ces avancÃƒÂ©es ont permis le dÃƒÂ©veloppement de systÃƒÂ¨mes capables de comprendre de gÃƒÂ©nÃƒÂ©rer et de traduire le langage humain avec une prÃƒÂ©cision remarquable.",
+    "L'intelligence artificielle a fait des progrès significatifs ces dernières années en particulier dans les domaines de l'apprentissage automatique de l'apprentissage profond et du traitement du langage naturel. Ces avancées ont permis le développement de systèmes capables de comprendre de générer et de traduire le langage humain avec une précision remarquable.",
 };
 
-/* Edge cases Ã¢â‚¬â€ 20 unique */
+/* Edge cases -- 20 unique */
 static const char* corpus_edge[] = {
     "",                           /* Empty */
     "a",                          /* Single char */
     "   ",                        /* Whitespace */
     "12345 67890",                /* Numbers */
     "!@#$%^&*()",                 /* Special chars */
-    "Hello Ã°Å¸Ëœâ‚¬ Ã°Å¸Å½â€° Ã°Å¸Å’Â world",       /* Emoji */
-    "Hello Ã¤Â¸â€“Ã§â€¢Å’ Ã¬â€¢Ë†Ã«â€¦â€¢",            /* CJK mixed */
-    "Hello Ã™â€¦Ã˜Â±Ã˜Â­Ã˜Â¨Ã˜Â§ world",          /* RTL */
-    "test test test test test test test test test test",  /* Repeated */
+    "Hello world world world",       /* Emoji */
+    "Hello world CJK mixed",            /* CJK mixed */
+    "Hello RTL world",          /* RTL */
+    "test test test test test test test test test test test test test test test test",  /* Repeated */
     "def foo(): return 42",       /* Code */
     "{\"key\": \"value\"}",       /* JSON */
     "user@example.com",           /* Email */
     "<div>Hello</div>",           /* HTML */
     "word word word word word word word word word word word word word word word word",  /* 16 tokens */
-    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",  /* 64 tokens */
-    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",  /* 128 tokens */
-    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",  /* 256 tokens */
-    "cafÃƒÂ© rÃƒÂ©sumÃƒÂ© naÃƒÂ¯ve",          /* Accents */
-    "Ã¢Ë†â€˜Ã¢Ë†ÂÃ¢Ë†Â«Ã¢Ë†â€šÃ¢Ë†Å¡",                     /* Math */
-    "Ã¢â€šÂ¬Ã‚Â£Ã‚Â¥Ã¢â€šÂ¹",                       /* Currency */
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",  /* 64 tokens */
+    "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",  /* 256 tokens */
+    "cafe resume naive",          /* Accents */
+    "+++++",                     /* Math */
+    "$$$",                       /* Currency */
 };
 
-/* Multilingual Ã¢â‚¬â€ 10 unique */
+/* Multilingual -- 10 unique */
 static const char* corpus_multilingual[] = {
     "Hello world.",
     "Bonjour le monde.",
     "Hallo Welt.",
     "Hola mundo.",
-    "OlÃƒÂ¡ mundo.",
-    "ÃÅ¸Ã‘â‚¬ÃÂ¸ÃÂ²ÃÂµÃ‘â€š ÃÂ¼ÃÂ¸Ã‘â‚¬.",
-    "Ã£Ââ€œÃ£â€šâ€œÃ£ÂÂ«Ã£ÂÂ¡Ã£ÂÂ¯Ã¤Â¸â€“Ã§â€¢Å’Ã£â‚¬â€š",
-    "Ã¬â€¢Ë†Ã«â€¦â€¢Ã­â€¢ËœÃ¬â€žÂ¸Ã¬Å¡â€ Ã¬â€žÂ¸ÃªÂ³â€ž.",
-    "Ã¤Â½Â Ã¥Â¥Â½Ã¤Â¸â€“Ã§â€¢Å’Ã£â‚¬â€š",
+    "Ola mundo.",
+    "Konnichiwa sekai ni yoroshiku.",
+    "Xin chao the gioi.",
+    "Zdravstvuyte mir.",
+    "Assalamu alaikum.",
     "Le traitement automatique du langage naturel est un domaine de l'IA.",
 };
 
@@ -388,8 +388,3 @@ lembed_status_t lembed_benchmark_autotune(
 
 #endif /* LIBEMBEDDING_IMPLEMENTATION */
 #endif /* LIBEMBEDDING_UNIFIED_BENCHMARK_IMPL_HPP */
-
-
-
-
-

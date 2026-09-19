@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - detail/embedding_cache_impl.hpp
  * LRU cache implementation for embeddings
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

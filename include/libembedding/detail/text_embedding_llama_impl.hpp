@@ -1,16 +1,10 @@
-﻿/*
+/*
  * libembedding - text_embedding_llama_impl.hpp
  * llama.cpp backend implementation
+ * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.4.0
- *
- * SPDX-License-Identifier: MIT
- */
-/*
- * libembedding - detail/text_embedding_llama_impl.hpp
- * llama.cpp backend for text embedding
- * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,9 +1,7 @@
 """Unit tests for backend auto-detection."""
 
-import os
 import pytest
-
-from libembedding.backend import detect_backend, backend_to_enum
+from libembedding.backend import backend_to_enum, detect_backend
 
 
 @pytest.mark.parametrize(
@@ -51,13 +49,13 @@ def test_detect_backend_local_path_onnx_file(tmp_path):
 def test_backend_to_enum():
     assert backend_to_enum("cpu") == 0
     assert backend_to_enum("onnx") == 0
-    assert backend_to_enum("llama") == 5
-    assert backend_to_enum("llamacpp") == 5
+    assert backend_to_enum("llama") == 1
+    assert backend_to_enum("llamacpp") == 1
     assert backend_to_enum("auto") == 2
     assert backend_to_enum("unknown") == 2
 
 
 def test_backend_to_enum_case_insensitive():
     assert backend_to_enum("CPU") == 0
-    assert backend_to_enum("LLAMA") == 5
+    assert backend_to_enum("LLAMA") == 1
     assert backend_to_enum("Auto") == 2

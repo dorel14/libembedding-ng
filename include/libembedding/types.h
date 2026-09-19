@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - C/C++ Embedding Library (header-only on Linux/macOS, shared lib/DLL on Windows)
  * types.h - Core types, opaque handles, enums, output structures
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -200,6 +200,42 @@ typedef struct {
     uint64_t batches_run;       /* total ONNX inference batches executed */
     double   avg_latency_ms;    /* average wall-clock time per embed() call (ms) */
 } lembed_stats_t;
+
+/* Versioned stats with cache fields — compatible with lembed_stats_t base */
+typedef struct {
+    lembed_stats_t base;
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    int      cache_size;
+} lembed_stats_v2_t;
+
+/* =========================================================================
+ * Versioned Model Descriptor (v2)
+ * Extends lembed_model_desc_t with quantization and cache info.
+ * ========================================================================= */
+typedef struct {
+    lembed_model_desc_t base;
+    int                 quantization; /* lembed_quantization_t */
+    int                 cache_size;   /* LRU cache capacity, 0 = disabled */
+} lembed_model_desc_v2_t;
+
+/* =========================================================================
+ * Versioned Text Embedding Options (v2)
+ * Extends lembed_text_options_t with quantization field.
+ * ========================================================================= */
+typedef struct {
+    lembed_text_options_t base;
+    int                   quantization; /* lembed_quantization_t */
+} lembed_text_options_v2_t;
+
+/* =========================================================================
+ * Versioned Reranker Options (v2)
+ * Extends lembed_reranker_options_t with quantization field.
+ * ========================================================================= */
+typedef struct {
+    lembed_reranker_options_t base;
+    int                       quantization; /* lembed_quantization_t */
+} lembed_reranker_options_v2_t;
 
 /* =========================================================================
  * Opaque Handles

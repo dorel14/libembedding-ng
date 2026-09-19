@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - sparse_text_embedding.h
  * Sparse text embedding C API (SPLADE, BGE-M3)
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

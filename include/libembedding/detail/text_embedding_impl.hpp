@@ -46,8 +46,14 @@ extern "C" {
 #endif
 
 /* =========================================================================
- * Internal struct definition
+ * Internal struct definition - text embedding context (all backends)
  * ========================================================================= */
+/**
+ * @brief Main text embedding context struct.
+ *
+ * Contains ONNX backend (session + tokenizer), llama.cpp backend (session + pool),
+ * pooling/quantization config, runtime metadata, stats counters, and optional LRU cache.
+ */
 struct lembed_text_embedding {
     lembed_backend_t backend_type;
 
@@ -80,6 +86,8 @@ struct lembed_text_embedding {
     /* Stats counters */
     uint64_t texts_embedded = 0;
     uint64_t batches_run = 0;
+    uint64_t cache_hits = 0;
+    uint64_t cache_misses = 0;
     double   total_latency_ms = 0.0;
     int      stats_calls = 0;
 
@@ -100,6 +108,7 @@ struct lembed_text_embedding {
  * Helper functions
  * ========================================================================= */
 static void lembed__text_update_desc(lembed_text_embedding_t* ctx) {
+    /** @brief Update model descriptor fields from context members. */
     if (!ctx) return;
     ctx->desc.name = ctx->model_name_str.c_str();
     ctx->desc.dimension = ctx->dim;
@@ -158,10 +167,11 @@ lembed_status_t lembed_text_embedding_create(
             ctx->output_key = "sentence_embedding";
         }
 
-        std::string onnx_path = model_dir + "/" + info.model_file;
+std::string onnx_path = model_dir + "/" + info.model_file;
         ctx->onnx.session.load_from_file(onnx_path.c_str(),
-                                    options->num_threads,
-                                    (int)options->provider);
+                                        options->num_threads,
+                                        (int)options->provider,
+                                        (int)ctx->quantization);
 
         std::string tok_path = model_dir + "/tokenizer.json";
         ctx->onnx.tokenizer.load_from_file(tok_path, ctx->max_length);
@@ -557,6 +567,20 @@ void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stat
     out->avg_latency_ms = ctx->stats_calls > 0
         ? ctx->total_latency_ms / (double)ctx->stats_calls
         : 0.0;
+}
+
+void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!ctx) return;
+    out->base.texts_embedded = ctx->texts_embedded;
+    out->base.batches_run = ctx->batches_run;
+    out->base.avg_latency_ms = ctx->stats_calls > 0
+        ? ctx->total_latency_ms / (double)ctx->stats_calls
+        : 0.0;
+    out->cache_hits = ctx->cache_hits;
+    out->cache_misses = ctx->cache_misses;
+    out->cache_size = ctx->cache ? ctx->cache->capacity() : 0;
 }
 
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx) {

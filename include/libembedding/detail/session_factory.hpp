@@ -22,9 +22,9 @@
 #include "detail/onnx_session_impl.hpp"
 #include "detail/llama_session_impl.hpp"
 #include "detail/model_loader_impl.hpp"
-#include "model_registry.h"
-#include "downloader.h"
-#include "gguf_registry.h"
+#include "libembedding/model_registry.h"
+#include "libembedding/downloader.h"
+#include "libembedding/gguf_registry.h"
 
 namespace lembed { namespace detail {
 
@@ -61,7 +61,7 @@ inline std::string ensure_onnx_model_dir(
                                  show_progress, offline, &model_dir_cstr);
     if (s != LEMBED_OK) {
         /* Try reranker registry */
-        s = lemembed_ensure_reranker_model((lembed_reranker_model_t)model_enum,
+        s = lembed_ensure_reranker_model((lembed_reranker_model_t)model_enum,
                                           cache_dir, show_progress, offline, &model_dir_cstr);
     }
     if (s != LEMBED_OK) {

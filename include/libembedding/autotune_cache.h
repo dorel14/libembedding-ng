@@ -1,11 +1,11 @@
-﻿/*
+/*
  * libembedding - autotune_cache.h
  * Caching for autotuning results with full fingerprint
  *
  * Cache key = hash of hardware + software + model
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

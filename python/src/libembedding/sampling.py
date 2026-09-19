@@ -24,41 +24,43 @@ def _sample_corpus(texts: list[str], max_size: int = 100) -> list[str]:
         return texts
 
     n_buckets = 10
-    buckets: list[list[str]] = [[] for _ in range(n_buckets)]
+    buckets: list[list[tuple[int, str]]] = [[] for _ in range(n_buckets)]
 
-    for text in texts:
+    for index, text in enumerate(texts):
         word_count = len(text.split())
         if word_count <= 0:
             bucket_idx = 0
         else:
             log_count = math.log10(word_count)
             bucket_idx = min(int(log_count * 2.5), n_buckets - 1)
-        buckets[bucket_idx].append(text)
+        buckets[bucket_idx].append((index, text))
 
     sampled = []
-    sampled_set = set()
-    per_bucket = max_size // n_buckets
+    sampled_indices = set()
+    per_bucket = max(1, max_size // n_buckets)
 
     for bucket in buckets:
         if not bucket:
             continue
         if len(bucket) <= per_bucket:
-            for t in bucket:
-                if t not in sampled_set:
-                    sampled.append(t)
-                    sampled_set.add(t)
+            for index, text in bucket:
+                if index not in sampled_indices:
+                    sampled.append(text)
+                    sampled_indices.add(index)
         else:
             step = len(bucket) / per_bucket
             for i in range(per_bucket):
-                idx = int(i * step)
-                t = bucket[idx]
-                if t not in sampled_set:
-                    sampled.append(t)
-                    sampled_set.add(t)
+                index, text = bucket[int(i * step)]
+                if index not in sampled_indices:
+                    sampled.append(text)
+                    sampled_indices.add(index)
 
     if len(sampled) < max_size:
-        remaining = [t for t in texts if t not in sampled_set]
-        if remaining:
-            sampled.extend(random.sample(remaining, min(max_size - len(sampled), len(remaining))))
+        remaining_indices = [i for i in range(n) if i not in sampled_indices]
+        for index in random.sample(
+            remaining_indices, min(max_size - len(sampled), len(remaining_indices))
+        ):
+            sampled.append(texts[index])
+            sampled_indices.add(index)
 
     return sampled[:max_size]

@@ -21,7 +21,7 @@ add_executable(test_similarity test_similarity.cpp)
 target_link_libraries(test_similarity PRIVATE libembedding)
 add_test(NAME test_similarity COMMAND test_similarity)
 
-# Test local loading (no network required â€” tests error paths)
+# Test local loading (no network required — tests error paths)
 add_executable(test_local_loading test_local_loading.cpp)
 target_link_libraries(test_local_loading PRIVATE libembedding)
 # This test only exercises create_from_path error paths; no download code needed.

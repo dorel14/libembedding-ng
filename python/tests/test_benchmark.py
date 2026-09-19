@@ -1,6 +1,5 @@
 """Unit tests for libembedding benchmark module."""
 
-import pytest
 
 from libembedding.benchmark import (
     Benchmark,
@@ -62,7 +61,9 @@ def test_benchmark_result_str():
 def test_comparison_result_summary():
     results = [
         BenchmarkResult(model_name="a.onnx", backend="onnx", throughput_docs_sec=50.0),
-        BenchmarkResult(model_name="b.gguf", backend="llama.cpp", throughput_docs_sec=80.0),
+        BenchmarkResult(
+            model_name="b.gguf", backend="llama.cpp", throughput_docs_sec=80.0
+        ),
     ]
     comparison = ComparisonResult(results=results)
     comparison.recommendation = results[1]
@@ -99,6 +100,8 @@ def test_benchmark_hardware_cached():
 
 def test_benchmark_compare_all_missing_paths():
     bench = Benchmark()
-    result = bench.compare_all(onnx_path="/nonexistent/onnx", gguf_path="/nonexistent/gguf")
+    result = bench.compare_all(
+        onnx_path="/nonexistent/onnx", gguf_path="/nonexistent/gguf"
+    )
     assert result.results == []
     assert result.recommendation is None

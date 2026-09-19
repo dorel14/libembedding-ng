@@ -10,8 +10,9 @@ def test_reranker_list_supported_models():
     assert len(models) > 0
     assert any("bge-reranker" in m.model_name for m in models)
     for m in models:
-        assert m.dim > 0
+        # Reranker models have dim = 0 (they output scores, not embeddings)
         assert m.model_code
+        assert m.max_tokens > 0
 
 
 def test_reranker_auto_profile_map():
@@ -89,14 +90,18 @@ def test_reranker_auto_config_invalid_objective():
     from libembedding.reranker import reranker_auto_config
 
     with pytest.raises(ValueError, match="Unknown objective"):
-        reranker_auto_config("jinaai/jina-reranker-v1-turbo-en-quantized", objective="invalid")
+        reranker_auto_config(
+            "jinaai/jina-reranker-v1-turbo-en-quantized", objective="invalid"
+        )
 
 
 def test_reranker_autotune_constrained_invalid_objective():
     from libembedding.reranker import reranker_autotune_constrained
 
     with pytest.raises(ValueError, match="Unknown objective"):
-        reranker_autotune_constrained("jinaai/jina-reranker-v1-turbo-en-quantized", objective="invalid")
+        reranker_autotune_constrained(
+            "jinaai/jina-reranker-v1-turbo-en-quantized", objective="invalid"
+        )
 
 
 def test_reranker_auto_config_profile_invalid():
@@ -111,4 +116,4 @@ def test_reranker_info_offline_missing():
     from libembedding.exceptions import LembedError
 
     with pytest.raises(LembedError):
-        Reranker("BAAI/bge-reranker-base", offline=True)
+        Reranker("nonexistent-reranker-model", offline=True)
