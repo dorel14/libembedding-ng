@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - C Header-Only Embedding Library
  * error.h - Error codes and error reporting
  *

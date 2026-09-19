@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - reranker.h
  * Cross-encoder reranker C API (ONNX + llama.cpp backends)
  *

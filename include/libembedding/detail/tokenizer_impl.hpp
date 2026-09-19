@@ -65,14 +65,14 @@ static inline std::vector<std::string> basic_tokenize(const std::string& text) {
             i++;
         } else if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
                    (c >= '[' && c <= '`') || (c >= '{' && c <= '~')) {
-            /* punctuation â€” separate token */
+            /* punctuation — separate token */
             if (!current.empty()) { tokens.push_back(current); current.clear(); }
             current += (char)c;
             tokens.push_back(current);
             current.clear();
             i++;
         } else if (c >= 0x80) {
-            /* multi-byte UTF-8 â€” keep as single token */
+            /* multi-byte UTF-8 — keep as single token */
             if (!current.empty()) { tokens.push_back(current); current.clear(); }
             int bytes = 1;
             if ((c & 0xE0) == 0xC0) bytes = 2;
@@ -377,7 +377,7 @@ private:
                 end--;
             }
             if (!found) {
-                /* Character not in vocab â€” use [UNK] for entire word */
+                /* Character not in vocab — use [UNK] for entire word */
                 if (!found_any) ids.push_back(unk_token_id_);
                 return;
             }

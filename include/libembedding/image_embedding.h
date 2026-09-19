@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - image_embedding.h
  * Image embedding C API
  *

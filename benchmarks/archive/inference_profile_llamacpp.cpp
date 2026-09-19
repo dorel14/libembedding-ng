@@ -1,4 +1,4 @@
-﻿/*
+/*
  * llama.cpp inference profiling — step-by-step breakdown
  * Uses only high-level API (no direct LlamaSession access).
  * Measures: full pipeline at various batch sizes, single-text overhead.

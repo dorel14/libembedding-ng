@@ -64,7 +64,7 @@ typedef struct {
     int         num_errors;
 } lembed_benchmark_metrics_t;
 
-/* Result for one model Ã— backend */
+/* Result for one model × backend */
 typedef struct {
     char        model_name[128];
     char        model_path[512];

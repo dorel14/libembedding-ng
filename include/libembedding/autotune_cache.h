@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - autotune_cache.h
  * Caching for autotuning results with full fingerprint
  *

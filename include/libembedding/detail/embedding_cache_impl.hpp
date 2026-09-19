@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - detail/embedding_cache_impl.hpp
  * LRU cache implementation for embeddings
  *

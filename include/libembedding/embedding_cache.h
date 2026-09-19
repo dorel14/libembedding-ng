@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - embedding_cache.h
  * LRU cache for embeddings
  *

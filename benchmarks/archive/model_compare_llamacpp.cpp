@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Multi-model benchmark for llama.cpp backend
  * Tests multiple small GGUF models and compares throughput.
  * Mirrors the ONNX model_compare.cpp methodology.

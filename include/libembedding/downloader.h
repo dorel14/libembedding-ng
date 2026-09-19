@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - downloader.h
  * Model download C API
  *

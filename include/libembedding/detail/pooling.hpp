@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - detail/pooling.hpp
  * CLS and Mean pooling implementations
  *

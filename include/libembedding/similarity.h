@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - similarity.h
  * Native similarity functions: cosine, dot product, euclidean distance
  *

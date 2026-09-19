@@ -1,4 +1,4 @@
-﻿/*
+/*
  * llama.cpp backend profiling
  * Measures: text length scaling, batch scaling, thread scaling, memory usage
  */

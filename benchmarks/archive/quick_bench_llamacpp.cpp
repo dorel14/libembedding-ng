@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Quick llama.cpp backend benchmark - fast iteration test
  * Uses cached GGUF model, measures throughput at batch sizes 32, 128, 256
  */

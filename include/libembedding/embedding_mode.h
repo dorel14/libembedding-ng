@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - embedding_mode.h
  * Embedding quality/speed modes
  *

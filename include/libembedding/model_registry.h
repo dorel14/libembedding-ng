@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - C Header-Only Embedding Library
  * model_registry.h - Model registry query API
  *

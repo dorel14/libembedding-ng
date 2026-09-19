@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - sparse_text_embedding.h
  * Sparse text embedding C API (SPLADE, BGE-M3)
  *

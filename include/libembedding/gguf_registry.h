@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - gguf_registry.h
  * Recommended GGUF models for llama.cpp backend
  *
