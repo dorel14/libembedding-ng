@@ -1,12 +1,17 @@
 """High-level text embedding API."""
 
+# pyright: reportAttributeAccessIssue=false,reportCallIssue=false
 from __future__ import annotations
 
+import os
 import warnings
 
-import numpy as np
+import numpy as np  # pyright: ignore[reportMissingImports]
 
-from ._binding import ffi, lib
+from ._binding import (  # pyright: ignore[reportAttributeAccessIssue,reportMissingImports]
+    ffi,
+    lib,
+)
 from ._status import check_status
 from .backend import _BACKEND_ENUM
 from .exceptions import ModelNotFoundError
@@ -96,8 +101,6 @@ class TextEmbedding:
                 filename = parts[1]
             else:
                 # Try local path
-                import os
-
                 if os.path.isfile(model_name):
                     repo = ""
                     filename = model_name
@@ -143,12 +146,9 @@ class TextEmbedding:
                 # HuggingFace model code: ensure it is cached
                 idx = resolve_text_model(model_name)
                 if idx < 0:
-                    raise ModelNotFoundError(f"Unknown model: {model_name}")
+                    raise ModelNotFoundError(7, f"Unknown model: {model_name}")
                 info = ffi.new("lembed_model_info_t *")
                 lib.lembed_get_text_model_info(idx, info)
-                code = ffi.string(info.model_code).decode("utf-8")
-                file_name = ffi.string(info.model_file).decode("utf-8")
-
 
                 model_dir = ffi.new("char **")
                 check_status(
@@ -330,8 +330,7 @@ class TextEmbedding:
         for i in range(0, n, actual_bs):
             batch = texts[i : i + actual_bs]
             embeddings = self.embed(batch, batch_size=actual_bs)
-            for emb in embeddings:
-                yield emb
+            yield from embeddings
 
     def close(self) -> None:
         """Release the underlying C resources."""

@@ -97,7 +97,7 @@ public:
         }
 
         /* Execution provider */
-        configure_provider(api, opts, provider);
+        apply_provider_config(api, opts, provider);
         apply_quantization_config(api, opts, quantization);
 
         #if defined(_WIN32) || defined(WIN32)
@@ -135,7 +135,7 @@ public:
             ort_check(api->SetInterOpNumThreads(opts, 1));
         }
 
-        configure_provider(api, opts, provider);
+        apply_provider_config(api, opts, provider);
         apply_quantization_config(api, opts, quantization);
 
         ort_check(api->CreateSessionFromArray(ort_env(), data, size, opts, &session_));
@@ -422,7 +422,7 @@ private:
      * ONNX Runtime provider library installed. We attempt to append
      * the provider and fall back silently to CPU on failure.
      * ========================================================================= */
-    void apply_provider_config(const OrtApi* api, OrtSessionOptions* opts, lembed_execution_provider_t provider) {
+    void apply_provider_config(const OrtApi* api, OrtSessionOptions* opts, int provider) {
 #ifdef ORT_API_VERSION
         switch (provider) {
             case 1: { /* CUDA */

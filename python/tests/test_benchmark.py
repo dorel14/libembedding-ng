@@ -1,6 +1,5 @@
 """Unit tests for libembedding benchmark module."""
 
-
 from libembedding.benchmark import (
     Benchmark,
     BenchmarkResult,

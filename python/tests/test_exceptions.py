@@ -1,6 +1,5 @@
 """Unit tests for libembedding exception hierarchy."""
 
-
 from libembedding.exceptions import (
     BatchSizeError,
     DownloadError,

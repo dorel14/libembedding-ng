@@ -152,6 +152,7 @@ else()
     add_library(libembedding INTERFACE)
     target_link_libraries(libembedding INTERFACE llama ggml)
     target_include_directories(libembedding INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/ggml/include>
     )

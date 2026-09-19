@@ -16,8 +16,8 @@
 #error "This header must be included only when LIBEMBEDDING_IMPLEMENTATION is defined"
 #endif
 
-#include "model_registry.h"
-#include "downloader.h"
+#include "../model_registry.h"
+#include "../downloader.h"
 #include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/tokenizer_impl.hpp"

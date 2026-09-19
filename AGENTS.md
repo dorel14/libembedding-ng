@@ -283,6 +283,7 @@ Les agents doivent :
 
 - [ ] Le code compile en Release et Debug sur au moins une plateforme.
 - [ ] Les tests unitaires passent (`./run_tests.sh`).
+- [ ] Les fichiers python  passent  les tests  ruff sans aucuns problèmes.
 - [ ] La documentation (README, docs/) est à jour.
 - [ ] Les commentaires de code sont présents pour les nouvelles fonctions publiques.
 - [ ] `SPDX-License-Identifier: MIT` est présent dans tous les fichiers modifiés.
