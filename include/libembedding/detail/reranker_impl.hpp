@@ -18,8 +18,8 @@
 
 #include "../model_registry.h"
 #include "../downloader.h"
-#include "detail/model_loader_impl.hpp"
-#include "detail/onnx_session_impl.hpp"
+#include "model_loader_impl.hpp"
+#include "onnx_session_impl.hpp"
 #include "detail/tokenizer_impl.hpp"
 #include "detail/batch.hpp"
 #include "detail/embedding_cache_impl.hpp"
