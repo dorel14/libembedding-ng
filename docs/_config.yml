@@ -11,8 +11,8 @@ description: >-
 # Modern, searchable docs theme (no local gem needed on GitHub Pages).
 remote_theme: just-the-docs/just-the-docs
 
-# Project page lives at https://dorel14.github.io/libembedding/
-baseurl: "/libembedding"
+# Project page lives at https://dorel14.github.io/libembedding-ng/
+baseurl: "/libembedding-ng"
 
 # Keep page URLs deterministic so internal .md -> .html links resolve.
 permalink: none

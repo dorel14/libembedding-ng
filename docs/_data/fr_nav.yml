@@ -1,51 +1,51 @@
 # French Navigation
 - title: Accueil
-  url: /index.html
+  url: index.html
 - title: Démarrage
-  url: /getting_started.html
+  url: getting_started.html
 - title: API Python
-  url: /api_reference.html
+  url: api_reference.html
 - title: Similarité
-  url: /similarity.html
+  url: similarity.html
 - title: Cache LRU
-  url: /python/cache.html
+  url: python/cache.html
 - title: Benchmark
-  url: /python/benchmark.html
+  url: python/benchmark.html
 - title: Backend
-  url: /python/backend.html
+  url: python/backend.html
 - title: Statistiques
-  url: /python/stats.html
+  url: python/stats.html
 - title: Modèles
-  url: /models.html
+  url: models.html
 - title: Performance
-  url: /performance_tuning.html
+  url: performance_tuning.html
 - title: Usage avancé
-  url: /advanced_usage.html
+  url: advanced_usage.html
 - title: C API — Similarité
-  url: /c_api/similarity.html
+  url: c_api/similarity.html
 - title: C API — Modes
-  url: /c_api/embedding_mode.html
+  url: c_api/embedding_mode.html
 - title: C API — Cache
-  url: /c_api/embedding_cache.html
+  url: c_api/embedding_cache.html
 - title: C API — Cache Autotune
-  url: /c_api/autotune_cache.html
+  url: c_api/autotune_cache.html
 - title: C API — Téléchargement
-  url: /c_api/downloader.html
+  url: c_api/downloader.html
 - title: C API — llama.cpp
-  url: /c_api/llamacpp_backend.html
+  url: c_api/llamacpp_backend.html
 - title: C API — Erreurs
-  url: /c_api/error.html
+  url: c_api/error.html
 - title: C API — Config
-  url: /c_api/config.html
+  url: c_api/config.html
 - title: C API — Sélection modèle
-  url: /c_api/model_selector.html
+  url: c_api/model_selector.html
 - title: C API — Auto-tuneur
-  url: /c_api/autotuner.html
+  url: c_api/autotuner.html
 - title: C API — Workers
-  url: /c_api/worker_autotune.html
+  url: c_api/worker_autotune.html
 - title: C API — Benchmark
-  url: /c_api/embedding_benchmark.html
+  url: c_api/embedding_benchmark.html
 - title: C API — GGUF Registry
-  url: /c_api/gguf_registry.html
+  url: c_api/gguf_registry.html
 - title: Documentation anglaise
-  url: /en/index.html
+  url: en/index.html

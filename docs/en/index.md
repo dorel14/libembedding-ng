@@ -4,7 +4,7 @@ nav_exclude: true
 
 # Home
 
-> **Français:** [Accueil](index.html)
+> **Français:** [Accueil](../index.html)
 
 libembedding is a C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
 
