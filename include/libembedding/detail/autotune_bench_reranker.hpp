@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - detail/autotune_bench_reranker.hpp
  * Reranker auto-tuner
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

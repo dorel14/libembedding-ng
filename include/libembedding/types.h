@@ -3,7 +3,7 @@
  * types.h - Core types, opaque handles, enums, output structures
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -200,6 +200,14 @@ typedef struct {
     uint64_t batches_run;       /* total ONNX inference batches executed */
     double   avg_latency_ms;    /* average wall-clock time per embed() call (ms) */
 } lembed_stats_t;
+
+/* Versioned stats with cache fields — compatible with lembed_stats_t base */
+typedef struct {
+    lembed_stats_t base;
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    int      cache_size;
+} lembed_stats_v2_t;
 
 /* =========================================================================
  * Opaque Handles

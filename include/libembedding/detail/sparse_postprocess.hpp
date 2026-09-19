@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - detail/sparse_postprocess.hpp
  * SPLADE and BGE-M3 sparse embedding postprocessing
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

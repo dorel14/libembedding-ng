@@ -1,6 +1,5 @@
 """Unit tests for corpus sampling utilities."""
 
-import pytest
 
 from libembedding.sampling import _sample_corpus
 

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * libembedding - detail/tokenizer_impl.hpp
  * Built-in HuggingFace tokenizer.json parser (WordPiece + BPE)
  * No external Rust/tokenizers-cpp dependency required.
@@ -8,7 +8,7 @@
  * - BPE (GPT/Sentencepiece-style: nomic, jina, CLIP, etc.)
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

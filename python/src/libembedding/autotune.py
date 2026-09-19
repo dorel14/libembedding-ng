@@ -5,12 +5,16 @@ from __future__ import annotations
 from ._binding import ffi, lib
 from ._status import check_status
 from .models import resolve_text_model
-from .types import TuningResult, ModelSelectionResult, UnifiedTuningResult
 from .sampling import _sample_corpus
+from .types import ModelSelectionResult, TuningResult, UnifiedTuningResult
 
 
-def _do_autotune(model_name: str, provider: str = "cpu",
-                 texts: list[str] | None = None, max_sample_size: int = 100) -> TuningResult:
+def _do_autotune(
+    model_name: str,
+    provider: str = "cpu",
+    texts: list[str] | None = None,
+    max_sample_size: int = 100,
+) -> TuningResult:
     """Run autotune with cache lookup."""
     model_idx = resolve_text_model(model_name)
     if model_idx >= 0:
@@ -29,13 +33,16 @@ def _do_autotune(model_name: str, provider: str = "cpu",
         for i, t in enumerate(sampled):
             c_strs.append(ffi.new("char[]", t.encode("utf-8")))
             c_texts[i] = c_strs[i]
-        check_status(lib.lembed_autotune_custom(
-            code.encode("utf-8"), c_texts, n,
-            lib.LEMBED_AUTOTUNE_QUICK, result))
+        check_status(
+            lib.lembed_autotune_custom(
+                code.encode("utf-8"), c_texts, n, lib.LEMBED_AUTOTUNE_QUICK, result
+            )
+        )
     else:
         result = ffi.new("lembed_tuning_result_t *")
-        check_status(lib.lembed_autotune(
-            code.encode("utf-8"), lib.LEMBED_AUTOTUNE_QUICK, result))
+        check_status(
+            lib.lembed_autotune(code.encode("utf-8"), lib.LEMBED_AUTOTUNE_QUICK, result)
+        )
 
     return TuningResult(
         workers=result.workers,
@@ -86,7 +93,7 @@ def autotune(
 
 def auto_select_model(
     use_case: str = "balanced",
-) -> "ModelSelectionResult":
+) -> ModelSelectionResult:
     """Automatically select the best model and configuration for your hardware.
 
     Args:
@@ -130,7 +137,7 @@ def autotune_unified(
     model_name: str = None,
     *,
     full: bool = False,
-) -> "UnifiedTuningResult":
+) -> UnifiedTuningResult:
     """Unified auto-tune entry point for all task types.
 
     Args:
@@ -159,7 +166,9 @@ def autotune_unified(
         }
         model_name = defaults.get(task)
         if model_name is None:
-            raise ValueError(f"No default model for task '{task}'. Please specify model_name.")
+            raise ValueError(
+                f"No default model for task '{task}'. Please specify model_name."
+            )
 
     mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
     result = ffi.new("lembed_unified_tuning_result_t *")
@@ -172,7 +181,11 @@ def autotune_unified(
             lib.lembed_get_text_model_info(idx, info)
             resolved_name = ffi.string(info.model_code).decode("utf-8")
 
-    check_status(lib.lembed_autotune_unified(task_map[task], resolved_name.encode("utf-8"), mode, result))
+    check_status(
+        lib.lembed_autotune_unified(
+            task_map[task], resolved_name.encode("utf-8"), mode, result
+        )
+    )
 
     return UnifiedTuningResult(
         task=task,

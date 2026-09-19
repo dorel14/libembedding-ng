@@ -1,7 +1,7 @@
 """Model name resolution and registry queries.
 
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 """
 
 import os
@@ -29,6 +29,7 @@ _POOLING_NAMES = {0: "cls", 1: "mean"}
 _POOLING_ENUM = {v: k for k, v in _POOLING_NAMES.items()}
 
 _QUANTIZATION_NAMES = {0: "none", 1: "static", 2: "dynamic"}
+_QUANTIZATION_ENUM = {"none": 0, "static": 1, "dynamic": 2}
 
 
 def _model_info_from_c(info) -> ModelInfo:
@@ -44,6 +45,24 @@ def _model_info_from_c(info) -> ModelInfo:
     )
 
 
+def _matches_model(model_name: str, name: str, code: str) -> bool:
+    wanted = model_name.strip().lower().replace("\\", "/")
+    wanted_key = wanted.replace("-", "").replace("_", "")
+    candidates = (
+        name.strip().lower().replace("\\", "/"),
+        code.strip().lower().replace("\\", "/"),
+    )
+    if wanted in candidates:
+        return True
+    for candidate in candidates:
+        candidate_key = candidate.replace("-", "").replace("_", "")
+        if candidate.rsplit("/", 1)[-1] == wanted.rsplit("/", 1)[-1]:
+            return True
+        if wanted_key in candidate_key:
+            return True
+    return False
+
+
 def resolve_text_model(model_name: str) -> int:
     idx = lib.lembed_find_text_model_by_code(model_name.encode("utf-8"))
     if idx >= 0:
@@ -52,9 +71,13 @@ def resolve_text_model(model_name: str) -> int:
     count_ptr = ffi.new("int *")
     check_status(lib.lembed_list_text_models(models_ptr, count_ptr))
     for i in range(count_ptr[0]):
-        if ffi.string(models_ptr[0][i].model_name).decode() == model_name:
+        name = ffi.string(models_ptr[0][i].model_name).decode()
+        code = ffi.string(models_ptr[0][i].model_code).decode()
+        if _matches_model(model_name, name, code):
             return i
-    raise ModelNotFoundError(7, "Model not found", f"No text model matching '{model_name}'")
+    raise ModelNotFoundError(
+        7, "Model not found", f"No text model matching '{model_name}'"
+    )
 
 
 def resolve_sparse_model(model_name: str) -> int:
@@ -65,9 +88,13 @@ def resolve_sparse_model(model_name: str) -> int:
     count_ptr = ffi.new("int *")
     check_status(lib.lembed_list_sparse_models(models_ptr, count_ptr))
     for i in range(count_ptr[0]):
-        if ffi.string(models_ptr[0][i].model_name).decode() == model_name:
+        name = ffi.string(models_ptr[0][i].model_name).decode()
+        code = ffi.string(models_ptr[0][i].model_code).decode()
+        if _matches_model(model_name, name, code):
             return i
-    raise ModelNotFoundError(7, "Model not found", f"No sparse model matching '{model_name}'")
+    raise ModelNotFoundError(
+        7, "Model not found", f"No sparse model matching '{model_name}'"
+    )
 
 
 def resolve_image_model(model_name: str) -> int:
@@ -77,9 +104,11 @@ def resolve_image_model(model_name: str) -> int:
     for i in range(count_ptr[0]):
         name = ffi.string(models_ptr[0][i].model_name).decode()
         code = ffi.string(models_ptr[0][i].model_code).decode()
-        if model_name in (name, code):
+        if _matches_model(model_name, name, code):
             return i
-    raise ModelNotFoundError(7, "Model not found", f"No image model matching '{model_name}'")
+    raise ModelNotFoundError(
+        7, "Model not found", f"No image model matching '{model_name}'"
+    )
 
 
 def resolve_reranker_model(model_name: str) -> int:
@@ -89,9 +118,11 @@ def resolve_reranker_model(model_name: str) -> int:
     for i in range(count_ptr[0]):
         name = ffi.string(models_ptr[0][i].model_name).decode()
         code = ffi.string(models_ptr[0][i].model_code).decode()
-        if model_name in (name, code):
+        if _matches_model(model_name, name, code):
             return i
-    raise ModelNotFoundError(7, "Model not found", f"No reranker model matching '{model_name}'")
+    raise ModelNotFoundError(
+        7, "Model not found", f"No reranker model matching '{model_name}'"
+    )
 
 
 def _list_models(list_fn) -> list[ModelInfo]:
@@ -117,9 +148,19 @@ def list_reranker_models() -> list[ModelInfo]:
     return _list_models(lib.lembed_list_reranker_models)
 
 
-def _desc_from_c(desc_ptr) -> ModelDesc:
-    """Convert a C lembed_model_desc_t pointer to ModelDesc."""
-    name = ffi.string(desc_ptr.name).decode("utf-8", errors="replace") if desc_ptr.name else ""
+def _desc_from_c(desc_ptr, desc_v2_ptr=None) -> ModelDesc:
+    """Convert a C descriptor pointer to ModelDesc."""
+    quantization = _QUANTIZATION_NAMES.get(0, "none")
+    cache_size = 0
+    if desc_v2_ptr is not None:
+        quantization = _QUANTIZATION_NAMES.get(desc_v2_ptr.quantization, "none")
+        cache_size = desc_v2_ptr.cache_size
+        desc_ptr = desc_v2_ptr.base
+    name = (
+        ffi.string(desc_ptr.name).decode("utf-8", errors="replace")
+        if desc_ptr.name
+        else ""
+    )
     return ModelDesc(
         name=name,
         dimension=desc_ptr.dimension,
@@ -129,17 +170,19 @@ def _desc_from_c(desc_ptr) -> ModelDesc:
         batch_size=desc_ptr.batch_size,
         provider=_PROVIDER_NAMES.get(desc_ptr.provider, "unknown"),
         device_id=desc_ptr.device_id,
+        quantization=quantization,
+        cache_size=cache_size,
     )
 
 
 def _is_local_path(model_name: str) -> bool:
-    """True if the given string looks like an existing local directory path or GGUF file."""
-    if model_name.endswith(".gguf"):
-        return os.path.isfile(model_name)
+    """True if the given string looks like a local model path or file."""
+    lowered = model_name.lower()
+    if lowered.endswith((".gguf", ".onnx", ".json")):
+        return True
     return os.path.exists(model_name)
 
 
 def _is_gguf_model(model_name: str) -> bool:
     """True if the model name looks like a GGUF file path."""
     return model_name.endswith((".gguf", ".GGUF"))
-

@@ -1,14 +1,51 @@
+# English Navigation
 - title: Home
   url: /en/index.html
 - title: Getting started
   url: /en/getting_started.html
 - title: Python API Reference
   url: /en/api_reference.html
+- title: Similarity Functions
+  url: /en/similarity.html
+- title: Embedding Cache
+  url: /en/python/cache.html
+- title: Unified Benchmark
+  url: /en/python/benchmark.html
+- title: Backend Detection
+  url: /en/python/backend.html
+- title: Runtime Statistics
+  url: /en/python/stats.html
 - title: Available models
   url: /en/models.html
 - title: Performance Tuning
   url: /en/performance_tuning.html
 - title: Advanced usage
   url: /en/advanced_usage.html
+- title: C API — Similarity
+  url: /en/c_api/similarity.html
+- title: C API — Embedding Modes
+  url: /en/c_api/embedding_mode.html
+- title: C API — Embedding Cache
+  url: /en/c_api/embedding_cache.html
+- title: C API — Autotune Cache
+  url: /en/c_api/autotune_cache.html
+- title: C API — Model Downloading
+  url: /en/c_api/downloader.html
+- title: C API — llama.cpp Backend
+  url: /en/c_api/llamacpp_backend.html
+- title: C API — Error Codes
+  url: /en/c_api/error.html
+- title: C API — Config
+  url: /en/c_api/config.html
+- title: C API — Model Selection
+  url: /en/c_api/model_selector.html
+- title: C API — Autotuner
+  url: /en/c_api/autotuner.html
+- title: C API — Worker Auto-Tune
+  url: /en/c_api/worker_autotune.html
+- title: C API — Benchmark
+  url: /en/c_api/embedding_benchmark.html
+- title: C API — GGUF Registry
+  url: /en/c_api/gguf_registry.html
 - title: Documentation française
   url: /index.html

@@ -19,6 +19,9 @@ sed -i 's/^#define LIBEMBEDDING_VERSION_STRING "[0-9.]*"$/#define LIBEMBEDDING_V
 # Update CMakeLists.txt project VERSION
 sed -i 's/^    VERSION [0-9][0-9.]*$/    VERSION '"${VERSION}"'/' CMakeLists.txt
 
+# Update CMakeLists.txt version variable
+sed -i 's/^set(LIBEMBEDDING_VERSION "[0-9][0-9.]*")$/set(LIBEMBEDDING_VERSION "'"${VERSION}"'")/' CMakeLists.txt
+
 # Update all C/C++ header version comments
 find include -type f \( -name "*.h" -o -name "*.hpp" \) -not -path "*/third_party/*" | while read -r f; do
     sed -i 's/^ \* Version: [0-9][0-9.]*/ * Version: '"${VERSION}"'/' "$f"

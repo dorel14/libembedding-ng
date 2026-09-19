@@ -26,6 +26,8 @@ class TextEmbeddingPool:
         offline: Same as TextEmbedding.
         autotune: If True, auto-tune workers/threads/batch.
         autotune_texts: Optional list of texts for autotune benchmark.
+        cache_size: Size of LRU embedding cache per worker (0 = disabled).
+        quantization: Override quantization mode ("none", "static", "dynamic").
     """
 
     def __init__(
@@ -45,15 +47,22 @@ class TextEmbeddingPool:
         autotune: bool = False,
         autotune_texts: list[str] | None = None,
         autotune_max_samples: int = 100,
+        cache_size: int = 0,
+        quantization: str | None = None,
     ):
         if autotune:
-            tuned = _do_autotune(model_name, provider,
-                                 texts=autotune_texts,
-                                 max_sample_size=autotune_max_samples)
+            tuned = _do_autotune(
+                model_name,
+                provider,
+                texts=autotune_texts,
+                max_sample_size=autotune_max_samples,
+            )
             n_workers = tuned.workers
             threads_per_worker = tuned.threads
             batch_size = tuned.batch_size
-            print(f"Autotune: {n_workers} workers x {threads_per_worker} threads, batch={batch_size}")
+            print(
+                f"Autotune: {n_workers} workers x {threads_per_worker} threads, batch={batch_size}"
+            )
         else:
             n_workers = workers
             if n_workers <= 0:
@@ -75,6 +84,8 @@ class TextEmbeddingPool:
                 max_length=max_length,
                 dim=dim,
                 pooling=pooling,
+                cache_size=cache_size,
+                quantization=quantization,
             )
             self._workers.append(worker)
 

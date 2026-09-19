@@ -123,7 +123,7 @@ for m in libembedding.list_text_models():
 
 ---
 
-## Image models (5 models)
+## Image models (6 models)
 
 | HuggingFace name | Dim | Description |
 |------------------|-----|-------------|

@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - model_selector.h
  * Automatic model selection based on hardware and use case
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

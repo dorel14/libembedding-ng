@@ -1,9 +1,9 @@
-﻿/*
+/*
  * libembedding - detail/status_helper.hpp
  * Common error handling helpers for C++ wrappers
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

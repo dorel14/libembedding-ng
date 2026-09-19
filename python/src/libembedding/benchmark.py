@@ -11,17 +11,15 @@ Usage:
     result = bench.autotune("path/to/model.gguf", "llama.cpp")
     print(result)
 Auteur: David Orel
-Version: 1.4.0
+Version: 1.6.0
 
 """
-
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Optional
 
 from ._binding import ffi, lib
 from ._status import check_status
@@ -29,17 +27,19 @@ from ._status import check_status
 
 class CorpusType(IntEnum):
     """Test corpus categories."""
-    SHORT = 0        # < 20 tokens
-    MEDIUM = 1       # 20-80 tokens
-    LONG = 2         # 80-200 tokens
-    VERY_LONG = 3    # 200+ tokens
-    MIXED = 4        # All lengths
-    MULTILINGUAL = 5 # Multi-language
-    EDGE_CASES = 6   # Edge cases
+
+    SHORT = 0  # < 20 tokens
+    MEDIUM = 1  # 20-80 tokens
+    LONG = 2  # 80-200 tokens
+    VERY_LONG = 3  # 200+ tokens
+    MIXED = 4  # All lengths
+    MULTILINGUAL = 5  # Multi-language
+    EDGE_CASES = 6  # Edge cases
 
 
 class Objective(IntEnum):
     """Optimization objectives (must match autotuner.h)."""
+
     LATENCY = 0
     THROUGHPUT = 1
     BALANCED = 2
@@ -49,6 +49,7 @@ class Objective(IntEnum):
 @dataclass
 class Metrics:
     """Benchmark metrics for one run."""
+
     throughput_docs_sec: float = 0.0
     latency_p50_ms: float = 0.0
     latency_p95_ms: float = 0.0
@@ -61,7 +62,8 @@ class Metrics:
 
 @dataclass
 class BenchmarkResult:
-    """Result for one model Ã— backend combination."""
+    """Result for one model x backend combination."""
+
     model_name: str
     backend: str
     throughput_docs_sec: float = 0.0
@@ -86,8 +88,9 @@ class BenchmarkResult:
 @dataclass
 class ComparisonResult:
     """Full comparison results with recommendation."""
+
     results: list[BenchmarkResult] = field(default_factory=list)
-    recommendation: Optional[BenchmarkResult] = None
+    recommendation: BenchmarkResult | None = None
 
     def summary(self) -> str:
         """Generate formatted comparison table."""
@@ -108,14 +111,16 @@ class ComparisonResult:
                 f"{r.peak_memory_mb:>8.0f}"
             )
         if self.recommendation:
-            lines.extend([
-                "-" * 72,
-                f"Recommendation: {os.path.basename(self.recommendation.model_name)} "
-                f"[{self.recommendation.backend}]",
-                f"  Throughput: {self.recommendation.throughput_docs_sec:.1f} docs/s",
-                f"  Latency p50: {self.recommendation.latency_p50_ms:.2f} ms",
-                f"  Memory: {self.recommendation.peak_memory_mb:.0f} MB",
-            ])
+            lines.extend(
+                [
+                    "-" * 72,
+                    f"Recommendation: {os.path.basename(self.recommendation.model_name)} "
+                    f"[{self.recommendation.backend}]",
+                    f"  Throughput: {self.recommendation.throughput_docs_sec:.1f} docs/s",
+                    f"  Latency p50: {self.recommendation.latency_p50_ms:.2f} ms",
+                    f"  Memory: {self.recommendation.peak_memory_mb:.0f} MB",
+                ]
+            )
         lines.append("=" * 72)
         return "\n".join(lines)
 
@@ -123,6 +128,7 @@ class ComparisonResult:
 @dataclass
 class HardwareInfo:
     """Detected hardware information."""
+
     cpu_name: str
     physical_cores: int
     logical_cores: int
@@ -163,7 +169,7 @@ class Benchmark:
     """
 
     def __init__(self):
-        self._hardware: Optional[HardwareInfo] = None
+        self._hardware: HardwareInfo | None = None
 
     @property
     def hardware(self) -> HardwareInfo:
@@ -180,12 +186,14 @@ class Benchmark:
     ) -> BenchmarkResult:
         """Auto-tune a backend for a model."""
         result = ffi.new("lembed_benchmark_result_t*")
-        check_status(lib.lembed_benchmark_autotune(
-            model_path.encode(),
-            backend.encode(),
-            int(objective),
-            result,
-        ))
+        check_status(
+            lib.lembed_benchmark_autotune(
+                model_path.encode(),
+                backend.encode(),
+                int(objective),
+                result,
+            )
+        )
         return BenchmarkResult(
             model_name=ffi.string(result.model_name).decode(),
             backend=ffi.string(result.backend).decode(),
@@ -214,13 +222,15 @@ class Benchmark:
         config.workers = 1
 
         result = ffi.new("lembed_benchmark_result_t*")
-        check_status(lib.lembed_benchmark_run(
-            model_path.encode(),
-            backend.encode(),
-            int(corpus),
-            config,
-            result,
-        ))
+        check_status(
+            lib.lembed_benchmark_run(
+                model_path.encode(),
+                backend.encode(),
+                int(corpus),
+                config,
+                result,
+            )
+        )
         return BenchmarkResult(
             model_name=ffi.string(result.model_name).decode(),
             backend=ffi.string(result.backend).decode(),
@@ -235,8 +245,8 @@ class Benchmark:
 
     def compare_all(
         self,
-        onnx_path: Optional[str] = None,
-        gguf_path: Optional[str] = None,
+        onnx_path: str | None = None,
+        gguf_path: str | None = None,
         objective: Objective = Objective.BALANCED,
     ) -> ComparisonResult:
         """Compare all available backends for a model."""
@@ -260,11 +270,16 @@ class Benchmark:
     def sweep(
         self,
         models: dict[str, str],
-        corpora: Optional[list[CorpusType]] = None,
+        corpora: list[CorpusType] | None = None,
     ) -> dict[str, list[BenchmarkResult]]:
         """Run benchmark sweep across models and corpora."""
         if corpora is None:
-            corpora = [CorpusType.SHORT, CorpusType.MEDIUM, CorpusType.LONG, CorpusType.MIXED]
+            corpora = [
+                CorpusType.SHORT,
+                CorpusType.MEDIUM,
+                CorpusType.LONG,
+                CorpusType.MIXED,
+            ]
 
         results = {}
         for name, path in models.items():
@@ -284,4 +299,3 @@ class Benchmark:
                 model_results.append(result)
             results[name] = model_results
         return results
-

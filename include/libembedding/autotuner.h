@@ -3,7 +3,7 @@
  * Auto-tuning for optimal embedding performance
  *
  * Auteur: David Orel
- * Version: 1.4.0
+ * Version: 1.6.0
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,20 +1,18 @@
 """Unit tests for libembedding dataclasses."""
 
 import numpy as np
-import pytest
-
 from libembedding.types import (
-    SparseEmbedding,
-    RerankResult,
-    ModelInfo,
+    ImageTuningResult,
     ModelDesc,
+    ModelInfo,
+    ModelSelectionResult,
+    RerankerTuningResult,
+    RerankResult,
+    SparseEmbedding,
+    SparseTuningResult,
     Stats,
     TuningResult,
-    RerankerTuningResult,
-    SparseTuningResult,
-    ImageTuningResult,
     UnifiedTuningResult,
-    ModelSelectionResult,
 )
 
 
