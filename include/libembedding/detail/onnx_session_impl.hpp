@@ -409,18 +409,20 @@ private:
                 break;
         }
     }
-        (void)api; (void)opts; (void)provider;
-        /* Provider configuration:
-         * 0 = CPU (default, no extra setup needed)
-         * 1 = CUDA
-         * 2 = CoreML
-         * 3 = DirectML
-         * 4 = TensorRT
-         *
-         * For non-CPU providers, the user must have the corresponding
-         * ONNX Runtime provider library installed. We attempt to append
-         * the provider and fall back silently to CPU on failure.
-         */
+
+    /* =========================================================================
+     * Provider configuration
+     * 0 = CPU (default, no extra setup needed)
+     * 1 = CUDA
+     * 2 = CoreML
+     * 3 = DirectML
+     * 4 = TensorRT
+     *
+     * For non-CPU providers, the user must have the corresponding
+     * ONNX Runtime provider library installed. We attempt to append
+     * the provider and fall back silently to CPU on failure.
+     * ========================================================================= */
+    void apply_provider_config(const OrtApi* api, OrtSessionOptions* opts, lembed_execution_provider_t provider) {
 #ifdef ORT_API_VERSION
         switch (provider) {
             case 1: { /* CUDA */

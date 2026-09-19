@@ -15,7 +15,7 @@
 #include <string>
 
 #include "cJSON.h"
-#include "detail/downloader_impl.hpp"
+#include "downloader_impl.hpp"
 
 namespace lembed { namespace detail {
 
