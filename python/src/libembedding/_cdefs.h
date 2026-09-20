@@ -408,6 +408,10 @@ void lembed_embeddings_free(lembed_embeddings_t* result);
 void lembed_sparse_embeddings_free(lembed_sparse_embeddings_t* result);
 void lembed_rerank_results_free(lembed_rerank_results_t* result);
 
+/* Versioned option defaults */
+lembed_text_options_v2_t lembed_text_options_default_v2(void);
+lembed_reranker_options_v2_t lembed_reranker_options_default_v2(void);
+
 /* â”€â”€ Autotuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 typedef enum {

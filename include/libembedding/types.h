@@ -388,6 +388,10 @@ void lembed_embeddings_free(lembed_embeddings_t* result);
 void lembed_sparse_embeddings_free(lembed_sparse_embeddings_t* result);
 void lembed_rerank_results_free(lembed_rerank_results_t* result);
 
+/* Versioned option defaults */
+lembed_text_options_v2_t lembed_text_options_default_v2(void);
+lembed_reranker_options_v2_t lembed_reranker_options_default_v2(void);
+
 #ifdef __cplusplus
 }
 #endif
@@ -451,6 +455,22 @@ lembed_reranker_options_t lembed_reranker_options_default(void) {
     opts.llama_n_gpu_layers = 0;
     opts.auto_workers = 0;
     opts.cache_size = 0;
+    return opts;
+}
+
+lembed_text_options_v2_t lembed_text_options_default_v2(void) {
+    lembed_text_options_v2_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.base = lembed_text_options_default();
+    opts.quantization = LEMBED_QUANTIZATION_NONE;
+    return opts;
+}
+
+lembed_reranker_options_v2_t lembed_reranker_options_default_v2(void) {
+    lembed_reranker_options_v2_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.base = lembed_reranker_options_default();
+    opts.quantization = LEMBED_QUANTIZATION_NONE;
     return opts;
 }
 
