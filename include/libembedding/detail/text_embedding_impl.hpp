@@ -200,7 +200,7 @@ lembed_status_t lembed_text_embedding_create_v2(
     lembed_status_t s = lembed_text_embedding_create(&options->base, out);
     if (s != LEMBED_OK || !*out) return s;
 
-    (*out)->quantization = options->quantization;
+    (*out)->quantization = (lembed_quantization_t)options->quantization;
     return LEMBED_OK;
 }
 
