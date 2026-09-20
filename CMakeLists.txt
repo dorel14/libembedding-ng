@@ -136,7 +136,11 @@ if(WIN32)
     # add it here instead of ""
     add_library(libembedding SHARED "${CMAKE_CURRENT_SOURCE_DIR}/python/csrc/libembedding_shlib.cpp")
 
-    set_target_properties(libembedding PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+    # Use explicit .def file for exports instead of WINDOWS_EXPORT_ALL_SYMBOLS
+    # This allows LTCG (/GL /LTCG) to be used if desired
+    set_target_properties(libembedding PROPERTIES
+        LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/libembedding.def"
+    )
 
     # Force CMake to accept a shared library without initial source files
     # car elle va lier ONNXRuntime et CURL
@@ -163,10 +167,9 @@ add_library(libembedding::libembedding ALIAS libembedding)
 # =========================================================================
 # CPU Optimizations
 # =========================================================================
-# Note: /GL (whole-program opt) and /LTCG are intentionally omitted on MSVC
-# because they are incompatible with WINDOWS_EXPORT_ALL_SYMBOLS, which
-# CMake needs to parse object files to auto-generate the export definition.
-# To use LTCG, provide an explicit .def file instead.
+# Note: /GL (whole-program opt) and /LTCG can now be used on MSVC
+# because we use an explicit .def file for exports instead of
+# WINDOWS_EXPORT_ALL_SYMBOLS.
 if(MSVC)
     target_compile_options(libembedding PRIVATE
         $<$<CONFIG:Release>:/O2>

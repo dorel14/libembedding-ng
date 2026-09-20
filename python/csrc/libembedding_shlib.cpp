@@ -1,10 +1,22 @@
 #define LIBEMBEDDING_IMPLEMENTATION
 #include <libembedding/libembedding.h>
 
+#ifdef _MSC_VER
+/* These headers contain C++ inline helpers in namespace lembed::detail.
+ * MSVC emits C4190 because they are included while the umbrella header
+ * opens extern "C" — false positive, the functions are not C-linkage. */
+#pragma warning(push)
+#pragma warning(disable: 4190)
+#endif
+
 /* Autotuner C API implementation */
 #include "libembedding/detail/autotuner_impl.hpp"
 #include "libembedding/detail/autotune_bench_text.hpp"
 #include "libembedding/detail/autotune_cache.hpp"
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #include <cstdio>
 

@@ -14,30 +14,29 @@
 #include "../autotune_cache.h"
 #include "../config.h"
 #include "cJSON.h"
+#include "autotune_cache.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <intrin.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace lembed {
 namespace detail {
 
-static std::string cache_dir() {
-    const char* home = getenv("USERPROFILE");
-    if (!home) home = getenv("HOME");
-    if (!home) home = ".";
-    return std::string(home) + "/.cache/libembedding";
-}
-
 static std::string cache_file() {
-    return cache_dir() + "/tune_cache.json";
+    return autotune_cache_dir() + "/tune_cache.json";
 }
 
 static std::string read_file(const std::string& path) {
@@ -242,8 +241,3 @@ lembed_status_t lembed_tune_cache_clear(void) {
 
 #endif /* LIBEMBEDDING_IMPLEMENTATION */
 #endif /* LIBEMBEDDING_AUTOTUNE_CACHE_IMPL_HPP */
-
-
-
-
-

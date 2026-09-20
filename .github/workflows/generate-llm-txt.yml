@@ -1,39 +1,23 @@
 name: Generate LLM Documentation
 
-# Generates llm.txt and llm_full.txt at the repository root so that the
-# project documentation is easily consumable by LLMs and indexing bots.
-#
-# Triggers:
-#   - push to main when docs/README/script/workflow files change
-#   - pull_request to main
-#   - workflow_dispatch (manual)
-
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
       - 'docs/**'
       - 'README.md'
       - 'examples/**'
-      - 'python/pyproject.toml'
-      - 'include/libembedding/config.h'
       - 'scripts/generate_llm_docs.py'
       - '.github/workflows/generate-llm-txt.yml'
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  generate:
-    name: Generate llm.txt / llm_full.txt
+  generate-llm-txt:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # needed to push generated files back to the repo
-      pull-requests: write   # comment on PRs if the files are outdated
-
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -42,35 +26,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate llm.txt and llm_full.txt
+      - name: Generate llm.txt / llm_full.txt
         run: python scripts/generate_llm_docs.py
 
-      - name: Commit or report (push to main)
-        if: github.event_name == 'push'
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          # Only commit if there are actual changes
-          git add llm.txt llm_full.txt
-          if ! git diff --quiet --staged; then
-            git commit -m "docs: auto-update llm.txt / llm_full.txt [skip ci]"
-            git push origin HEAD:${{ github.ref }}
-          else
-            echo "No changes to commit — llm.txt and llm_full.txt are up to date."
-          fi
-
-      - name: Comment on PR if files changed
-        if: github.event_name == 'pull_request'
+      - name: Commit generated files
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add llm.txt llm_full.txt
-          if ! git diff --quiet --staged; then
-            git commit -m "docs: update llm.txt / llm_full.txt [skip ci]"
-            git push origin HEAD:${{ github.head_ref }}
-
-            # Show the diff summary as a PR comment
-            git diff --stat HEAD~1 HEAD || true
-          else
-            echo "No changes — llm.txt and llm_full.txt are up to date."
-          fi
+          git diff --quiet && git diff --staged --quiet || (git commit -m "docs: regenerate llm.txt / llm_full.txt [skip ci]" && git push origin main)

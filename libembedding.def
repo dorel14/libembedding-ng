@@ -1,0 +1,8 @@
+LIBRARY "libembedding"
+EXPORTS
+    ; Version
+    lembed_version
+
+    ; Error handling
+    lembed_status_message
+    lembed_last_error
