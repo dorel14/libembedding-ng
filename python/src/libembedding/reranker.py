@@ -423,7 +423,8 @@ def reranker_auto_config(
 
 def clear_reranker_autotune_cache(model_name: str | None = None) -> None:
     """Clear reranker autotune cache for a model (or all models if None)."""
-    lib.lembed_reranker_autotune_clear_cache(
+    lib.lembed_autotune_unified_clear_cache(
+        lib.LEMBED_TASK_RERANKING,
         model_name.encode("utf-8") if model_name else ffi.NULL
     )
 

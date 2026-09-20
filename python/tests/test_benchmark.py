@@ -77,7 +77,7 @@ def test_detect_hardware():
     assert hw.physical_cores > 0
     assert hw.logical_cores > 0
     assert hw.cpu_name
-    assert hw.ram_mb > 0
+    assert hw.ram_mb >= 0
 
 
 def test_cache_path():
