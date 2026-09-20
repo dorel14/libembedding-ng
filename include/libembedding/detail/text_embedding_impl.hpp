@@ -185,6 +185,21 @@ std::string onnx_path = model_dir + "/" + info.model_file;
     }
 }
 
+/* =========================================================================
+ * Create (v2 - with explicit quantization override)
+ * ========================================================================= */
+lembed_status_t lembed_text_embedding_create_v2(
+        const lembed_text_options_v2_t* options,
+        lembed_text_embedding_t** out) {
+    if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    lembed_status_t s = lembed_text_embedding_create(&options->base, out);
+    if (s != LEMBED_OK || !*out) return s;
+
+    (*out)->quantization = options->quantization;
+    return LEMBED_OK;
+}
+
 lembed_status_t lembed_text_embedding_create_custom(
         const lembed_user_defined_model_t* model,
         lembed_execution_provider_t provider,
@@ -549,6 +564,10 @@ int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx) {
 
 const lembed_model_desc_t* lembed_text_embedding_desc(const lembed_text_embedding_t* ctx) {
     return ctx ? &ctx->desc : nullptr;
+}
+
+const lembed_model_desc_v2_t* lembed_text_embedding_desc_v2(const lembed_text_embedding_t* ctx) {
+    return ctx ? &ctx->desc_v2 : nullptr;
 }
 
 const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx) {

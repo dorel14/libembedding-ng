@@ -28,6 +28,8 @@ namespace lembed { namespace detail {
  * Unified Auto-Tuner Implementation
  * ========================================================================= */
 
+extern "C" {
+
 lembed_status_t lembed_autotune_unified(
     lembed_task_t task,
     const char* model_name,
@@ -96,7 +98,11 @@ lembed_status_t lembed_autotune_unified(
         default:
             return LEMBED_ERROR_INVALID_ARGUMENT;
     }
-}
+} /* lembed_autotune_unified */
+
+} /* extern "C" */
+
+extern "C" {
 
 lembed_status_t lembed_autotune_unified_config(
     lembed_task_t task,
@@ -154,7 +160,7 @@ lembed_status_t lembed_autotune_unified_config(
         default:
             return LEMBED_ERROR_INVALID_ARGUMENT;
     }
-}
+} /* lembed_autotune_unified_config */
 
 void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name) {
     switch (task) {
@@ -168,7 +174,9 @@ void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_n
         case LEMBED_TASK_SPARSE:
             break;
     }
-}
+} /* lembed_autotune_unified_clear_cache */
+
+} /* extern "C" */
 
 }} /* namespace lembed::detail */
 
