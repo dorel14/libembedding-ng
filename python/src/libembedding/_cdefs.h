@@ -1,6 +1,6 @@
 /* Flattened C declarations for cffi — derived from libembedding public headers.
  * No preprocessor directives, no C++ constructs.
- * Synced with headers in include/libembedding/ (v1.4.0). */
+ * Synced with headers in include/libembedding/ (v1.6.0). */
 
 /* â”€â”€ Error handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
@@ -155,10 +155,23 @@ typedef struct {
 } lembed_model_desc_t;
 
 typedef struct {
+    lembed_model_desc_t base;
+    int                 quantization; /* lembed_quantization_t */
+    int                 cache_size;   /* LRU cache capacity, 0 = disabled */
+} lembed_model_desc_v2_t;
+
+typedef struct {
     uint64_t texts_embedded;
     uint64_t batches_run;
     double   avg_latency_ms;
 } lembed_stats_t;
+
+typedef struct {
+    lembed_stats_t base;
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    int      cache_size;
+} lembed_stats_v2_t;
 
 typedef struct lembed_text_embedding    lembed_text_embedding_t;
 typedef struct lembed_sparse_embedding  lembed_sparse_embedding_ctx_t;
@@ -214,6 +227,11 @@ typedef struct {
     int                         batch_strategy; /* lembed_batch_strategy_t (ONNX only) */
 } lembed_text_options_t;
 
+typedef struct {
+    lembed_text_options_t base;
+    int                   quantization; /* lembed_quantization_t */
+} lembed_text_options_v2_t;
+
 typedef enum {
     LEMBED_MODE_FAST = 0,
     LEMBED_MODE_BALANCED = 1,
@@ -257,6 +275,11 @@ typedef struct {
 } lembed_reranker_options_t;
 
 typedef struct {
+    lembed_reranker_options_t base;
+    int                       quantization; /* lembed_quantization_t */
+} lembed_reranker_options_v2_t;
+
+typedef struct {
     lembed_sparse_model_t       model;
     lembed_execution_provider_t provider;
     int                         device_id;
@@ -293,6 +316,7 @@ lembed_reranker_options_t lembed_reranker_options_default(void);
 /* â”€â”€ Functions: Text embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 lembed_status_t lembed_text_embedding_create(const lembed_text_options_t* options, lembed_text_embedding_t** out);
+lembed_status_t lembed_text_embedding_create_v2(const lembed_text_options_v2_t* options, lembed_text_embedding_t** out);
 lembed_status_t lembed_text_embedding_create_custom(const lembed_user_defined_model_t* model, lembed_execution_provider_t provider, int num_threads, lembed_text_embedding_t** out);
 lembed_status_t lembed_text_embedding_create_from_path(const char* dir_path, const lembed_text_options_t* options, lembed_text_embedding_t** out);
 lembed_status_t lembed_text_embedding_create_from_gguf_path(const char* gguf_path, const lembed_text_options_t* options, lembed_text_embedding_t** out);
@@ -301,9 +325,11 @@ lembed_status_t lembed_text_embedding_embed(lembed_text_embedding_t* ctx, const 
 lembed_status_t lembed_text_embedding_embed_stream(lembed_text_embedding_t* ctx, const char* const* texts, int num_texts, int batch_size, void (*callback)(const float* embedding, int dim, void* userdata), void* userdata);
 int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx);
 const lembed_model_desc_t* lembed_text_embedding_desc(const lembed_text_embedding_t* ctx);
+const lembed_model_desc_v2_t* lembed_text_embedding_desc_v2(const lembed_text_embedding_t* ctx);
 const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx);
 int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx);
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out);
+void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
 
 /* â”€â”€ Functions: Sparse text embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -333,14 +359,17 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 /* â”€â”€ Functions: Reranker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 lembed_status_t lembed_reranker_create(const lembed_reranker_options_t* options, lembed_reranker_t** out);
+lembed_status_t lembed_reranker_create_v2(const lembed_reranker_options_v2_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_create_from_path(const char* path, const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_create_from_gguf_path(const char* gguf_path, const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_create_from_gguf_model(const char* repo, const char* filename, const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_rerank(lembed_reranker_t* ctx, const char* query, const char* const* documents, int num_documents, int batch_size, lembed_rerank_results_t* result);
 const lembed_model_desc_t* lembed_reranker_desc(const lembed_reranker_t* ctx);
+const lembed_model_desc_v2_t* lembed_reranker_desc_v2(const lembed_reranker_t* ctx);
 const char* lembed_reranker_model_name(const lembed_reranker_t* ctx);
 int lembed_reranker_max_length(const lembed_reranker_t* ctx);
 void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out);
+void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* out);
 void lembed_reranker_free(lembed_reranker_t* ctx);
 
 /* â”€â”€ Functions: Model registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -391,9 +420,9 @@ typedef struct {
     int workers;
     int threads;
     int batch_size;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
 } lembed_tuning_result_t;
 
 /* Run auto-tuning for a text embedding model.
@@ -440,9 +469,9 @@ typedef struct {
     int threads;
     int batch_size;
     int max_tokens;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
     double p95_latency_ms;
 } lembed_reranker_tuning_result_t;
 
@@ -512,10 +541,10 @@ typedef struct {
     int top_k;
     float min_weight;
     int storage_format;
-    float throughput_docs_sec;
-    float latency_ms;
+    double throughput_docs_sec;
+    double latency_ms;
     double p95_latency_ms;
-    float memory_mb;
+    double memory_mb;
 } lembed_unified_tuning_result_t;
 
 lembed_status_t lembed_autotune_unified(
@@ -540,9 +569,9 @@ typedef struct {
     int storage_format;
     int threads;
     int batch_size;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
 } lembed_sparse_tuning_result_t;
 
 lembed_status_t lembed_sparse_autotune(
@@ -555,9 +584,9 @@ lembed_status_t lembed_sparse_autotune(
 typedef struct {
     int threads;
     int batch_size;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
 } lembed_image_tuning_result_t;
 
 lembed_status_t lembed_image_autotune(

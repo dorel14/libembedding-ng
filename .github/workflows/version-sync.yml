@@ -1,9 +1,11 @@
 name: Version Sync Check
 
+# Runs on PRs to verify C/Python versions are consistent.
+# On main, version sync is handled by semantic-release + sync_version.sh
+# and verified in the release workflow after tests pass.
+
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
   workflow_call:
 
@@ -46,8 +48,7 @@ jobs:
             echo "  C API (config.h):        $C"
             echo "  CMake (CMakeLists.txt):  $CMAKE"
             echo ""
-            echo "Run the version sync script to fix:"
-            echo "  bash scripts/sync_version.sh ${PY}"
+            echo "All version locations must be updated together."
             exit 1
           fi
           echo "All versions match: ${PY}"

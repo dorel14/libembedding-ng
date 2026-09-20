@@ -219,23 +219,6 @@ typedef struct {
     int                 cache_size;   /* LRU cache capacity, 0 = disabled */
 } lembed_model_desc_v2_t;
 
-/* =========================================================================
- * Versioned Text Embedding Options (v2)
- * Extends lembed_text_options_t with quantization field.
- * ========================================================================= */
-typedef struct {
-    lembed_text_options_t base;
-    int                   quantization; /* lembed_quantization_t */
-} lembed_text_options_v2_t;
-
-/* =========================================================================
- * Versioned Reranker Options (v2)
- * Extends lembed_reranker_options_t with quantization field.
- * ========================================================================= */
-typedef struct {
-    lembed_reranker_options_t base;
-    int                       quantization; /* lembed_quantization_t */
-} lembed_reranker_options_v2_t;
 
 /* =========================================================================
  * Opaque Handles
@@ -311,6 +294,15 @@ typedef struct {
     int                         batch_strategy; /* lembed_batch_strategy_t (ONNX only) */
 } lembed_text_options_t;
 
+/* =========================================================================
+ * Versioned Text Embedding Options (v2)
+ * Extends lembed_text_options_t with quantization field.
+ * ========================================================================= */
+typedef struct {
+    lembed_text_options_t base;
+    int                   quantization; /* lembed_quantization_t */
+} lembed_text_options_v2_t;
+
 /* Batching strategy for ONNX backend */
 typedef enum {
     LEMBED_BATCH_SEQUENTIAL = 0,    /* One text at a time (no batching) */
@@ -365,6 +357,15 @@ typedef struct {
     int                         auto_workers;   /* 1 = auto-detect optimal workers/sessions */
     int                         cache_size;     /* 0 = disabled, >0 = LRU cache capacity */
 } lembed_reranker_options_t;
+
+/* =========================================================================
+ * Versioned Reranker Options (v2)
+ * Extends lembed_reranker_options_t with quantization field.
+ * ========================================================================= */
+typedef struct {
+    lembed_reranker_options_t base;
+    int                       quantization; /* lembed_quantization_t */
+} lembed_reranker_options_v2_t;
 
 /* User-defined model (bring-your-own ONNX) */
 typedef struct {

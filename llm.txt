@@ -1,0 +1,138 @@
+# libembedding-ng
+
+> Version 1.6.0 — C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
+
+**Local-first embedding and reranking engine for C/C++ and Python.**
+
+libembedding provides a unified runtime for ONNX Runtime and llama.cpp models,
+supporting dense embeddings, sparse embeddings, image embeddings and reranking
+through a single API. It is published on PyPI as `libembedding-ng` and is a
+fork of [pacifio/libembedding](https://github.com/pacifio/libembedding).
+
+## Key features
+
+- **Text embeddings** — 44 text models (dense), ONNX + GGUF/llama.cpp
+- **Sparse embeddings** — SPLADE++, BGE-M3 sparse
+- **Image embeddings** — CLIP, ResNet, Unicom, Nomic Vision
+- **Reranking** — BGE, Jina rerankers
+- **Auto-tuning** — find optimal workers, threads, batch size
+- **LRU Cache** — thread-safe cache for frequent embeddings
+- **Multi-backend** — ONNX Runtime + llama.cpp
+- **Similarity** — cosine, dot product, Euclidean
+- **Production helpers** — session pooling, streaming, benchmarking
+
+## Installation (Python)
+
+```bash
+pip install libembedding-ng
+```
+
+The PyPI wheel bundles ONNX Runtime, libcurl, and (optionally) llama.cpp
+as a self-contained shared library.
+
+## Quick start (Python)
+
+```python
+from libembedding import TextEmbedding, SparseTextEmbedding, Reranker
+import numpy as np
+
+# Dense text embeddings
+model = TextEmbedding("BAAI/bge-small-en-v1.5")
+embeddings = model.embed(["The cat sat on the mat", "A kitten on a rug"])
+similarity = np.dot(embeddings[0], embeddings[1])  # 0.82
+
+# Sparse embeddings (SPLADE)
+sparse = SparseTextEmbedding()
+results = sparse.embed(["machine learning"])
+
+# Reranking
+reranker = Reranker("BAAI/bge-reranker-base")
+ranked = reranker.rerank("What is deep learning?", ["Deep learning uses neural networks", "The weather is sunny today"])
+```
+
+## Quick start (C)
+
+```c
+#include <libembedding/text_embedding.h>
+
+lembed_text_options_t opts = lembed_text_options_default();
+lembed_text_embedding_t* embedder = NULL;
+lembed_text_embedding_create(&opts, &embedder);
+
+const char* texts[] = { "Hello world", "How are you?" };
+lembed_embeddings_t result = {0};
+lembed_text_embedding_embed(embedder, texts, 2, 0, &result);
+// result.data = float[2][384], L2-normalized
+
+lembed_embeddings_free(&result);
+lembed_text_embedding_free(embedder);
+```
+
+## English documentation
+
+- [Getting started](https://dorel14.github.io/libembedding-ng/en/getting_started.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/getting_started.md)
+- [Python API Reference](https://dorel14.github.io/libembedding-ng/en/api_reference.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/api_reference.md)
+- [Available models](https://dorel14.github.io/libembedding-ng/en/models.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/models.md)
+- [Performance Tuning](https://dorel14.github.io/libembedding-ng/en/performance_tuning.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/performance_tuning.md)
+- [Advanced usage](https://dorel14.github.io/libembedding-ng/en/advanced_usage.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/advanced_usage.md)
+- [Similarity Functions](https://dorel14.github.io/libembedding-ng/en/similarity.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/similarity.md)
+- [Embedding Cache (LRU)](https://dorel14.github.io/libembedding-ng/en/python/cache.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/python/cache.md)
+- [Unified Benchmark](https://dorel14.github.io/libembedding-ng/en/python/benchmark.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/python/benchmark.md)
+- [Backend Detection](https://dorel14.github.io/libembedding-ng/en/python/backend.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/python/backend.md)
+- [Runtime Statistics](https://dorel14.github.io/libembedding-ng/en/python/stats.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/python/stats.md)
+- [Similarity C API](https://dorel14.github.io/libembedding-ng/en/c_api/similarity.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/similarity.md)
+- [Embedding Modes C API](https://dorel14.github.io/libembedding-ng/en/c_api/embedding_mode.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/embedding_mode.md)
+- [Embedding Cache C API](https://dorel14.github.io/libembedding-ng/en/c_api/embedding_cache.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/embedding_cache.md)
+- [Autotune Cache C API](https://dorel14.github.io/libembedding-ng/en/c_api/autotune_cache.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/autotune_cache.md)
+- [Model Downloading C API](https://dorel14.github.io/libembedding-ng/en/c_api/downloader.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/downloader.md)
+- [llama.cpp Backend C API](https://dorel14.github.io/libembedding-ng/en/c_api/llamacpp_backend.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/llamacpp_backend.md)
+- [Error Codes C API](https://dorel14.github.io/libembedding-ng/en/c_api/error.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/error.md)
+- [Configuration and Version C API](https://dorel14.github.io/libembedding-ng/en/c_api/config.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/config.md)
+- [Automatic Model Selection C API](https://dorel14.github.io/libembedding-ng/en/c_api/model_selector.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/model_selector.md)
+- [Autotuner C API](https://dorel14.github.io/libembedding-ng/en/c_api/autotuner.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/autotuner.md)
+- [Worker Auto-Tune C API](https://dorel14.github.io/libembedding-ng/en/c_api/worker_autotune.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/worker_autotune.md)
+- [Benchmark C API](https://dorel14.github.io/libembedding-ng/en/c_api/embedding_benchmark.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/embedding_benchmark.md)
+- [GGUF Registry C API](https://dorel14.github.io/libembedding-ng/en/c_api/gguf_registry.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/en/c_api/gguf_registry.md)
+
+## Documentation française
+
+- [Démarrage rapide](https://dorel14.github.io/libembedding-ng/getting_started.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/getting_started.md)
+- [Référence API Python](https://dorel14.github.io/libembedding-ng/api_reference.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/api_reference.md)
+- [Modèles disponibles](https://dorel14.github.io/libembedding-ng/models.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/models.md)
+- [Performance Tuning](https://dorel14.github.io/libembedding-ng/performance_tuning.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/performance_tuning.md)
+- [Usage avancé](https://dorel14.github.io/libembedding-ng/advanced_usage.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/advanced_usage.md)
+- [Fonctions de similarité](https://dorel14.github.io/libembedding-ng/similarity.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/similarity.md)
+- [Cache d'embeddings LRU](https://dorel14.github.io/libembedding-ng/python/cache.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/python/cache.md)
+- [Benchmark unifié](https://dorel14.github.io/libembedding-ng/python/benchmark.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/python/benchmark.md)
+- [Auto-détection de backend](https://dorel14.github.io/libembedding-ng/python/backend.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/python/backend.md)
+- [Statistiques runtime](https://dorel14.github.io/libembedding-ng/python/stats.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/python/stats.md)
+- [Similarité C API](https://dorel14.github.io/libembedding-ng/c_api/similarity.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/similarity.md)
+- [Modes d'embedding C API](https://dorel14.github.io/libembedding-ng/c_api/embedding_mode.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/embedding_mode.md)
+- [Cache LRU C API](https://dorel14.github.io/libembedding-ng/c_api/embedding_cache.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/embedding_cache.md)
+- [Cache d'autotune C API](https://dorel14.github.io/libembedding-ng/c_api/autotune_cache.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/autotune_cache.md)
+- [Téléchargement de modèles C API](https://dorel14.github.io/libembedding-ng/c_api/downloader.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/downloader.md)
+- [Backend llama.cpp C API](https://dorel14.github.io/libembedding-ng/c_api/llamacpp_backend.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/llamacpp_backend.md)
+- [Codes d'erreur C API](https://dorel14.github.io/libembedding-ng/c_api/error.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/error.md)
+- [Configuration et version C API](https://dorel14.github.io/libembedding-ng/c_api/config.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/config.md)
+- [Sélection automatique de modèle C API](https://dorel14.github.io/libembedding-ng/c_api/model_selector.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/model_selector.md)
+- [Auto-tuneur C API](https://dorel14.github.io/libembedding-ng/c_api/autotuner.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/autotuner.md)
+- [Auto-tune workers C API](https://dorel14.github.io/libembedding-ng/c_api/worker_autotune.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/worker_autotune.md)
+- [Benchmark C API](https://dorel14.github.io/libembedding-ng/c_api/embedding_benchmark.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/embedding_benchmark.md)
+- [Registre de modèles GGUF C API](https://dorel14.github.io/libembedding-ng/c_api/gguf_registry.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/gguf_registry.md)
+
+## Code examples
+
+- [Python: example.py](https://github.com/dorel14/libembedding/blob/main/examples/python/example.py)
+- [C++: basic_embedding.cpp](https://github.com/dorel14/libembedding/blob/main/examples/cpp/basic_embedding.cpp)
+- [C++: batch_embedding.cpp](https://github.com/dorel14/libembedding/blob/main/examples/cpp/batch_embedding.cpp)
+- [C++: pool_example.cpp](https://github.com/dorel14/libembedding/blob/main/examples/cpp/pool_example.cpp)
+
+## Repository
+
+- **GitHub**: [https://github.com/dorel14/libembedding](https://github.com/dorel14/libembedding)
+- **PyPI**: [https://pypi.org/project/libembedding-ng/](https://pypi.org/project/libembedding-ng/)
+- **Documentation**: [https://dorel14.github.io/libembedding-ng/](https://dorel14.github.io/libembedding-ng/)
+- **License**: MIT (fork of pacifio/libembedding)
+
+---
+*This file is auto-generated by `scripts/generate_llm_docs.py`. The full documentation is in [`llm_full.txt`](llm_full.txt).*

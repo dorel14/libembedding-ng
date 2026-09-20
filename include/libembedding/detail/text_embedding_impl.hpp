@@ -82,6 +82,7 @@ struct lembed_text_embedding {
     lembed_execution_provider_t provider;
     int device_id;
     lembed_model_desc_t desc;
+    lembed_model_desc_v2_t desc_v2;
 
     /* Stats counters */
     uint64_t texts_embedded = 0;
@@ -118,6 +119,9 @@ static void lembed__text_update_desc(lembed_text_embedding_t* ctx) {
     ctx->desc.batch_size = ctx->batch_size;
     ctx->desc.provider = ctx->provider;
     ctx->desc.device_id = ctx->device_id;
+    ctx->desc_v2.base = ctx->desc;
+    ctx->desc_v2.quantization = (int)ctx->quantization;
+    ctx->desc_v2.cache_size = ctx->cache ? (int)ctx->cache->capacity() : 0;
 }
 
 #include "text_embedding_llama_impl.hpp"
@@ -183,6 +187,21 @@ std::string onnx_path = model_dir + "/" + info.model_file;
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
+}
+
+/* =========================================================================
+ * Create (v2 - with explicit quantization override)
+ * ========================================================================= */
+lembed_status_t lembed_text_embedding_create_v2(
+        const lembed_text_options_v2_t* options,
+        lembed_text_embedding_t** out) {
+    if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    lembed_status_t s = lembed_text_embedding_create(&options->base, out);
+    if (s != LEMBED_OK || !*out) return s;
+
+    (*out)->quantization = (lembed_quantization_t)options->quantization;
+    return LEMBED_OK;
 }
 
 lembed_status_t lembed_text_embedding_create_custom(
@@ -549,6 +568,10 @@ int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx) {
 
 const lembed_model_desc_t* lembed_text_embedding_desc(const lembed_text_embedding_t* ctx) {
     return ctx ? &ctx->desc : nullptr;
+}
+
+const lembed_model_desc_v2_t* lembed_text_embedding_desc_v2(const lembed_text_embedding_t* ctx) {
+    return ctx ? &ctx->desc_v2 : nullptr;
 }
 
 const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx) {

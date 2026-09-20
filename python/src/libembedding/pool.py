@@ -115,7 +115,9 @@ class TextEmbeddingPool:
             if start < end:
                 chunks.append(texts[start:end])
 
-        results: list[np.ndarray] = [None] * len(chunks)
+        results: list[np.ndarray] = [
+            np.empty((0, self._dim), dtype=np.float32) for _ in range(len(chunks))
+        ]
 
         def embed_chunk(idx: int, chunk: list[str]) -> None:
             results[idx] = self._workers[idx].embed(chunk)

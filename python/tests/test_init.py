@@ -1,7 +1,6 @@
 """Smoke tests for libembedding package imports and version."""
 
 
-
 def test_package_import():
     import libembedding
 

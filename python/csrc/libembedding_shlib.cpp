@@ -80,3 +80,28 @@ lembed_status_t lembed_auto_select_model(
 void lembed_autotune_clear_cache(const char* model_name) {
     lembed::detail::clear_autotune_cache(model_name);
 }
+
+/* C-linkage wrappers for autotune unified API (exported from shared lib) */
+extern "C" {
+
+lembed_status_t lembed_autotune_unified(
+        lembed_task_t task,
+        const char* model_name,
+        lembed_autotune_mode_t mode,
+        lembed_unified_tuning_result_t* result) {
+    return lembed::detail::lembed_autotune_unified(task, model_name, mode, result);
+}
+
+lembed_status_t lembed_autotune_unified_config(
+        lembed_task_t task,
+        const char* model_name,
+        double target_latency_ms,
+        lembed_unified_tuning_result_t* result) {
+    return lembed::detail::lembed_autotune_unified_config(task, model_name, target_latency_ms, result);
+}
+
+void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name) {
+    lembed::detail::lembed_autotune_unified_clear_cache(task, model_name);
+}
+
+} /* extern "C" */

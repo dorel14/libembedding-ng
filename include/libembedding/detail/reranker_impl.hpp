@@ -16,13 +16,13 @@
 #error "This header must be included only when LIBEMBEDDING_IMPLEMENTATION is defined"
 #endif
 
-#include "model_registry.h"
-#include "downloader.h"
-#include "detail/model_loader_impl.hpp"
-#include "detail/onnx_session_impl.hpp"
-#include "detail/tokenizer_impl.hpp"
-#include "detail/batch.hpp"
-#include "detail/embedding_cache_impl.hpp"
+#include "../model_registry.h"
+#include "../downloader.h"
+#include "model_loader_impl.hpp"
+#include "onnx_session_impl.hpp"
+#include "tokenizer_impl.hpp"
+#include "batch.hpp"
+#include "embedding_cache_impl.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -77,7 +77,7 @@ struct lembed_reranker {
     lembed::detail::LRUCache* cache = nullptr;
 };
 
-#include "detail/reranker_llama_impl.hpp"
+#include "reranker_llama_impl.hpp"
 
 static bool lembed__path_ends_with_gguf(const char* path) {
     if (!path) return false;

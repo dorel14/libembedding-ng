@@ -15,6 +15,9 @@ name: Release
 # "[skip ci]" marker is put on the bump commit so the push-back to `main`
 # cannot re-trigger this workflow.
 
+# Flow: check (lint+encoding) → test (C++ + Python) → version (semantic-release) → build → publish
+# Version is determined AFTER tests pass.
+
 on:
   push:
     branches: [main]
@@ -29,115 +32,13 @@ concurrency:
 
 jobs:
   # -----------------------------------------------------------------------
-  # 1) Determine the next version and create the release (tag + GH release)
+  # 1) Fast static checks (encoding, lint) — run first, no system deps needed
   # -----------------------------------------------------------------------
-  version:
-    name: Semantic Release
+  check:
+    name: Static checks
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
-      version: ${{ steps.resolve.outputs.version }}
-      released: ${{ steps.resolve.outputs.released }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install semantic-release
-        run: |
-          python -m pip install --upgrade pip
-          # IMPORTANT: gitpython >= 3.1.60 removed Actor.name_email_regex which
-          # python-semantic-release 9.x still references, crashing every run.
-          # Pinning gitpython<3.1.60 is the documented upstream workaround.
-          pip install "python-semantic-release==9.21.2" "gitpython<3.1.60"
-
-      - name: Detect next release
-        id: detect
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          NEXT="$(semantic-release version --print 2>/dev/null || true)"
-          LAST="$(semantic-release version --print-last-released 2>/dev/null || true)"
-          echo "detected_next=${NEXT}" >> "$GITHUB_ENV"
-          echo "detected_last=${LAST}" >> "$GITHUB_ENV"
-          if [[ "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$NEXT" != "$LAST" ]; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "version=$NEXT" >> "$GITHUB_OUTPUT"
-            echo "Next release: ${NEXT} (last: ${LAST})"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "No release needed on this push (next=${NEXT}, last=${LAST})."
-          fi
-
-      - name: Create release
-        id: resolve
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ "${{ steps.detect.outputs.released }}" = "true" ]; then
-            NEXT="${{ steps.detect.outputs.version }}"
-            echo "Stamping version ${NEXT} with python-semantic-release..."
-            semantic-release version
-            echo "Syncing version ${NEXT} to remaining headers/comments..."
-            bash scripts/sync_version.sh "${NEXT}"
-            # The bump commit is tagged vX.Y.Z - capture it for downstream jobs.
-            TAG="$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1)"
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "version=${NEXT}" >> "$GITHUB_OUTPUT"
-            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-            echo "Created release: ${TAG}"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "No release needed on this push."
-          fi
-
-  # -----------------------------------------------------------------------
-  # 1.5) Preflight checks before building wheels
-  # -----------------------------------------------------------------------
-  preflight:
-    name: Preflight checks
-    needs: version
-    if: needs.version.outputs.released == 'true'
-    runs-on: ubuntu-latest
-    env:
-      ONNXRUNTIME_VERSION: "1.20.1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.version.outputs.tag }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install cffi numpy pytest pytest-timeout ruff pyright
-
-      - name: Version sync check
-        run: |
-          PY=$(grep -oP '^version = "\K[^"]+' python/pyproject.toml)
-          C=$(grep -oP 'LIBEMBEDDING_VERSION_STRING "\K[^"]+' include/libembedding/config.h)
-          CMAKE=$(grep -oP '^\s*VERSION\s+\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
-          if [ -z "$CMAKE" ]; then
-            CMAKE=$(grep -oP 'set\(LIBEMBEDDING_VERSION "\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
-          fi
-          if [ "$PY" != "$C" ] || [ "$PY" != "$CMAKE" ]; then
-            echo "Version mismatch! PY=$PY C=$C CMAKE=$CMAKE"
-            exit 1
-          fi
 
       - name: Encoding check
         run: |
@@ -148,8 +49,22 @@ jobs:
 
       - name: Lint and typecheck Python sources
         run: |
+          python -m pip install --upgrade pip
+          pip install ruff pyright
           ruff check python/src
           pyright python/src
+
+  # -----------------------------------------------------------------------
+  # 2) Run tests BEFORE version bump
+  # -----------------------------------------------------------------------
+  test:
+    name: Tests
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      ONNXRUNTIME_VERSION: "1.20.1"
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
@@ -188,12 +103,96 @@ jobs:
           pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
 
   # -----------------------------------------------------------------------
-  # 2) Build the platform wheels for every supported OS (matrix)
+  # 3) Determine the next version and create the release (AFTER tests pass)
+  # -----------------------------------------------------------------------
+  version:
+    name: Semantic Release
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      released: ${{ steps.resolve.outputs.released }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install semantic-release
+        run: |
+          python -m pip install --upgrade pip
+          # v10.5.0+ supports operand-less version_variables (needed for CMake/config.h)
+          # v10.6.0+ supports file replacement via * pattern
+          pip install "python-semantic-release>=10.6.0"
+
+      - name: Detect next release
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEXT="$(semantic-release version --print 2>/dev/null || true)"
+          LAST="$(semantic-release version --print-last-released 2>/dev/null || true)"
+          echo "detected_next=${NEXT}" >> "$GITHUB_ENV"
+          echo "detected_last=${LAST}" >> "$GITHUB_ENV"
+          if [[ "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$NEXT" != "$LAST" ]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+            echo "Next release: ${NEXT} (last: ${LAST})"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "No release needed on this push (next=${NEXT}, last=${LAST})."
+          fi
+
+      - name: Create release
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.detect.outputs.released }}" = "true" ]; then
+            NEXT="${{ steps.detect.outputs.version }}"
+            echo "Stamping version ${NEXT} with python-semantic-release..."
+            semantic-release version
+            echo "Syncing version ${NEXT} to remaining headers/comments..."
+            bash scripts/sync_version.sh "${NEXT}"
+            # Verify all versions match after bump
+            PY=$(grep -oP '^version = "\K[^"]+' python/pyproject.toml)
+            C=$(grep -oP 'LIBEMBEDDING_VERSION_STRING "\K[^"]+' include/libembedding/config.h)
+            CMAKE=$(grep -oP '^\s*VERSION\s+\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+            if [ -z "$CMAKE" ]; then
+              CMAKE=$(grep -oP 'set\(LIBEMBEDDING_VERSION "\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
+            fi
+            if [ "$PY" != "$C" ] || [ "$PY" != "$CMAKE" ]; then
+              echo "Version mismatch after bump! PY=$PY C=$C CMAKE=$CMAKE"
+              exit 1
+            fi
+            echo "All versions synced: ${PY}"
+            # The bump commit is tagged vX.Y.Z - capture it for downstream jobs.
+            TAG="$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1)"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=${NEXT}" >> "$GITHUB_OUTPUT"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "Created release: ${TAG}"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "No release needed on this push."
+          fi
+
+  # -----------------------------------------------------------------------
+  # 4) Build the platform wheels for every supported OS (matrix)
   # -----------------------------------------------------------------------
   build:
     name: Build wheel (${{ matrix.name }})
-    needs: [version, preflight]
-    if: needs.version.outputs.released == 'true' && needs.preflight.result == 'success'
+    needs: [version]
+    if: needs.version.outputs.released == 'true'
     uses: ./.github/workflows/build-wheel.yml
     secrets: inherit
     with:
@@ -215,7 +214,7 @@ jobs:
             python: "3.12"
 
   # -----------------------------------------------------------------------
-  # 3) Collect every wheel and publish them to PyPI
+  # 5) Collect every wheel and publish them to PyPI
   # -----------------------------------------------------------------------
   publish:
     name: Publish to PyPI
