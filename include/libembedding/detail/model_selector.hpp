@@ -99,6 +99,13 @@ static lembed_status_t auto_select_impl(
         ModelSelection& result) {
     if (!use_case) use_case = "balanced";
 
+    /* Validate use_case */
+    if (strcmp(use_case, "speed") != 0 &&
+        strcmp(use_case, "quality") != 0 &&
+        strcmp(use_case, "balanced") != 0) {
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+
     fprintf(stderr, "Auto model selection (use_case=%s)...\n", use_case);
 
     double best_score = -1e18;

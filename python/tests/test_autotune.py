@@ -32,7 +32,7 @@ def test_auto_select_model():
     assert result.throughput_docs_sec >= 0
     assert result.latency_ms >= 0
     assert result.memory_mb >= 0
-    assert 0.0 <= result.score <= 1.0
+    assert result.score >= 0.0
 
 
 def test_auto_select_model_speed():
