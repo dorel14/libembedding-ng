@@ -82,6 +82,7 @@ struct lembed_text_embedding {
     lembed_execution_provider_t provider;
     int device_id;
     lembed_model_desc_t desc;
+    lembed_model_desc_v2_t desc_v2;
 
     /* Stats counters */
     uint64_t texts_embedded = 0;
@@ -118,6 +119,9 @@ static void lembed__text_update_desc(lembed_text_embedding_t* ctx) {
     ctx->desc.batch_size = ctx->batch_size;
     ctx->desc.provider = ctx->provider;
     ctx->desc.device_id = ctx->device_id;
+    ctx->desc_v2.base = ctx->desc;
+    ctx->desc_v2.quantization = (int)ctx->quantization;
+    ctx->desc_v2.cache_size = ctx->cache ? (int)ctx->cache->capacity() : 0;
 }
 
 #include "text_embedding_llama_impl.hpp"
