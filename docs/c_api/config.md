@@ -30,6 +30,16 @@ Ce module gère la version de la bibliothèque et les macros de configuration.
 | `LIBEMBEDDING_NO_DOWNLOAD` | Désactive le téléchargement de modèles |
 | `LIBEMBEDDING_NO_IMAGE` | Désactive les images (stb_image) |
 | `LIBEMBEDDING_INTEGRATION_TESTS` | Active les tests d'intégration |
+| `LIBEMBEDDING_BUILD_SHARED` | Build shared library for Python bindings (Windows: always SHARED) |
+
+## Version
+
+| Macro | Description |
+|-------|-------------|
+| `LIBEMBEDDING_VERSION_MAJOR` | Version majeure |
+| `LIBEMBEDDING_VERSION_MINOR` | Version mineure |
+| `LIBEMBEDDING_VERSION_PATCH` | Version de correctif |
+| `LIBEMBEDDING_VERSION_STRING` | Version complète (ex: "1.6.0") |
 
 ## Exemple
 

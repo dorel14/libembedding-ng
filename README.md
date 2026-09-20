@@ -632,6 +632,13 @@ typedef struct {
     int                         llama_n_ctx;    // context size (0 = model default)
     int                         llama_n_gpu_layers; // GPU layers (-1 = all, 0 = CPU only)
     int                         llama_verbose;  // 1 = enable llama.cpp logging
+    int                         llama_n_batch;  // max tokens per llama_encode (0 = model default)
+    int                         auto_workers;   // 1 = auto-detect optimal workers/sessions
+    int                         cache_size;     // 0 = disabled, >0 = LRU cache capacity
+    /* Backend selection (ONNX, LLAMACPP, or AUTO) */
+    lembed_backend_t            backend;        // default: LEMBED_BACKEND_AUTO
+    /* ONNX batching strategy */
+    int                         batch_strategy; // LEMBED_BATCH_LENGTH_BUCKET (ONNX only)
 } lembed_text_options_t;
 ```
 
@@ -649,6 +656,30 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled) |
 
 Providers are configured via `configure_provider()` and gracefully fall back to CPU if the provider library is unavailable.
+
+### Versioned options (v2)
+
+`lembed_text_options_v2_t` and `lembed_reranker_options_v2_t` extend the base options with a `quantization` field while keeping full backward compatibility via the `base` member:
+
+```c
+typedef struct {
+    lembed_text_options_t base;
+    int                   quantization; /* lembed_quantization_t */
+} lembed_text_options_v2_t;
+```
+
+Use `lembed_text_options_default_v2()` / `lembed_reranker_options_default_v2()` to initialize both fields at once.
+
+### Compile-Time Configuration
+
+| Option | Default | Description |
+|---|---|---|
+| `LIBEMBEDDING_NO_DOWNLOAD` | OFF | Disable model downloading (offline only) |
+| `LIBEMBEDDING_NO_IMAGE` | OFF | Disable image embedding support |
+| `LIBEMBEDDING_BUILD_TESTS` | ON | Build tests |
+| `LIBEMBEDDING_BUILD_EXAMPLES` | ON | Build examples |
+| `LIBEMBEDDING_BUILD_BENCHMARKS` | OFF | Build benchmarks |
+| `LIBEMBEDDING_BUILD_SHARED` | OFF | Build shared library for bindings (Windows: always SHARED) |
 
 ---
 
