@@ -953,7 +953,7 @@ Measured on Apple M-series (macOS arm64) with `all-MiniLM-L6-v2` (384-dim). Medi
 | Peak RSS (MB)            | **567**     | 1,981     | **3.5x less** |
 
 **Key takeaways:**
-- `pip install libembedding` is a **5-8x faster** drop-in replacement for fastembed
+- `pip install libembedding-ng` is a **5-8x faster** drop-in replacement for fastembed
 - **8.6x faster single-text latency** (4.4ms vs 38ms) -- the C backend does the heavy lifting
 - **3.5x less memory** (567MB vs 1.98GB peak RSS)
 - C++ and Python share the same backend -- Python adds only 13% overhead (4.4ms vs 3.9ms)
