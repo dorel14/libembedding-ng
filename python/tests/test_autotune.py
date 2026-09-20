@@ -66,6 +66,7 @@ def test_autotune_unified_invalid_task():
         autotune_unified("invalid_task")
 
 
+@pytest.mark.skip(reason="requires model download (network)")
 def test_autotune_unified_reranking_no_default():
     result = autotune_unified("reranking")
     assert result.task == "reranking"

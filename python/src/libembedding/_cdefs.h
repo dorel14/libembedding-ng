@@ -1,6 +1,6 @@
 /* Flattened C declarations for cffi — derived from libembedding public headers.
  * No preprocessor directives, no C++ constructs.
- * Synced with headers in include/libembedding/ (v1.4.0). */
+ * Synced with headers in include/libembedding/ (v1.6.0). */
 
 /* â”€â”€ Error handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
@@ -420,9 +420,9 @@ typedef struct {
     int workers;
     int threads;
     int batch_size;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
 } lembed_tuning_result_t;
 
 /* Run auto-tuning for a text embedding model.
@@ -469,9 +469,9 @@ typedef struct {
     int threads;
     int batch_size;
     int max_tokens;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
     double p95_latency_ms;
 } lembed_reranker_tuning_result_t;
 
@@ -541,10 +541,10 @@ typedef struct {
     int top_k;
     float min_weight;
     int storage_format;
-    float throughput_docs_sec;
-    float latency_ms;
+    double throughput_docs_sec;
+    double latency_ms;
     double p95_latency_ms;
-    float memory_mb;
+    double memory_mb;
 } lembed_unified_tuning_result_t;
 
 lembed_status_t lembed_autotune_unified(
@@ -569,9 +569,9 @@ typedef struct {
     int storage_format;
     int threads;
     int batch_size;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
 } lembed_sparse_tuning_result_t;
 
 lembed_status_t lembed_sparse_autotune(
@@ -584,9 +584,9 @@ lembed_status_t lembed_sparse_autotune(
 typedef struct {
     int threads;
     int batch_size;
-    float throughput_docs_sec;
-    float latency_ms;
-    float memory_mb;
+    double throughput_docs_sec;
+    double latency_ms;
+    double memory_mb;
 } lembed_image_tuning_result_t;
 
 lembed_status_t lembed_image_autotune(

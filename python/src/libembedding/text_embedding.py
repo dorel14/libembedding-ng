@@ -13,10 +13,10 @@ from ._binding import (  # pyright: ignore[reportAttributeAccessIssue,reportMiss
     lib,
 )
 from ._status import check_status
-from .backend import _BACKEND_ENUM
 from .exceptions import ModelNotFoundError
 from .models import (
     _POOLING_ENUM,
+    _PROVIDER_MAP,
     _QUANTIZATION_ENUM,
     _desc_from_c,
     _is_gguf_model,
@@ -108,7 +108,7 @@ class TextEmbedding:
                     raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
 
             opts = ffi.new("lembed_text_options_t *")
-            opts.provider = _BACKEND_ENUM.get(provider, 0)
+            opts.provider = _PROVIDER_MAP.get(provider, 0)
             opts.num_threads = threads
             opts.batch_size = batch_size
             opts.max_length = max_length
@@ -166,7 +166,7 @@ class TextEmbedding:
 
             if _is_local_path(model_name):
                 opts = ffi.new("lembed_text_options_t *")
-                opts.provider = _BACKEND_ENUM.get(provider, 0)
+                opts.provider = _PROVIDER_MAP.get(provider, 0)
                 opts.num_threads = threads
                 opts.batch_size = batch_size
                 opts.max_length = max_length
@@ -184,7 +184,7 @@ class TextEmbedding:
                 )
             else:
                 opts = ffi.new("lembed_text_options_v2_t *")
-                opts.base.provider = _BACKEND_ENUM.get(provider, 0)
+                opts.base.provider = _PROVIDER_MAP.get(provider, 0)
                 opts.base.num_threads = threads
                 opts.base.batch_size = batch_size
                 opts.base.max_length = max_length

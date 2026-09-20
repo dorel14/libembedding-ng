@@ -1097,10 +1097,22 @@ The `LlamaError` exception is raised for llama.cpp-specific failures. Use `TextE
 
 Full documentation is available on **GitHub Pages** (bilingual FR/EN):
 
-- **English**: https://dorel14.github.io/libembedding/
-- **Français**: https://dorel14.github.io/libembedding/
+- **English**: https://dorel14.github.io/libembedding-ng/
+- **Français**: https://dorel14.github.io/libembedding-ng/
 
 The docs cover installation, quick start, API reference, model catalog, performance tuning, and advanced usage (local models, providers, cache, offline mode, GGUF/llama.cpp, LRU cache, dynamic scheduler, FAST/BALANCED/QUALITY modes).
+
+### LLM-friendly docs (`llm.txt`)
+
+A concise project summary and a complete documentation dump are available at the
+repository root for LLM consumption:
+
+- **`llm.txt`** — concise summary, key links, and quick-start snippets
+- **`llm_full.txt`** — full concatenated documentation (README + all FR/EN doc pages + code examples)
+
+These files are **auto-generated** by `scripts/generate_llm_docs.py` and
+committed by the [Generate LLM Documentation](.github/workflows/generate-llm-txt.yml)
+GitHub Actions workflow on every push that changes docs or the README.
 
 ---
 
