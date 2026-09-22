@@ -116,7 +116,6 @@ EXPORTS
     lembed_reranker_auto_config_profile
     lembed_reranker_autotune
     lembed_reranker_autotune_constrained
-    lembed_reranker_autotune_custom
     lembed_reranker_auto_config
     lembed_reranker_autotune_clear_cache
 
