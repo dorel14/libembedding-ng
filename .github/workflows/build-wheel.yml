@@ -297,6 +297,8 @@ jobs:
           fi
           echo "Installing $WHEEL"
           pip install "$WHEEL"
+          # Reinstall pytest (uninstalled by wheel install which has no dev deps)
+          pip install pytest pytest-timeout pytest-cov
           pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
