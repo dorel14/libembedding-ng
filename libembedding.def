@@ -1,8 +1,173 @@
 LIBRARY "libembedding"
 EXPORTS
-    ; Version
+    ; ---- Version / config ----
     lembed_version
 
-    ; Error handling
+    ; ---- Error handling ----
     lembed_status_message
     lembed_last_error
+
+    ; ---- Embedding modes ----
+    lembed_mode_to_string
+    lembed_recommended_model_for_mode
+
+    ; ---- Options defaults ----
+    lembed_text_options_default
+    lembed_text_options_default_v2
+    lembed_sparse_options_default
+    lembed_image_options_default
+    lembed_reranker_options_default
+    lembed_reranker_options_default_v2
+
+    ; ---- Text embedding ----
+    lembed_text_embedding_create
+    lembed_text_embedding_create_v2
+    lembed_text_embedding_create_custom
+    lembed_text_embedding_create_from_path
+    lembed_text_embedding_create_from_gguf_path
+    lembed_text_embedding_create_from_gguf_model
+    lembed_text_embedding_embed
+    lembed_text_embedding_embed_stream
+    lembed_text_embedding_dim
+    lembed_text_embedding_desc
+    lembed_text_embedding_desc_v2
+    lembed_text_embedding_model_name
+    lembed_text_embedding_max_length
+    lembed_text_embedding_stats
+    lembed_text_embedding_stats_v2
+    lembed_text_embedding_free
+
+    ; ---- Sparse text embedding ----
+    lembed_sparse_text_embedding_create
+    lembed_sparse_text_embedding_create_from_path
+    lembed_sparse_text_embedding_embed
+    lembed_sparse_text_embedding_desc
+    lembed_sparse_text_embedding_model_name
+    lembed_sparse_text_embedding_max_length
+    lembed_sparse_text_embedding_stats
+    lembed_sparse_text_embedding_free
+
+    ; ---- Image embedding ----
+    lembed_image_embedding_create
+    lembed_image_embedding_create_from_path
+    lembed_image_embedding_embed_files
+    lembed_image_embedding_embed_bytes
+    lembed_image_embedding_dim
+    lembed_image_embedding_desc
+    lembed_image_embedding_model_name
+    lembed_image_embedding_max_length
+    lembed_image_embedding_stats
+    lembed_image_embedding_free
+
+    ; ---- Reranker ----
+    lembed_reranker_create
+    lembed_reranker_create_v2
+    lembed_reranker_create_from_path
+    lembed_reranker_create_from_gguf_path
+    lembed_reranker_create_from_gguf_model
+    lembed_reranker_rerank
+    lembed_reranker_desc
+    lembed_reranker_desc_v2
+    lembed_reranker_model_name
+    lembed_reranker_max_length
+    lembed_reranker_stats
+    lembed_reranker_stats_v2
+    lembed_reranker_free
+
+    ; ---- Model registry ----
+    lembed_get_text_model_info
+    lembed_get_sparse_model_info
+    lembed_get_image_model_info
+    lembed_get_reranker_model_info
+    lembed_list_text_models
+    lembed_list_sparse_models
+    lembed_list_image_models
+    lembed_list_reranker_models
+    lembed_find_text_model_by_code
+    lembed_find_sparse_model_by_code
+    lembed_find_reranker_model_by_code
+    lembed_find_image_model_by_code
+
+    ; ---- Downloader ----
+    lembed_ensure_text_model
+    lembed_ensure_sparse_model
+    lembed_ensure_image_model
+    lembed_ensure_reranker_model
+    lembed_ensure_gguf_model
+    lembed_free_string
+
+    ; ---- Similarity ----
+    lembed_cosine_similarity
+    lembed_dot_product
+    lembed_euclidean_distance
+
+    ; ---- Memory free ----
+    lembed_embeddings_free
+    lembed_sparse_embeddings_free
+    lembed_rerank_results_free
+
+    ; ---- Autotuner ----
+    lembed_autotune
+    lembed_autotune_custom
+    lembed_autotune_clear_cache
+    lembed_auto_select_model
+
+    ; ---- Reranker auto-tuner ----
+    lembed_reranker_auto_config_profile
+    lembed_reranker_autotune
+    lembed_reranker_autotune_constrained
+    lembed_reranker_autotune_custom
+    lembed_reranker_auto_config
+    lembed_reranker_autotune_clear_cache
+
+    ; ---- Unified auto-tuner ----
+    lembed_autotune_unified
+    lembed_autotune_unified_config
+    lembed_autotune_unified_clear_cache
+
+    ; ---- Sparse / image auto-tuner ----
+    lembed_sparse_autotune
+    lembed_image_autotune
+
+    ; ---- llama.cpp backend ----
+    lembed_llama_backend_available
+    lembed_llama_version
+
+    ; ---- Worker auto-tuning ----
+    lembed_detect_optimal_workers
+    lembed_recommended_workers_for_model
+
+    ; ---- GGUF model registry ----
+    lembed_list_gguf_models
+    lembed_find_gguf_model
+    lembed_default_gguf_model
+
+    ; ---- Embedding cache ----
+    lembed_cache_config_default
+    lembed_cache_create
+    lembed_cache_free
+    lembed_cache_clear
+    lembed_cache_get
+    lembed_cache_put
+    lembed_cache_size
+    lembed_cache_capacity
+
+    ; ---- Unified benchmark ----
+    lembed_benchmark_run
+    lembed_benchmark_autotune
+    lembed_benchmark_compare
+    lembed_benchmark_get_corpus
+    lembed_benchmark_select_model
+    lembed_benchmark_detect_sessions
+    lembed_benchmark_default_cache_dir
+
+    ; ---- Tuning cache ----
+    lembed_cache_detect_hardware
+    lembed_cache_detect_software
+    lembed_tune_cache_load
+    lembed_tune_cache_save
+    lembed_tune_cache_clear
+    lembed_tune_cache_path
+    lembed_tune_cache_key
+    lembed_tune_cache_add_config
+    lembed_tune_cache_set_best
