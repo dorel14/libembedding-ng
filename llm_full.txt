@@ -11,6 +11,8 @@ Site: https://dorel14.github.io/libembedding-ng/
 
 # libembedding-ng
 
+<img src="docs/assets/logo-readme.png" alt="libembedding-ng logo" width="220" />
+
 **Local-first embedding and reranking engine for C/C++ and Python.**
 
 libembedding-ng provides a unified runtime for ONNX Runtime and llama.cpp models,
