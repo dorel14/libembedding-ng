@@ -53,6 +53,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7",
+    "pytest-cov",
     "pytest-benchmark",
 ]
 

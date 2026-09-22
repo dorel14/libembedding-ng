@@ -99,7 +99,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           cd python
-          pip install -e .
+          pip install -e .[dev]
           pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
 
   # -----------------------------------------------------------------------
