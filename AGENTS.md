@@ -203,6 +203,17 @@ Exemple d’en-tête standard :
 - Les headers publics doivent être documentés avec des commentaires Doxygen-compatibles.
 - Les fonctions internes complexes doivent avoir des commentaires expliquant le « pourquoi ».
 
+### 6.4 LLM-friendly documentation (`llm.txt` / `llm_full.txt`)
+
+- **`llm.txt`** et **`llm_full.txt`** sont générés à la racine du dépôt par
+  `scripts/generate_llm_docs.py` et régénérés automatiquement par le workflow
+  [`.github/workflows/generate-llm-txt.yml`](.github/workflows/generate-llm-txt.yml).
+- `llm.txt` fournit un résumé concis avec liens vers chaque page de la documentation.
+- `llm_full.txt` contient le README + l'ensemble des pages docs (FR + EN) + exemples de code.
+- **Règle** : toute modification de `docs/`, `README.md`, `examples/` ou du script
+  déclenche une régénération. Vérifier que `llm.txt` / `llm_full.txt` restent à jour
+  avant de merged une PR.
+
 ---
 
 ## 7. Tests
@@ -283,6 +294,7 @@ Les agents doivent :
 
 - [ ] Le code compile en Release et Debug sur au moins une plateforme.
 - [ ] Les tests unitaires passent (`./run_tests.sh`).
+- [ ] Les fichiers python  passent  les tests  ruff sans aucuns problèmes.
 - [ ] La documentation (README, docs/) est à jour.
 - [ ] Les commentaires de code sont présents pour les nouvelles fonctions publiques.
 - [ ] `SPDX-License-Identifier: MIT` est présent dans tous les fichiers modifiés.

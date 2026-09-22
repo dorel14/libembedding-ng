@@ -1,10 +1,9 @@
 """libembedding — Fast ONNX-based text, image, and sparse embeddings for Python."""
 
 import logging
+from importlib.metadata import PackageNotFoundError, version
 
 try:
-    from importlib.metadata import PackageNotFoundError, version
-
     __version__ = version("libembedding-ng")
 except PackageNotFoundError:
     __version__ = "0.0.0"
@@ -48,9 +47,9 @@ from .reranker import (
 )
 from .similarity import cosine_similarity, dot_product, euclidean_distance
 from .sparse_text_embedding import SparseTextEmbedding, sparse_autotune
-from .text_embedding import (
+from .text_embedding import (  # pyright: ignore[reportPrivateImportUsage]
     TextEmbedding,
-    TextEmbeddingPool,
+    TextEmbeddingPool,  # pyright: ignore[reportPrivateImportUsage]
 )
 from .types import (
     ImageTuningResult,
@@ -115,6 +114,10 @@ __all__ = [
     "CorpusType",
     "EmbeddingCache",
     "HardwareInfo",
+    "ImageEmbedding",
+    "ImageTuningResult",
+    "LembedError",
+    "LlamaError",
     "Metrics",
     "ModelDesc",
     "ModelInfo",
@@ -141,6 +144,7 @@ __all__ = [
     "clear_reranker_autotune_cache",
     "cosine_similarity",
     "detect_backend",
+    "detect_hardware",
     "dot_product",
     "euclidean_distance",
     "image_autotune",

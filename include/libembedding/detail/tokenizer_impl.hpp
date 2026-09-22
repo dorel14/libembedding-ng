@@ -18,6 +18,8 @@
 
 #include "cJSON.h"
 
+#include <climits>
+
 #if defined(_WIN32) || defined(WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX

@@ -78,16 +78,7 @@ if(LIBEMBEDDING_INTEGRATION_TESTS)
     target_compile_definitions(test_llama_embedding PRIVATE
         LIBEMBEDDING_IMPLEMENTATION
     )
-    target_link_directories(test_llama_embedding PRIVATE
-        ${CMAKE_BINARY_DIR}/_deps/llama.cpp-build/src/Release
-        ${CMAKE_BINARY_DIR}/_deps/llama.cpp-build/ggml/src/Release
-        ${CMAKE_BINARY_DIR}/lib/Release
-    )
     target_link_libraries(test_llama_embedding PRIVATE llama ggml)
-    # Add onnxruntime path via linker flag (llama.cpp dependency)
-    target_link_options(test_llama_embedding PRIVATE
-        "/LIBPATH:${CMAKE_CURRENT_SOURCE_DIR}/../third_party/onnxruntime/lib"
-    )
     add_test(NAME test_llama_embedding COMMAND test_llama_embedding)
 
     if(NOT LIBEMBEDDING_NO_IMAGE)

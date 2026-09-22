@@ -57,7 +57,7 @@ if __name__ == "__main__":
         print()
         test_clear_cache()
         print("\n=== All tests passed ===")
-    except Exception as e:
+    except (OSError, RuntimeError, ValueError) as e:
         print(f"\nFAILED: {e}")
         import traceback
 

@@ -114,8 +114,10 @@ class ComparisonResult:
             lines.extend(
                 [
                     "-" * 72,
-                    f"Recommendation: {os.path.basename(self.recommendation.model_name)} "
-                    f"[{self.recommendation.backend}]",
+                    (
+                        f"Recommendation: {os.path.basename(self.recommendation.model_name)} "
+                        f"[{self.recommendation.backend}]"
+                    ),
                     f"  Throughput: {self.recommendation.throughput_docs_sec:.1f} docs/s",
                     f"  Latency p50: {self.recommendation.latency_p50_ms:.2f} ms",
                     f"  Memory: {self.recommendation.peak_memory_mb:.0f} MB",

@@ -14,7 +14,6 @@ from __future__ import annotations
 import numpy as np
 
 from ._binding import ffi, lib
-from .models import _QUANTIZATION_NAMES
 
 
 class EmbeddingCache:

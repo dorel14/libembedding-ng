@@ -1,0 +1,9 @@
+{
+  "pythonVersion": "3.12",
+  "extraPaths": [],
+  "include": [],
+  "exclude": ["**/build", "**/build_shared", "**/third_party/llama.cpp"],
+  "reportAttributeAccessIssue": "none",
+  "reportCallIssue": "none",
+  "reportMissingImports": "none"
+}

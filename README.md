@@ -1,5 +1,7 @@
 # libembedding-ng
 
+<img src="docs/assets/logo-readme.png" alt="libembedding-ng logo" width="220" />
+
 **Local-first embedding and reranking engine for C/C++ and Python.**
 
 libembedding-ng provides a unified runtime for ONNX Runtime and llama.cpp models,
@@ -632,6 +634,13 @@ typedef struct {
     int                         llama_n_ctx;    // context size (0 = model default)
     int                         llama_n_gpu_layers; // GPU layers (-1 = all, 0 = CPU only)
     int                         llama_verbose;  // 1 = enable llama.cpp logging
+    int                         llama_n_batch;  // max tokens per llama_encode (0 = model default)
+    int                         auto_workers;   // 1 = auto-detect optimal workers/sessions
+    int                         cache_size;     // 0 = disabled, >0 = LRU cache capacity
+    /* Backend selection (ONNX, LLAMACPP, or AUTO) */
+    lembed_backend_t            backend;        // default: LEMBED_BACKEND_AUTO
+    /* ONNX batching strategy */
+    int                         batch_strategy; // LEMBED_BATCH_LENGTH_BUCKET (ONNX only)
 } lembed_text_options_t;
 ```
 
@@ -649,6 +658,30 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled) |
 
 Providers are configured via `configure_provider()` and gracefully fall back to CPU if the provider library is unavailable.
+
+### Versioned options (v2)
+
+`lembed_text_options_v2_t` and `lembed_reranker_options_v2_t` extend the base options with a `quantization` field while keeping full backward compatibility via the `base` member:
+
+```c
+typedef struct {
+    lembed_text_options_t base;
+    int                   quantization; /* lembed_quantization_t */
+} lembed_text_options_v2_t;
+```
+
+Use `lembed_text_options_default_v2()` / `lembed_reranker_options_default_v2()` to initialize both fields at once.
+
+### Compile-Time Configuration
+
+| Option | Default | Description |
+|---|---|---|
+| `LIBEMBEDDING_NO_DOWNLOAD` | OFF | Disable model downloading (offline only) |
+| `LIBEMBEDDING_NO_IMAGE` | OFF | Disable image embedding support |
+| `LIBEMBEDDING_BUILD_TESTS` | ON | Build tests |
+| `LIBEMBEDDING_BUILD_EXAMPLES` | ON | Build examples |
+| `LIBEMBEDDING_BUILD_BENCHMARKS` | OFF | Build benchmarks |
+| `LIBEMBEDDING_BUILD_SHARED` | OFF | Build shared library for bindings (Windows: always SHARED) |
 
 ---
 
@@ -953,7 +986,7 @@ Measured on Apple M-series (macOS arm64) with `all-MiniLM-L6-v2` (384-dim). Medi
 | Peak RSS (MB)            | **567**     | 1,981     | **3.5x less** |
 
 **Key takeaways:**
-- `pip install libembedding` is a **5-8x faster** drop-in replacement for fastembed
+- `pip install libembedding-ng` is a **5-8x faster** drop-in replacement for fastembed
 - **8.6x faster single-text latency** (4.4ms vs 38ms) -- the C backend does the heavy lifting
 - **3.5x less memory** (567MB vs 1.98GB peak RSS)
 - C++ and Python share the same backend -- Python adds only 13% overhead (4.4ms vs 3.9ms)
@@ -1097,10 +1130,22 @@ The `LlamaError` exception is raised for llama.cpp-specific failures. Use `TextE
 
 Full documentation is available on **GitHub Pages** (bilingual FR/EN):
 
-- **English**: https://dorel14.github.io/libembedding/
-- **Français**: https://dorel14.github.io/libembedding/
+- **English**: https://dorel14.github.io/libembedding-ng/
+- **Français**: https://dorel14.github.io/libembedding-ng/
 
 The docs cover installation, quick start, API reference, model catalog, performance tuning, and advanced usage (local models, providers, cache, offline mode, GGUF/llama.cpp, LRU cache, dynamic scheduler, FAST/BALANCED/QUALITY modes).
+
+### LLM-friendly docs (`llm.txt`)
+
+A concise project summary and a complete documentation dump are available at the
+repository root for LLM consumption:
+
+- **`llm.txt`** — concise summary, key links, and quick-start snippets
+- **`llm_full.txt`** — full concatenated documentation (README + all FR/EN doc pages + code examples)
+
+These files are **auto-generated** by `scripts/generate_llm_docs.py` and
+committed by the [Generate LLM Documentation](.github/workflows/generate-llm-txt.yml)
+GitHub Actions workflow on every push that changes docs or the README.
 
 ---
 

@@ -20,6 +20,7 @@
 #include <list>
 #include <mutex>
 #include <algorithm>
+#include <vector>
 
 namespace lembed { namespace detail {
 
@@ -51,6 +52,14 @@ public:
         *dim = it->second->dim;
         list_.splice(list_.begin(), list_, it->second->it);
         it->second->it = list_.begin();
+        return true;
+    }
+
+    bool get_copy(const std::string& key, std::vector<float>& out) {
+        float* vec = nullptr;
+        int dim = 0;
+        if (!get(key, &vec, &dim) || dim <= 0) return false;
+        out.assign(vec, vec + dim);
         return true;
     }
 

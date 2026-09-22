@@ -1,6 +1,7 @@
 """Tests for Reranker API."""
 
 import pytest
+from libembedding.exceptions import LembedError
 
 
 def test_reranker_list_supported_models():
@@ -23,7 +24,7 @@ def test_reranker_auto_profile_map():
         try:
             reranker = Reranker_auto(profile, offline=True)
             reranker.close()
-        except Exception:
+        except (OSError, RuntimeError, ValueError, LembedError):
             pytest.skip("model download unavailable for reranker auto-config")
 
 
@@ -113,7 +114,6 @@ def test_reranker_auto_config_profile_invalid():
 
 def test_reranker_info_offline_missing():
     from libembedding import Reranker
-    from libembedding.exceptions import LembedError
 
     with pytest.raises(LembedError):
         Reranker("nonexistent-reranker-model", offline=True)

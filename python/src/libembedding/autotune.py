@@ -119,7 +119,7 @@ def auto_select_model(
     )
 
 
-def clear_autotune_cache(model_name: str = None) -> None:
+def clear_autotune_cache(model_name: str | None = None) -> None:
     """Clear autotune cache for a model (or all models if None)."""
     lib.lembed_autotune_clear_cache(
         model_name.encode("utf-8") if model_name else ffi.NULL
@@ -134,7 +134,7 @@ _TASK_SPARSE = 3
 
 def autotune_unified(
     task: str = "embedding",
-    model_name: str = None,
+    model_name: str | None = None,
     *,
     full: bool = False,
 ) -> UnifiedTuningResult:

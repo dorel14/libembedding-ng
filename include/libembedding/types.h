@@ -219,23 +219,6 @@ typedef struct {
     int                 cache_size;   /* LRU cache capacity, 0 = disabled */
 } lembed_model_desc_v2_t;
 
-/* =========================================================================
- * Versioned Text Embedding Options (v2)
- * Extends lembed_text_options_t with quantization field.
- * ========================================================================= */
-typedef struct {
-    lembed_text_options_t base;
-    int                   quantization; /* lembed_quantization_t */
-} lembed_text_options_v2_t;
-
-/* =========================================================================
- * Versioned Reranker Options (v2)
- * Extends lembed_reranker_options_t with quantization field.
- * ========================================================================= */
-typedef struct {
-    lembed_reranker_options_t base;
-    int                       quantization; /* lembed_quantization_t */
-} lembed_reranker_options_v2_t;
 
 /* =========================================================================
  * Opaque Handles
@@ -311,6 +294,15 @@ typedef struct {
     int                         batch_strategy; /* lembed_batch_strategy_t (ONNX only) */
 } lembed_text_options_t;
 
+/* =========================================================================
+ * Versioned Text Embedding Options (v2)
+ * Extends lembed_text_options_t with quantization field.
+ * ========================================================================= */
+typedef struct {
+    lembed_text_options_t base;
+    int                   quantization; /* lembed_quantization_t */
+} lembed_text_options_v2_t;
+
 /* Batching strategy for ONNX backend */
 typedef enum {
     LEMBED_BATCH_SEQUENTIAL = 0,    /* One text at a time (no batching) */
@@ -366,6 +358,15 @@ typedef struct {
     int                         cache_size;     /* 0 = disabled, >0 = LRU cache capacity */
 } lembed_reranker_options_t;
 
+/* =========================================================================
+ * Versioned Reranker Options (v2)
+ * Extends lembed_reranker_options_t with quantization field.
+ * ========================================================================= */
+typedef struct {
+    lembed_reranker_options_t base;
+    int                       quantization; /* lembed_quantization_t */
+} lembed_reranker_options_v2_t;
+
 /* User-defined model (bring-your-own ONNX) */
 typedef struct {
     const unsigned char* onnx_data;
@@ -386,6 +387,10 @@ typedef struct {
 void lembed_embeddings_free(lembed_embeddings_t* result);
 void lembed_sparse_embeddings_free(lembed_sparse_embeddings_t* result);
 void lembed_rerank_results_free(lembed_rerank_results_t* result);
+
+/* Versioned option defaults */
+lembed_text_options_v2_t lembed_text_options_default_v2(void);
+lembed_reranker_options_v2_t lembed_reranker_options_default_v2(void);
 
 #ifdef __cplusplus
 }
@@ -450,6 +455,22 @@ lembed_reranker_options_t lembed_reranker_options_default(void) {
     opts.llama_n_gpu_layers = 0;
     opts.auto_workers = 0;
     opts.cache_size = 0;
+    return opts;
+}
+
+lembed_text_options_v2_t lembed_text_options_default_v2(void) {
+    lembed_text_options_v2_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.base = lembed_text_options_default();
+    opts.quantization = LEMBED_QUANTIZATION_NONE;
+    return opts;
+}
+
+lembed_reranker_options_v2_t lembed_reranker_options_default_v2(void) {
+    lembed_reranker_options_v2_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.base = lembed_reranker_options_default();
+    opts.quantization = LEMBED_QUANTIZATION_NONE;
     return opts;
 }
 

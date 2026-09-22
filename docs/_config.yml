@@ -33,6 +33,11 @@ heading_anchors: true
 nav_error_report: false   # avoid showing a raw error box if a nav entry drifts
 nav_enabled: true
 
+# Logo shown in the sidebar header and favicon in the browser tab.
+# Paths are relative to the /docs folder (Pages source root).
+logo: assets/logo-sidebar.png
+favicon: assets/favicon.ico
+
 # Links shown at the bottom of the sidebar.
 aux_links:
   "libembedding sur GitHub":
