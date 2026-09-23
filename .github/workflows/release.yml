@@ -84,7 +84,7 @@ jobs:
             -DLIBEMBEDDING_BUILD_TESTS=ON \
             -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
             -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
-            -DLIBEMBEDDING_BUILD_SHARED=OFF \
+            -DLIBEMBEDDING_BUILD_SHARED=ON \
             -DLIBEMBEDDING_INTEGRATION_TESTS=OFF \
             -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
           cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading
@@ -93,6 +93,25 @@ jobs:
         run: |
           cd build
           ctest --output-on-failure
+
+      - name: Build shared library for Python tests
+        env:
+          ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
+        run: |
+          cd build
+          cmake --build . --parallel 2 --target embedding_shared --config Release
+
+      - name: Copy shared libraries for Python tests
+        run: |
+          ext=".so"
+          ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
+          curl_lib_dir="/usr/lib/x86_64-linux-gnu"
+          mkdir -p python/src/libembedding
+          cp "build/libembedding${ext}" python/src/libembedding/
+          cp "${ort_lib_dir}/libonnxruntime${ext}" python/src/libembedding/ || true
+          cp "${ort_lib_dir}/libonnxruntime_providers_shared${ext}" python/src/libembedding/ || true
+          cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
+          ls -la python/src/libembedding/
 
       - name: Run Python tests
         env:
