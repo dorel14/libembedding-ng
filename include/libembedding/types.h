@@ -61,6 +61,7 @@ typedef enum {
     LEMBED_QUANTIZATION_NONE = 0,
     LEMBED_QUANTIZATION_STATIC,
     LEMBED_QUANTIZATION_DYNAMIC,
+    LEMBED_QUANTIZATION_AUTO,
 } lembed_quantization_t;
 
 /* =========================================================================

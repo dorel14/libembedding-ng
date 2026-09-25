@@ -1,6 +1,7 @@
 """Tests for Reranker API."""
 
 import pytest
+
 from libembedding.exceptions import LembedError
 
 

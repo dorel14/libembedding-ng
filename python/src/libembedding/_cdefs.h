@@ -55,6 +55,7 @@ typedef enum {
     LEMBED_QUANTIZATION_NONE = 0,
     LEMBED_QUANTIZATION_STATIC,
     LEMBED_QUANTIZATION_DYNAMIC,
+    LEMBED_QUANTIZATION_AUTO,
 } lembed_quantization_t;
 
 typedef enum {
@@ -577,6 +578,12 @@ typedef struct {
     double latency_ms;
     double memory_mb;
 } lembed_sparse_tuning_result_t;
+
+lembed_status_t lembed_sparse_best_config(
+    const char* model_name,
+    const char* const* texts,
+    int n_texts,
+    lembed_sparse_tuning_result_t* result);
 
 lembed_status_t lembed_sparse_autotune(
     const char* model_name,

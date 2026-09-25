@@ -3,7 +3,9 @@
 # pyright: reportAttributeAccessIssue=false,reportCallIssue=false
 from __future__ import annotations
 
+import contextlib
 import os
+import time
 import warnings
 
 import numpy as np  # pyright: ignore[reportMissingImports]
@@ -13,7 +15,7 @@ from ._binding import (  # pyright: ignore[reportAttributeAccessIssue,reportMiss
     lib,
 )
 from ._status import check_status
-from .exceptions import ModelNotFoundError
+from .exceptions import LembedError, ModelNotFoundError
 from .models import (
     _POOLING_ENUM,
     _PROVIDER_MAP,
@@ -30,6 +32,20 @@ _MODE_TO_MODEL = {
     "balanced": "BAAI/bge-small-en-v1.5",
     "quality": "BAAI/bge-base-en-v1.5",
 }
+
+# The C core already L2-normalises every vector before returning it, so
+# `normalized=True` is only meaningful for callers that bypassed that path.
+# It is kept for API symmetry and is a no-op on already-unit vectors.
+_VALID_DTYPES = ("float32", "float16")
+
+
+def _validate_output_dtype(dtype: str) -> str:
+    """Validate the dtype requested by the caller."""
+    if dtype not in _VALID_DTYPES:
+        raise ValueError(
+            f"Unsupported dtype: {dtype!r}. Expected one of {list(_VALID_DTYPES)}."
+        )
+    return dtype
 
 
 class TextEmbedding:
@@ -52,6 +68,8 @@ class TextEmbedding:
         cache_size: Size of LRU embedding cache (0 = disabled).
         quantization: Override model quantization mode ("none", "static",
             "dynamic"). If None, uses the model's default.
+        preferred_quantization: Auto-select best quantization ("auto"),
+            or one of "none", "static", "dynamic".
         num_threads: Deprecated; use ``threads``.
     """
 
@@ -71,6 +89,7 @@ class TextEmbedding:
         auto_workers: bool = False,
         cache_size: int = 0,
         quantization: str | None = None,
+        preferred_quantization: str | None = None,
         num_threads: int | None = None,
     ):
         if num_threads is not None:
@@ -92,6 +111,22 @@ class TextEmbedding:
         self._ctx = None
         self._dim = 0
         self._batch_size = batch_size
+
+        # Resolve preferred_quantization
+        resolved_quant = quant_enum
+        if preferred_quantization is not None and preferred_quantization != "none":
+            if preferred_quantization == "auto":
+                resolved_quant = self._auto_select_quantization(
+                    model_name, provider, threads, batch_size, cache_dir,
+                    max_length, dim, pooling, offline, show_download_progress,
+                    cache_size, auto_workers,
+                )
+                if resolved_quant is None:
+                    resolved_quant = lib.LEMBED_QUANTIZATION_NONE
+            else:
+                pq_enum = _QUANTIZATION_ENUM.get(preferred_quantization.lower())
+                if pq_enum is not None:
+                    resolved_quant = pq_enum
 
         if _is_gguf_model(model_name):
             # GGUF model: use llama.cpp backend
@@ -194,13 +229,79 @@ class TextEmbedding:
                 opts.base.show_download_progress = 1 if show_download_progress else 0
                 opts.base.auto_workers = 1 if auto_workers else 0
                 opts.base.cache_size = cache_size
-                opts.quantization = quant_enum
+                opts.quantization = resolved_quant
                 ctx_ptr = ffi.new("lembed_text_embedding_t **")
                 check_status(lib.lembed_text_embedding_create_v2(opts, ctx_ptr))
             self._ctx = ctx_ptr[0]
 
         self._dim = lib.lembed_text_embedding_dim(self._ctx)
         self._model_name = model_name
+
+    @staticmethod
+    def _auto_select_quantization(
+        model_name: str, provider: str, threads: int, batch_size: int,
+        cache_dir: str | None, max_length: int, dim: int, pooling: str,
+        offline: bool, show_download_progress: bool,
+        cache_size: int, auto_workers: bool,
+    ) -> int | None:
+        """Benchmark FP32/INT8-static/INT8-dynamic on a small corpus.
+        Returns the lembed_quantization_t enum value of the best mode."""
+        sample_texts = [
+            "Machine learning enables systems to learn from data.",
+            "Embeddings are dense vector representations of text.",
+            "The transformer architecture revolutionized NLP.",
+            "Natural language processing understanding text semantics.",
+            "Deep learning models learn hierarchical representations.",
+        ]
+
+        _QUANT_NAMES = {
+            "none": lib.LEMBED_QUANTIZATION_NONE,
+            "static": lib.LEMBED_QUANTIZATION_STATIC,
+            "dynamic": lib.LEMBED_QUANTIZATION_DYNAMIC,
+        }
+        _QUANT_KEYS = ["none", "static", "dynamic"]
+
+        best_name = _QUANT_KEYS[0]
+        best_tp = -1.0
+
+        for qname in _QUANT_KEYS:
+            model = None
+            try:
+                model = TextEmbedding(
+                    model_name=model_name,
+                    provider=provider,
+                    threads=threads,
+                    batch_size=batch_size,
+                    offline=offline,
+                    show_download_progress=False,
+                    cache_dir=cache_dir,
+                    max_length=max_length,
+                    dim=dim,
+                    pooling=pooling,
+                    cache_size=0,
+                    quantization=qname,
+                    preferred_quantization="none",
+                )
+                start = time.perf_counter()
+                result = model.embed(sample_texts)
+                elapsed = time.perf_counter() - start
+                if elapsed > 0 and len(result) > 0:
+                    tp = len(result) / elapsed
+                    if tp > best_tp:
+                        best_tp = tp
+                        best_name = qname
+            except (LembedError, OSError, ValueError):
+                # A quantization mode that cannot be loaded or executed is
+                # simply not a candidate; keep probing the other modes.
+                continue
+            finally:
+                if model is not None:
+                    with contextlib.suppress(Exception):
+                        model.close()
+
+        if best_tp <= 0.0:
+            return None
+        return _QUANT_NAMES[best_name]
 
     @property
     def dim(self) -> int:
@@ -245,12 +346,15 @@ class TextEmbedding:
             )
         return cls(_MODE_TO_MODEL[mode], **kwargs)
 
-    def embed(self, texts: list[str], batch_size: int | None = None) -> np.ndarray:
+    def embed(self, texts: list[str], *, batch_size: int | None = None,
+              dtype: str = "float32", normalized: bool = False) -> np.ndarray:
         """Embed texts into dense vectors.
 
         Args:
             texts: List of strings to embed.
             batch_size: Batch size override (None = use default).
+            dtype: Output dtype, "float32" or "float16".
+            normalized: L2 normalize before returning.
 
         Returns:
             numpy array of shape (len(texts), dim).
@@ -258,6 +362,8 @@ class TextEmbedding:
         n = len(texts)
         if n == 0:
             return np.empty((0, self._dim), dtype=np.float32)
+
+        _validate_output_dtype(dtype)
 
         c_texts = ffi.new("char*[]", n)
         c_strs = []
@@ -269,11 +375,114 @@ class TextEmbedding:
         bs = 0 if batch_size is None else batch_size
         check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, bs, result))
 
+        try:
+            dim = result.dim
+            total = result.num_embeddings * dim
+            arr = np.frombuffer(
+                ffi.buffer(result.data, total * 4), dtype=np.float32
+            ).copy()
+        finally:
+            lib.lembed_embeddings_free(result)
+
+        arr = arr.reshape(n, dim)
+        if normalized:
+            norms = np.linalg.norm(arr, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            arr = arr / norms
+        if dtype == "float16":
+            arr = arr.astype(np.float16)
+        return arr
+
+    def embed_bytes(self, texts: list[str], *, dtype: str = "float32",
+                    normalized: bool = False) -> bytes:
+        """Retourne les embeddings comme bloc mémoire brut.
+
+        Args:
+            texts: List of strings to embed.
+            dtype: Output dtype, "float32" or "float16".
+            normalized: L2 normalize before returning.
+
+        Returns:
+            bytes containing the embeddings (no numpy overhead).
+        """
+        n = len(texts)
+        if n == 0:
+            return b""
+
+        _validate_output_dtype(dtype)
+
+        c_texts = ffi.new("char*[]", n)
+        c_strs = []
+        for i, t in enumerate(texts):
+            c_strs.append(ffi.new("char[]", t.encode("utf-8")))
+            c_texts[i] = c_strs[i]
+
+        result = ffi.new("lembed_embeddings_t *")
+        check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, 0, result))
+
+        try:
+            dim = result.dim
+            total = result.num_embeddings * dim
+            arr = np.frombuffer(
+                ffi.buffer(result.data, total * 4), dtype=np.float32
+            ).copy()
+        finally:
+            lib.lembed_embeddings_free(result)
+
+        if normalized:
+            norms = np.linalg.norm(arr, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            arr = arr / norms
+        if dtype == "float16":
+            arr = arr.astype(np.float16)
+        return arr.tobytes()
+
+    def embed_iter(self, texts: list[str], *, dtype: str = "float32",
+                   normalized: bool = False):
+        """Yield one vector per text, without allocating a global array.
+
+        Args:
+            texts: List of strings to embed.
+            dtype: Output dtype, "float32" or "float16".
+            normalized: L2 normalize before yielding.
+
+        Yields:
+            numpy array of shape (dim,) for each text.
+        """
+        n = len(texts)
+        if n == 0:
+            return
+
+        _validate_output_dtype(dtype)
+
+        c_texts = ffi.new("char*[]", n)
+        c_strs = []
+        for i, t in enumerate(texts):
+            c_strs.append(ffi.new("char[]", t.encode("utf-8")))
+            c_texts[i] = c_strs[i]
+
+        result = ffi.new("lembed_embeddings_t *")
+        check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, 0, result))
+
         dim = result.dim
-        total = result.num_embeddings * dim
-        arr = np.frombuffer(ffi.buffer(result.data, total * 4), dtype=np.float32).copy()
-        lib.lembed_embeddings_free(result)
-        return arr.reshape(n, dim)
+        try:
+            for i in range(n):
+                # cffi pointer arithmetic: result.data is a float*, so the
+                # offset is expressed in floats (not bytes). Slicing a cdata
+                # pointer would return a Python list, not a buffer.
+                base = result.data + i * dim
+                vec = np.frombuffer(
+                    ffi.buffer(base, dim * 4), dtype=np.float32
+                ).copy()
+                if normalized:
+                    norm = float(np.linalg.norm(vec))
+                    if norm > 0.0:
+                        vec = vec / norm
+                if dtype == "float16":
+                    vec = vec.astype(np.float16)
+                yield vec
+        finally:
+            lib.lembed_embeddings_free(result)
 
     def embed_stream(
         self, texts: list[str], callback, batch_size: int | None = None

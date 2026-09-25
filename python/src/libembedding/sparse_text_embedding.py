@@ -227,3 +227,53 @@ def sparse_autotune(
         latency_ms=result.latency_ms,
         memory_mb=result.memory_mb,
     )
+
+
+def sparse_best_config(
+    model_name: str = "prithivida/SPLADE_PP_en_v1",
+    texts: list[str] | None = None,
+) -> SparseTuningResult:
+    """Find optimal sparse configuration by benchmarking variants.
+
+    Args:
+        model_name: Model name or local path.
+        texts: Optional list of sample texts for benchmarking.
+
+    Returns:
+        SparseTuningResult with optimal top_k, min_weight, storage_format.
+
+    Example:
+        >>> result = sparse_best_config("prithivida/SPLADE_PP_en_v1")
+        >>> print(f"Optimal: top_k={result.top_k}, storage={result.storage_format}")
+    """
+    if texts is None:
+        texts = [
+            "Machine learning is a subset of artificial intelligence",
+            "The quick brown fox jumps over the lazy dog",
+            "Embeddings are dense vector representations of text",
+            "Natural language processing understanding text semantics",
+            "Deep learning models learn hierarchical representations",
+        ]
+
+    n = len(texts)
+    encoded = [t.encode("utf-8") for t in texts]
+    c_strs = [ffi.new("char[]", e) for e in encoded]
+    c_texts = ffi.new("char*[]", c_strs)
+
+    result = ffi.new("lembed_sparse_tuning_result_t *")
+    check_status(
+        lib.lembed_sparse_best_config(
+            model_name.encode("utf-8"), c_texts, n, result
+        )
+    )
+
+    return SparseTuningResult(
+        top_k=result.top_k,
+        min_weight=result.min_weight,
+        storage_format=result.storage_format,
+        threads=result.threads,
+        batch_size=result.batch_size,
+        throughput_docs_sec=result.throughput_docs_sec,
+        latency_ms=result.latency_ms,
+        memory_mb=result.memory_mb,
+    )

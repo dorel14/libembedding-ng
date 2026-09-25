@@ -12,6 +12,8 @@
 /* Autotuner C API implementation */
 #include "libembedding/detail/autotuner_impl.hpp"
 #include "libembedding/detail/autotune_bench_text.hpp"
+#include "libembedding/detail/autotune_bench_text_custom.hpp"
+#include "libembedding/detail/autotune_bench_reranker_custom.hpp"
 #include "libembedding/detail/autotune_cache.hpp"
 
 #ifdef _MSC_VER
@@ -46,20 +48,22 @@ lembed_status_t lembed_autotune_custom(
     if (!model_name || !texts || n_texts <= 0 || !result)
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    int idx = lembed_find_text_model_by_code(model_name);
-    if (idx < 0) return LEMBED_ERROR_MODEL_NOT_FOUND;
+    return lembed::detail::lembed_autotune_custom_impl(
+        model_name, texts, n_texts, mode, result);
+}
 
-    std::vector<std::string> corpus;
-    corpus.reserve(n_texts);
-    for (int i = 0; i < n_texts; i++)
-        corpus.push_back(texts[i]);
+lembed_status_t lembed_reranker_autotune_custom(
+        const char* model_name,
+        const char* const* texts,
+        int n_texts,
+        lembed_autotune_mode_t mode,
+        lembed_objective_t objective,
+        lembed_reranker_tuning_result_t* result) {
+    if (!model_name || !texts || n_texts <= 0 || !result)
+        return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    return lembed::detail::autotune_text_impl(
-        (lembed_text_model_t)idx,
-        corpus,
-        mode,
-        result
-    );
+    return lembed::detail::lembed_reranker_autotune_custom_impl(
+        model_name, texts, n_texts, mode, objective, result);
 }
 
 #include "libembedding/detail/model_selector.hpp"

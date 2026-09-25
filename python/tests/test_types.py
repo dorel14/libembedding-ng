@@ -1,6 +1,7 @@
 """Unit tests for libembedding dataclasses."""
 
 import numpy as np
+
 from libembedding.types import (
     ImageTuningResult,
     ModelDesc,

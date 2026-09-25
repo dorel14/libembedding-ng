@@ -5,6 +5,7 @@ They are marked with @pytest.mark.network or skipped gracefully.
 """
 
 import pytest
+
 from libembedding.autotune import (
     auto_select_model,
     autotune_unified,

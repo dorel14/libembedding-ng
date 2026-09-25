@@ -536,3 +536,71 @@ def Reranker_auto(
         max_length=config.max_tokens,
         **kwargs,
     )
+
+
+def reranker_autotune_custom(
+    model_name: str = "jinaai/jina-reranker-v1-turbo-en-quantized",
+    texts: list[str] | None = None,
+    *,
+    full: bool = False,
+    objective: str = "balanced",
+) -> RerankerTuningResult:
+    """Auto-tune a reranker using a custom corpus of documents.
+
+    Args:
+        model_name: Model name (e.g. "jinaai/jina-reranker-v1-turbo-en-quantized")
+        texts: Custom document corpus for benchmarking.
+        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        objective: "latency", "throughput", "balanced", or "memory"
+
+    Returns:
+        RerankerTuningResult with optimal threads, batch_size, max_tokens.
+
+    Example:
+        >>> result = reranker_autotune_custom("BAAI/bge-reranker-base")
+        >>> print(f"Optimal: threads={result.threads}, batch={result.batch_size}")
+    """
+    mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
+    obj_map = {
+        "latency": lib.LEMBED_OBJECTIVE_LATENCY,
+        "throughput": lib.LEMBED_OBJECTIVE_THROUGHPUT,
+        "balanced": lib.LEMBED_OBJECTIVE_BALANCED,
+        "memory": lib.LEMBED_OBJECTIVE_MEMORY,
+    }
+    obj_enum = obj_map.get(objective.lower(), lib.LEMBED_OBJECTIVE_BALANCED)
+
+    if texts is None:
+        texts = [
+            "Machine learning is a subset of artificial intelligence",
+            "The quick brown fox jumps over the lazy dog",
+            "Embeddings are dense vector representations of text",
+            "Natural language processing understanding text semantics",
+            "Deep learning models learn hierarchical representations",
+        ]
+
+    n = len(texts)
+    encoded = [t.encode("utf-8") for t in texts]
+    c_strs = [ffi.new("char[]", e) for e in encoded]
+    c_texts = ffi.new("char*[]", c_strs)
+
+    result = ffi.new("lembed_reranker_tuning_result_t *")
+    check_status(
+        lib.lembed_reranker_autotune_custom(
+            model_name.encode("utf-8"),
+            c_texts,
+            n,
+            mode,
+            obj_enum,
+            result,
+        )
+    )
+
+    return RerankerTuningResult(
+        threads=result.threads,
+        batch_size=result.batch_size,
+        max_tokens=result.max_tokens,
+        throughput_docs_sec=result.throughput_docs_sec,
+        latency_ms=result.latency_ms,
+        p95_latency_ms=result.p95_latency_ms,
+        memory_mb=result.memory_mb,
+    )
