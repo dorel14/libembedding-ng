@@ -3,7 +3,7 @@
  * Sparse text embedding C API (SPLADE, BGE-M3)
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.8.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -12,12 +12,14 @@
 #define LIBEMBEDDING_SPARSE_TEXT_EMBEDDING_H
 
 #include "types.h"
+#include "autotuner.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 lembed_sparse_options_t lembed_sparse_options_default(void);
+
 
 lembed_status_t lembed_sparse_text_embedding_create(
     const lembed_sparse_options_t* options,
@@ -31,15 +33,36 @@ lembed_status_t lembed_sparse_text_embedding_embed(
     const lembed_sparse_options_t* sparse_opts,
     lembed_sparse_embeddings_t* result);
 
-/* Introspection */
+/* Introspection
+ * NOTE: desc/model_name return memory owned by the context: the pointers are
+ * dangling after lembed_sparse_text_embedding_free(). Copy the fields you need. */
 const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx);
 
 /* Runtime statistics */
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
+/* Versioned stats (cache fields present for API parity with the dense/rerank
+ * contexts). Sparse contexts have no embedding cache, so cache_hits,
+ * cache_misses and cache_size are always 0. */
+void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
 
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
+
+/* Find optimal sparse configuration for a model and corpus.
+ * The ONNX session is created once and reused for every candidate: top_k and
+ * min_weight are post-processing filters, so reloading the model per candidate
+ * would be pure waste. storage_format is not yet honoured by the C embed path
+ * and is therefore not benchmarked.
+ * texts: array of text samples for benchmarking (must be non-empty)
+ * n_texts: number of texts (must be > 0)
+ * result: output configuration with optimal top_k, min_weight, storage_format
+ * Returns LEMBED_OK on success. */
+lembed_status_t lembed_sparse_best_config(
+    const char* model_name,
+    const char* const* texts,
+    int n_texts,
+    lembed_sparse_tuning_result_t* result);
 
 /* Load from local directory */
 lembed_status_t lembed_sparse_text_embedding_create_from_path(
@@ -64,11 +87,14 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
 #include "detail/sparse_postprocess.hpp"
 #include "detail/batch.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 #include <chrono>
+#include <thread>
+
 
 struct lembed_sparse_embedding {
     lembed::detail::OnnxSession session;
@@ -83,6 +109,8 @@ struct lembed_sparse_embedding {
     lembed_execution_provider_t provider;
     int device_id;
     lembed_model_desc_t desc;
+    int top_k;
+    float min_weight;
 
     /* Stats counters */
     uint64_t texts_embedded = 0;
@@ -139,6 +167,8 @@ lembed_status_t lembed_sparse_text_embedding_create(
         ctx->desc.batch_size = ctx->batch_size;
         ctx->desc.provider = ctx->provider;
         ctx->desc.device_id = ctx->device_id;
+        ctx->top_k = options->top_k;
+        ctx->min_weight = options->min_weight;
 
         *out = ctx;
         return LEMBED_OK;
@@ -200,6 +230,8 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
         ctx->desc.batch_size = ctx->batch_size;
         ctx->desc.provider = ctx->provider;
         ctx->desc.device_id = ctx->device_id;
+        ctx->top_k = options->top_k;
+        ctx->min_weight = options->min_weight;
 
         *out = ctx;
         return LEMBED_OK;
@@ -267,20 +299,81 @@ lembed_status_t lembed_sparse_text_embedding_embed(
                 output.data.data(), mask_flat.data(),
                 bsz, seq_len, vocab_size);
 
+            /* Resolve filtering parameters.
+             * An explicit sparse_opts always wins, including top_k == 0
+             * which means "keep every term". The context-level values are
+             * only used when the caller passes NULL. */
+            const int top_k = sparse_opts ? sparse_opts->top_k : ctx->top_k;
+            const float min_weight = sparse_opts ? sparse_opts->min_weight
+                                                 : ctx->min_weight;
+
             /* Copy to C output */
             for (int i = 0; i < bsz; i++) {
                 auto& sr = sparse_results[i];
+
+                /* Apply min_weight pruning */
+                if (min_weight > 0.0f) {
+                    std::vector<int32_t> filt_idx;
+                    std::vector<float> filt_val;
+                    filt_idx.reserve(sr.indices.size());
+                    filt_val.reserve(sr.values.size());
+                    for (size_t j = 0; j < sr.indices.size(); j++) {
+                        if (sr.values[j] >= min_weight) {
+                            filt_idx.push_back(sr.indices[j]);
+                            filt_val.push_back(sr.values[j]);
+                        }
+                    }
+                    sr.indices = std::move(filt_idx);
+                    sr.values = std::move(filt_val);
+                }
+
+                /* Apply top_k selection */
+                if (top_k > 0 && (int)sr.indices.size() > top_k) {
+                    std::vector<std::pair<float, int32_t>> val_idx;
+                    val_idx.reserve(sr.indices.size());
+                    for (size_t j = 0; j < sr.indices.size(); j++) {
+                        val_idx.emplace_back(sr.values[j], sr.indices[j]);
+                    }
+                    std::partial_sort(
+                        val_idx.begin(),
+                        val_idx.begin() + top_k,
+                        val_idx.end(),
+                        [](const auto& a, const auto& b) {
+                            return a.first > b.first;
+                        });
+                    std::vector<int32_t> filt_idx(top_k);
+                    std::vector<float> filt_val(top_k);
+                    for (int k = 0; k < top_k; k++) {
+                        filt_idx[k] = val_idx[k].second;
+                        filt_val[k] = val_idx[k].first;
+                    }
+                    sr.indices = std::move(filt_idx);
+                    sr.values = std::move(filt_val);
+                }
+
                 int idx = out_offset + i;
-                result->items[idx].length = (int)sr.indices.size();
+                result->items[idx].length = 0;
+                result->items[idx].indices = nullptr;
+                result->items[idx].values = nullptr;
+                if (sr.indices.empty()) continue;
+
                 result->items[idx].indices = (int32_t*)malloc(
                     sr.indices.size() * sizeof(int32_t));
                 result->items[idx].values = (float*)malloc(
                     sr.values.size() * sizeof(float));
                 if (result->items[idx].indices && result->items[idx].values) {
+                    result->items[idx].length = (int)sr.indices.size();
                     std::memcpy(result->items[idx].indices, sr.indices.data(),
                                sr.indices.size() * sizeof(int32_t));
                     std::memcpy(result->items[idx].values, sr.values.data(),
                                sr.values.size() * sizeof(float));
+                } else {
+                    /* Allocation failed: never publish a length that does not
+                     * match an allocated buffer. */
+                    free(result->items[idx].indices);
+                    free(result->items[idx].values);
+                    result->items[idx].indices = nullptr;
+                    result->items[idx].values = nullptr;
                 }
             }
             out_offset += bsz;
@@ -325,6 +418,135 @@ void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx
 
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx) {
     delete ctx;
+}
+
+void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!ctx) return;
+    out->base.texts_embedded = ctx->texts_embedded;
+    out->base.batches_run = ctx->batches_run;
+    out->base.avg_latency_ms = ctx->stats_calls > 0
+        ? ctx->total_latency_ms / (double)ctx->stats_calls
+        : 0.0;
+}
+
+/* Find optimal sparse configuration by benchmarking variants.
+ *
+ * The ONNX session is created ONCE and reused for every candidate
+ * configuration: top_k / min_weight are post-processing filters, so
+ * reloading the model per candidate would be pure waste (24 model
+ * loads for the default grid). storage_format is not yet honoured by
+ * the C embed path, so it is not benchmarked here.
+ */
+lembed_status_t lembed_sparse_best_config(
+        const char* model_name,
+        const char* const* texts,
+        int n_texts,
+        lembed_sparse_tuning_result_t* result) {
+    if (!model_name || !texts || n_texts <= 0 || !result)
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    memset(result, 0, sizeof(*result));
+
+    /* Resolve model: registry entry or local directory */
+    int model_idx = 0;
+    bool is_local = false;
+    std::string model_path;
+    if (lembed::detail::file_exists(model_name)) {
+        is_local = true;
+        model_path = model_name;
+    } else {
+        int idx = lembed_find_sparse_model_by_code(model_name);
+        if (idx < 0) return LEMBED_ERROR_MODEL_NOT_FOUND;
+        model_idx = idx;
+    }
+
+    /* Single shared session for all candidates.
+     * Uses <thread> rather than autotune_cache.hpp so this public header
+     * does not drag in <windows.h> (NOMINMAX / min-max macro clashes). */
+    unsigned hw = std::thread::hardware_concurrency();
+    int cores = (hw == 0) ? 1 : (int)hw;
+    if (cores > 4) cores = 4;
+
+    lembed_sparse_options_t base = lembed_sparse_options_default();
+    base.model = static_cast<lembed_sparse_model_t>(model_idx);
+    base.num_threads = cores;
+    base.batch_size = 32;
+    base.show_download_progress = 0;
+    base.offline = 1;
+
+    lembed_sparse_embedding_ctx_t* ctx = nullptr;
+    lembed_status_t s;
+    if (is_local)
+        s = lembed_sparse_text_embedding_create_from_path(model_path.c_str(), &base, &ctx);
+    else
+        s = lembed_sparse_text_embedding_create(&base, &ctx);
+    if (s != LEMBED_OK) return s;
+
+    int best_top_k = 0;
+    float best_min_weight = 0.0f;
+    double best_throughput = 0.0;
+    int configs_tested = 0;
+
+    const int top_k_options[]    = {16, 32, 64, 128};
+    const float min_weight_options[] = {0.0f, 0.01f, 0.05f};
+
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    for (int tk : top_k_options) {
+        for (float mw : min_weight_options) {
+            lembed_sparse_options_t probe = base;
+            probe.top_k = tk;
+            probe.min_weight = mw;
+
+            /* Warmup pass (allocator / first-inference cost) */
+            lembed_sparse_embeddings_t warm = {0};
+            if (lembed_sparse_text_embedding_embed(ctx, texts, n_texts, base.batch_size,
+                                                   &probe, &warm) != LEMBED_OK)
+                continue;
+            lembed_sparse_embeddings_free(&warm);
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            lembed_sparse_embeddings_t emb = {0};
+            s = lembed_sparse_text_embedding_embed(ctx, texts, n_texts, base.batch_size,
+                                                   &probe, &emb);
+            auto t1 = std::chrono::high_resolution_clock::now();
+
+            if (s == LEMBED_OK && emb.count > 0) {
+                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                double tp = (ms > 0.0) ? (n_texts / (ms / 1000.0)) : 0.0;
+                if (tp > best_throughput) {
+                    best_throughput = tp;
+                    best_top_k = tk;
+                    best_min_weight = mw;
+                }
+                configs_tested++;
+            }
+            lembed_sparse_embeddings_free(&emb);
+        }
+    }
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+    double total_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+
+    lembed_sparse_text_embedding_free(ctx);
+
+    if (configs_tested == 0 || best_throughput <= 0.0) {
+        memset(result, 0, sizeof(*result));
+        return LEMBED_ERROR_ONNX_RUNTIME;
+    }
+
+    result->top_k = best_top_k;
+    result->min_weight = best_min_weight;
+    result->storage_format = 0;
+    result->threads = cores;
+    result->batch_size = base.batch_size;
+    result->throughput_docs_sec = best_throughput;
+    result->latency_ms = (n_texts > 0) ? (total_ms / n_texts) : 0.0;
+    result->memory_mb = 0.0;
+
+    return LEMBED_OK;
 }
 
 #ifdef __cplusplus

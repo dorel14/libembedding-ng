@@ -4,7 +4,7 @@
  * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.8.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -97,6 +97,11 @@ lembed_status_t lembed_text_embedding_create(
 
         std::string tok_path = model_dir + "/tokenizer.json";
         ctx->onnx.tokenizer.load_from_file(tok_path, ctx->max_length);
+
+        /* Allocated after the model is loaded so no error path can leak it */
+        if (options->cache_size > 0) {
+            ctx->cache = new lembed::detail::LRUCache((size_t)options->cache_size, 0);
+        }
 
         lembed__text_update_desc(ctx);
         *out = ctx;

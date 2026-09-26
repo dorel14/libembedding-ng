@@ -3,7 +3,7 @@
  * LRU cache implementation for embeddings
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.8.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -38,21 +38,34 @@ public:
 
     ~LRUCache() { clear(); }
 
+    // Returns a pointer owned by the cache (borrowed, see embedding_cache.h).
+    // The mutex is released before the caller reads the buffer: a concurrent
+    // put/eviction on the same key can free it while the caller is copying.
+    // Prefer get_copy() whenever the caller does not need a stable pointer.
     bool get(const std::string& key, float** out_vec, int* dim) {
         std::lock_guard<std::mutex> lock(mtx_);
-        auto it = map_.find(key);
-        if (it == map_.end()) return false;
-
-        if (ttl_seconds_ > 0 && time(nullptr) > it->second->expires_at) {
-            remove(it);
-            return false;
-        }
-
-        *out_vec = it->second->vec;
-        *dim = it->second->dim;
-        list_.splice(list_.begin(), list_, it->second->it);
-        it->second->it = list_.begin();
+        Entry* e = touch(key);
+        if (!e) return false;
+        *out_vec = e->vec;
+        *dim = e->dim;
         return true;
+    }
+
+    // Copies the value into caller-owned storage while holding the lock: no
+    // cache-owned pointer escapes, so a concurrent put/eviction cannot free the
+    // buffer in the middle of the copy (the race get() leaves to its caller).
+    // *dim always receives the stored dimension on a hit, so a caller that does
+    // not know the dimension up front can query it with capacity 0.
+    // Returns 1 when the value was copied, 0 on miss, -1 when the entry exists
+    // but `capacity` (or `out`) cannot hold it.
+    int get_copy(const std::string& key, float* out, int capacity, int* dim) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        Entry* e = touch(key);
+        if (!e) return 0;
+        if (dim) *dim = e->dim;
+        if (!out || capacity < e->dim) return -1;
+        memcpy(out, e->vec, (size_t)e->dim * sizeof(float));
+        return 1;
     }
 
     bool get_copy(const std::string& key, std::vector<float>& out) {
@@ -129,6 +142,22 @@ private:
     mutable std::mutex mtx_;
     std::list<std::string> list_;
     std::unordered_map<std::string, Entry*> map_;
+
+    // Looks up `key`, drops it when its TTL has expired and promotes it to the
+    // front of the LRU list. Returns nullptr on miss. Caller must hold mtx_.
+    Entry* touch(const std::string& key) {
+        auto it = map_.find(key);
+        if (it == map_.end()) return nullptr;
+
+        if (ttl_seconds_ > 0 && time(nullptr) > it->second->expires_at) {
+            remove(it);
+            return nullptr;
+        }
+
+        list_.splice(list_.begin(), list_, it->second->it);
+        it->second->it = list_.begin();
+        return it->second;
+    }
 
     void remove(std::unordered_map<std::string, Entry*>::iterator it) {
         free(it->second->vec);

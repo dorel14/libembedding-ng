@@ -1,25 +1,12 @@
 """Tests for TextEmbeddingPool."""
 
 import numpy as np
-import pytest
 
 
-def _bge_small(**kwargs):
-    """Create a BGE-small model, skipping the test if download fails."""
-    from libembedding import TextEmbedding
-    from libembedding.exceptions import DownloadError
-
-    kwargs.setdefault("show_download_progress", False)
-    try:
-        return TextEmbedding("BAAI/bge-small-en-v1.5", **kwargs)
-    except DownloadError:
-        pytest.skip("model download unavailable (network restriction in CI)")
-
-
-def test_pool_repr():
+def test_pool_repr(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     pool = TextEmbeddingPool(model.model_name, workers=2, offline=True)
     try:
         repr_str = repr(pool)
@@ -31,10 +18,10 @@ def test_pool_repr():
         model.close()
 
 
-def test_pool_dim():
+def test_pool_dim(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     pool = TextEmbeddingPool(model.model_name, workers=2, offline=True)
     try:
         assert pool.dim == model.dim
@@ -44,10 +31,10 @@ def test_pool_dim():
         model.close()
 
 
-def test_pool_embed_basic():
+def test_pool_embed_basic(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     pool = TextEmbeddingPool(model.model_name, workers=2, offline=True)
     try:
         texts = ["Hello world", "How are you?", "Testing pooling"]
@@ -60,10 +47,10 @@ def test_pool_embed_basic():
         model.close()
 
 
-def test_pool_embed_empty():
+def test_pool_embed_empty(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     pool = TextEmbeddingPool(model.model_name, workers=2, offline=True)
     try:
         result = pool.embed([])
@@ -73,10 +60,10 @@ def test_pool_embed_empty():
         model.close()
 
 
-def test_pool_context_manager():
+def test_pool_context_manager(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     try:
         with TextEmbeddingPool(model.model_name, workers=2, offline=True) as pool:
             assert pool.num_workers == 2
@@ -86,10 +73,10 @@ def test_pool_context_manager():
         model.close()
 
 
-def test_pool_workers_auto():
+def test_pool_workers_auto(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     pool = TextEmbeddingPool(model.model_name, workers=0, offline=True)
     try:
         assert pool.num_workers > 0
@@ -99,10 +86,10 @@ def test_pool_workers_auto():
         model.close()
 
 
-def test_pool_embed_order_preserved():
+def test_pool_embed_order_preserved(bge_small):
     from libembedding import TextEmbeddingPool
 
-    model = _bge_small()
+    model = bge_small()
     pool = TextEmbeddingPool(model.model_name, workers=2, offline=True)
     try:
         texts = [f"Text number {i}" for i in range(10)]
@@ -116,15 +103,10 @@ def test_pool_embed_order_preserved():
         model.close()
 
 
-def test_pool_autotune_path():
-    from libembedding import TextEmbedding, TextEmbeddingPool
-    from libembedding.exceptions import DownloadError
+def test_pool_autotune_path(bge_small):
+    from libembedding import TextEmbeddingPool
 
-    try:
-        model = TextEmbedding("BAAI/bge-small-en-v1.5", show_download_progress=False)
-    except DownloadError:
-        pytest.skip("model download unavailable for pool autotune test")
-
+    model = bge_small()
     try:
         pool = TextEmbeddingPool(
             model.model_name,

@@ -1,7 +1,7 @@
 """High-level sparse text embedding API.
 
 Auteur: David Orel
-Version: 1.6.0
+Version: 1.8.0
 """
 
 from __future__ import annotations
@@ -166,12 +166,14 @@ class SparseTextEmbedding:
 
     def stats(self) -> Stats:
         """Return runtime usage statistics."""
-        s = ffi.new("lembed_stats_t *")
-        lib.lembed_sparse_text_embedding_stats(self._ctx, s)
+        s = ffi.new("lembed_stats_v2_t *")
+        lib.lembed_sparse_text_embedding_stats_v2(self._ctx, s)
         return Stats(
-            texts_embedded=s.texts_embedded,
-            batches_run=s.batches_run,
-            avg_latency_ms=s.avg_latency_ms,
+            texts_embedded=s.base.texts_embedded,
+            batches_run=s.base.batches_run,
+            avg_latency_ms=s.base.avg_latency_ms,
+            cache_hits=s.cache_hits,
+            cache_misses=s.cache_misses,
         )
 
     def close(self) -> None:
@@ -216,6 +218,56 @@ def sparse_autotune(
             break
 
     check_status(lib.lembed_sparse_autotune(code.encode("utf-8"), mode, result))
+
+    return SparseTuningResult(
+        top_k=result.top_k,
+        min_weight=result.min_weight,
+        storage_format=result.storage_format,
+        threads=result.threads,
+        batch_size=result.batch_size,
+        throughput_docs_sec=result.throughput_docs_sec,
+        latency_ms=result.latency_ms,
+        memory_mb=result.memory_mb,
+    )
+
+
+def sparse_best_config(
+    model_name: str = "prithivida/SPLADE_PP_en_v1",
+    texts: list[str] | None = None,
+) -> SparseTuningResult:
+    """Find optimal sparse configuration by benchmarking variants.
+
+    Args:
+        model_name: Model name or local path.
+        texts: Optional list of sample texts for benchmarking.
+
+    Returns:
+        SparseTuningResult with optimal top_k, min_weight, storage_format.
+
+    Example:
+        >>> result = sparse_best_config("prithivida/SPLADE_PP_en_v1")
+        >>> print(f"Optimal: top_k={result.top_k}, storage={result.storage_format}")
+    """
+    if texts is None:
+        texts = [
+            "Machine learning is a subset of artificial intelligence",
+            "The quick brown fox jumps over the lazy dog",
+            "Embeddings are dense vector representations of text",
+            "Natural language processing understanding text semantics",
+            "Deep learning models learn hierarchical representations",
+        ]
+
+    n = len(texts)
+    encoded = [t.encode("utf-8") for t in texts]
+    c_strs = [ffi.new("char[]", e) for e in encoded]
+    c_texts = ffi.new("char*[]", c_strs)
+
+    result = ffi.new("lembed_sparse_tuning_result_t *")
+    check_status(
+        lib.lembed_sparse_best_config(
+            model_name.encode("utf-8"), c_texts, n, result
+        )
+    )
 
     return SparseTuningResult(
         top_k=result.top_k,

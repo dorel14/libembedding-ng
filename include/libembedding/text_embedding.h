@@ -56,7 +56,12 @@ lembed_status_t lembed_text_embedding_embed_stream(
 /* Get embedding dimension */
 int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx);
 
-/* Introspection */
+/* Introspection
+ * NOTE: the desc/desc_v2 pointers reference memory owned by the context.
+ * They stay valid until the next create_* call on the same context and are
+ * dangling as soon as lembed_text_embedding_free() is called: copy the fields
+ * you need, never store the pointer. model_name() returns an internal
+ * std::string buffer with the same lifetime. */
 const lembed_model_desc_t* lembed_text_embedding_desc(const lembed_text_embedding_t* ctx);
 const lembed_model_desc_v2_t* lembed_text_embedding_desc_v2(const lembed_text_embedding_t* ctx);
 const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx);

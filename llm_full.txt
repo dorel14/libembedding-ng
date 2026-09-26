@@ -189,14 +189,43 @@ with minimal overhead (~13%).
 | Dependency | Required | Notes |
 |---|---|---|
 | **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
-| **llama.cpp** | Yes | Fetched via CMake `FetchContent` (v0.3.0). Always enabled — provides the GGUF backend. |
-| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON` |
+| **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. |
+| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). |
 | **cJSON** | Bundled | Included in `third_party/` |
 | **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
 | **CMake** >= 3.18 | Build only | |
 | **C++17 compiler** | Build only | GCC 7+, Clang 5+, MSVC 2017+ |
 
 No Rust toolchain required. The tokenizer is implemented natively in C++ (supports WordPiece and BPE models via `tokenizer.json`).
+
+### Windows: libcurl runtime DLL
+
+`third_party/curl` ships the libcurl headers and the import library
+(`lib/libcurl.dll.a`) but **no runtime DLL** — no binary is versioned in this
+repository. The link therefore succeeds while `libembedding.dll` and every test
+or example executable fail at load time. Fetch the runtime once per checkout:
+
+```powershell
+pwsh -File scripts/fetch_windows_libcurl.ps1
+```
+
+The script downloads the official *curl-for-win* build matching the version in
+`third_party/curl/include/curl/curlver.h`, verifies its SHA-256 against the
+pinned value, and installs `libcurl-x64.dll` into `third_party/curl/bin/`
+(canonical location, git-ignored) together with a `.libcurl-source.txt`
+provenance record. `-CurlVersion` forces another version, `-Force` re-downloads.
+
+Alternatives at configure time: `-DCURL_LIBRARY=<vcpkg>\installed\x64-windows\lib\libcurl.lib`
+(what CI does), `-DCURL_RUNTIME_DLL=<path>\libcurl-x64.dll`,
+`-DLIBEMBEDDING_NO_DOWNLOAD=ON` (no download code at all) or
+`-DLIBEMBEDDING_CURL_STATIC=ON` (runtime managed by you). If none of these
+applies, CMake fails at **configure** time instead of letting the executables
+die later.
+
+> **Diagnostic** — a test that dies with `0xC0000135` (`STATUS_DLL_NOT_FOUND`)
+> or that `ctest` reports as `Timeout` while it really only took milliseconds is
+> almost always this missing DLL. Run the executable directly to see the real
+> exit code: `ctest` masks it.
 
 ---
 
@@ -744,7 +773,7 @@ Or via CMake, point to a custom llama.cpp installation if needed:
 set(LLAMACPP_ROOT "/path/to/llama.cpp")
 ```
 
-llama.cpp is fetched via CMake `FetchContent` (v0.3.0) by default. The `LEMBED_PROVIDER_LLAMACPP` execution provider and GGUF loading functions are always available:
+llama.cpp is vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download at configure time). The `LEMBED_PROVIDER_LLAMACPP` execution provider and GGUF loading functions are always available:
 
 ```c
 #include <libembedding/gguf_registry.h>
@@ -1016,7 +1045,7 @@ cmake --build . --parallel
 cd ../benchmarks && ./run_benchmarks.sh
 
 # Python bindings vs fastembed
-pip install libembedding
+pip install libembedding-ng
 PYTHONPATH=../python/src python3 bench_python_compare.py
 ```
 
@@ -3139,6 +3168,17 @@ cache = EmbeddingCache(capacity=4096, ttl_seconds=0, dim=0)
 | `capacity` | `int` | Maximum cache capacity |
 | `current_size` | `int` | Current number of entries |
 
+## Ownership of the returned data
+
+`get()` returns a NumPy array **owned by Python**: the copy is made by
+`lembed_cache_get_copy()` while the C cache still holds its lock. No
+cache-owned pointer is exposed, so a concurrent eviction, overwrite or
+`clear()` cannot free the buffer during the copy. The returned array stays
+valid after its entry is evicted, and two reads of the same key return two
+independent copies.
+
+See [Embedding Cache C API](c_api/embedding_cache.html) for the C equivalent.
+
 ## Context manager
 
 ```python
@@ -3524,13 +3564,26 @@ This module provides a thread-safe LRU cache for dense embeddings in C.
 |----------|---------|-------------|
 | `lembed_cache_create(config)` | `lembed_cache_t*` | Create a cache |
 | `lembed_cache_free(cache)` | `void` | Free a cache |
-| `lembed_cache_get(cache, text, out_vec, out_dim)` | `int` (hit=1, miss=0) | Retrieve embedding |
+| `lembed_cache_get_copy(cache, text, out_vec, capacity, out_dim)` | `int` (copied=1, miss=0, buffer too small=-1) | **Recommended** — copies under the lock into a caller-owned buffer |
+| `lembed_cache_get(cache, text, out_vec, out_dim)` | `int` (hit=1, miss=0) | Deprecated — returns a **borrowed** pointer, invalidated on eviction |
 | `lembed_cache_put(cache, text, vec, dim)` | `void` | Store embedding |
 | `lembed_cache_clear(cache)` | `void` | Clear the cache |
 | `lembed_cache_capacity(cache)` | `int` | Cache capacity |
 | `lembed_cache_size(cache)` | `int` | Current size |
 | `lembed_cache_config_default()` | `lembed_cache_config_t*` | Default configuration |
 | `lembed_cache_detect_hardware(hw)` | `lembed_status_t` | Detect hardware |
+
+## Pointer lifetime
+
+`lembed_cache_get()` returns a pointer **owned by the cache**, not a copy. It
+stays valid until the entry is overwritten (`lembed_cache_put`), evicted by LRU
+pressure, cleared (`lembed_cache_clear`) or freed (`lembed_cache_free`). The
+caller must copy what it needs and must **never** `free()` that pointer.
+
+Since the cache releases its lock before returning, a concurrent eviction can
+free the buffer while the caller is still copying it. Use
+`lembed_cache_get_copy()`, which copies **under the lock**: no cache-owned
+pointer ever leaves the library.
 
 ## Example
 
@@ -3547,11 +3600,16 @@ lembed_cache_t *cache = lembed_cache_create(&cfg);
 float vec[] = {0.1f, 0.2f, 0.3f};
 lembed_cache_put(cache, "hello world", vec, 3);
 
-float *out_vec = NULL;
-int out_dim = 0;
-int hit = lembed_cache_get(cache, "hello world", &out_vec, &out_dim);
-if (hit) {
-    printf("Cache hit, dim=%d\n", out_dim);
+// Retrieve: the copy happens under the cache lock
+int dim = 0;
+int rc = lembed_cache_get_copy(cache, "hello world", NULL, 0, &dim);
+if (rc == -1) {
+    // rc == -1: the key exists and `dim` is the size to allocate
+    float *out_vec = (float *)malloc(dim * sizeof(float));
+    if (lembed_cache_get_copy(cache, "hello world", out_vec, dim, &dim) == 1) {
+        printf("Cache hit, dim=%d, out_vec[0]=%f\n", dim, out_vec[0]);
+    }
+    free(out_vec);
 }
 
 printf("Capacity: %d, Size: %d\n",
@@ -6027,6 +6085,17 @@ cache = EmbeddingCache(capacity=4096, ttl_seconds=0, dim=0)
 | `capacity` | `int` | Capacité maximale du cache |
 | `current_size` | `int` | Nombre actuel d'entrées |
 
+## Propriété des données renvoyées
+
+`get()` renvoie un tableau NumPy **appartenant à Python** : la copie est faite
+par `lembed_cache_get_copy()` pendant que le cache C tient encore son verrou.
+Aucun pointeur détenu par le cache n'est exposé, donc une éviction, un
+écrasement ou un `clear()` concurrent ne peut pas libérer le tampon pendant la
+copie. Le tableau renvoyé reste valide après l'éviction de son entrée, et deux
+lectures successives de la même clé renvoient deux copies indépendantes.
+
+Voir [Cache LRU C API](c_api/embedding_cache.html) pour l'équivalent C.
+
 ## Contexte manager
 
 ```python
@@ -6413,13 +6482,27 @@ Ce module fournit un cache LRU thread-safe pour les embeddings denses en C.
 |----------|--------|-------------|
 | `lembed_cache_create(config)` | `lembed_cache_t*` | Créer un cache |
 | `lembed_cache_free(cache)` | `void` | Libérer un cache |
-| `lembed_cache_get(cache, text, out_vec, out_dim)` | `int` (hit=1, miss=0) | Récupérer un embedding |
+| `lembed_cache_get_copy(cache, text, out_vec, capacity, out_dim)` | `int` (copié=1, miss=0, buffer trop petit=-1) | **Recommandé** — copie sous verrou dans un tampon fourni par l'appelant |
+| `lembed_cache_get(cache, text, out_vec, out_dim)` | `int` (hit=1, miss=0) | Déprécié — rend un pointeur **emprunté**, invalidé à l'éviction |
 | `lembed_cache_put(cache, text, vec, dim)` | `void` | Stocker un embedding |
 | `lembed_cache_clear(cache)` | `void` | Vider le cache |
 | `lembed_cache_capacity(cache)` | `int` | Capacité du cache |
 | `lembed_cache_size(cache)` | `int` | Taille actuelle |
 | `lembed_cache_config_default()` | `lembed_cache_config_t*` | Configuration par défaut |
 | `lembed_cache_detect_hardware(hw)` | `lembed_status_t` | Détecter le hardware |
+
+## Durée de vie des pointeurs
+
+`lembed_cache_get()` rend **un pointeur interne au cache**, pas une copie. Il reste
+valide jusqu'à ce que l'entrée soit écrasée (`lembed_cache_put`), évacée par
+pression LRU, vidée (`lembed_cache_clear`) ou libérée (`lembed_cache_free`).
+L'appelant doit copier ce dont il a besoin et **ne jamais** appeler `free()` sur
+ce pointeur.
+
+Le cache relâchant son verrou avant le retour, une éviction concurrente peut
+libérer le tampon pendant que l'appelant le copie. Utilisez
+`lembed_cache_get_copy()`, qui copie **sous le verrou** : aucun pointeur
+détenu par le cache ne sort de la bibliothèque.
 
 ## Exemple
 
@@ -6439,12 +6522,16 @@ lembed_cache_t *cache = lembed_cache_create(&cfg);
 float vec[] = {0.1f, 0.2f, 0.3f};
 lembed_cache_put(cache, "hello world", vec, 3);
 
-// Récupérer un embedding
-float *out_vec = NULL;
-int out_dim = 0;
-int hit = lembed_cache_get(cache, "hello world", &out_vec, &out_dim);
-if (hit) {
-    printf("Cache hit, dim=%d\n", out_dim);
+// Récupérer un embedding : la copie est faite sous le verrou
+int dim = 0;
+int rc = lembed_cache_get_copy(cache, "hello world", NULL, 0, &dim);
+if (rc == -1) {
+    // rc == -1 : la clé existe, `dim` est la taille à allouer
+    float *out_vec = (float *)malloc(dim * sizeof(float));
+    if (lembed_cache_get_copy(cache, "hello world", out_vec, dim, &dim) == 1) {
+        printf("Cache hit, dim=%d, out_vec[0]=%f\n", dim, out_vec[0]);
+    }
+    free(out_vec);
 }
 
 // Statistiques

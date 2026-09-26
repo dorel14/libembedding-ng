@@ -3,7 +3,7 @@
  * types.h - Core types, opaque handles, enums, output structures
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.8.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -61,6 +61,7 @@ typedef enum {
     LEMBED_QUANTIZATION_NONE = 0,
     LEMBED_QUANTIZATION_STATIC,
     LEMBED_QUANTIZATION_DYNAMIC,
+    LEMBED_QUANTIZATION_AUTO,
 } lembed_quantization_t;
 
 /* =========================================================================
