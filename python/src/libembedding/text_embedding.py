@@ -557,5 +557,6 @@ class TextEmbedding:
         return f"TextEmbedding(dim={self._dim})"
 
 
-# Re-export TextEmbeddingPool from pool module
-from .pool import TextEmbeddingPool  # noqa: F401
+# Re-export TextEmbeddingPool from pool module (imported last: pool.py imports
+# TextEmbedding from this module, so the import cannot stay at the top).
+from .pool import TextEmbeddingPool  # noqa: E402,F401

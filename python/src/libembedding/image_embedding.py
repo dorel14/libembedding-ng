@@ -207,7 +207,6 @@ class ImageEmbedding:
         if self._ctx is not None:
             lib.lembed_image_embedding_free(self._ctx)
             self._ctx = None
-            self._ctx = None
 
     def __enter__(self):
         return self
