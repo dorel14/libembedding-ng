@@ -53,6 +53,7 @@ HEADER_GLOBS = (
     "include/libembedding/cpp/*.hpp",
 )
 PYTHON_GLOBS = ("python/src/libembedding/*.py",)
+CONFIG_GLOBS = ("include/libembedding/config.h",)
 
 CANONICAL_TOML = ROOT / "python" / "pyproject.toml"
 CDEFS_FILE = ROOT / "python" / "src" / "libembedding" / "_cdefs.h"
@@ -80,10 +81,38 @@ class Rule:
         return list(found)
 
     def apply(self, text: str, version: str) -> tuple[str, int]:
-        return self.regex.subn(self.template.format(version=version), text)
+        return self.regex.subn(self.expand(version), text)
+
+    def expand(self, version: str) -> str:
+        """Fill the template. ``{version}`` plus the split numeric components.
+
+        A rule may use ``{major}``, ``{minor}`` or ``{patch}`` instead of
+        ``{version}`` for the stamps that are not a single ``X.Y.Z`` token,
+        such as the ``#define LIBEMBEDDING_VERSION_MAJOR 1`` form.
+        """
+        major, minor, patch = version.split(".")
+        return self.template.format(
+            version=version, major=major, minor=minor, patch=patch
+        )
 
     def matches(self, text: str) -> list[str]:
         return [m.group(0) for m in self.regex.finditer(text)]
+
+
+def _version_macro_rule(part: str) -> Rule:
+    """Rule for ``#define LIBEMBEDDING_VERSION_<PART> <n>`` in config.h.
+
+    python-semantic-release's ``version_variables`` only stamps
+    ``LIBEMBEDDING_VERSION_STRING``, so the three numeric macros are handled
+    here. They are not cosmetic: ``detail/autotune_cache.hpp`` builds the
+    autotune cache key from ``MAJOR`` and ``MINOR``, so a stale value makes
+    two different releases share their tuning cache.
+    """
+    return Rule(
+        r"^(?P<prefix>#define\s+LIBEMBEDDING_VERSION_" + part + r"\s+)\d+(?P<suffix>\s*)$",
+        r"\g<prefix>{" + part.lower() + r"}\g<suffix>",
+        CONFIG_GLOBS,
+    )
 
 
 RULES = (
@@ -98,6 +127,9 @@ RULES = (
         PYTHON_GLOBS,
     ),
     Rule(r"\(v" + SEMVER_CORE + r"\)", r"(v{version})", ("python/src/libembedding/_cdefs.h",)),
+    _version_macro_rule("MAJOR"),
+    _version_macro_rule("MINOR"),
+    _version_macro_rule("PATCH"),
     Rule(
         r"^(?P<prefix>> \*\*Version courante\*\* : )" + SEMVER_CORE + r"(?P<suffix>\s*)$",
         r"\g<prefix>{version}\g<suffix>",
@@ -165,9 +197,13 @@ def sync(version: str, check_only: bool) -> int:
             total_stamps += len(found)
 
             if check_only:
-                bad = [m for m in found if version not in m]
-                if bad:
-                    stale.append((path, f"stale stamp(s): {bad[:3]}"))
+                # A stamp is in sync when re-applying the rule with the target
+                # version is a no-op. Comparing the rewritten text (rather than
+                # looking for the version substring) also works for the stamps
+                # that are not a single "X.Y.Z" token, e.g. the numeric macros.
+                updated, _ = rule.apply(original, version)
+                if updated != original:
+                    stale.append((path, f"stamp(s) {found[:3]} do not match {version}"))
                 continue
 
             updated, n = rule.apply(original, version)

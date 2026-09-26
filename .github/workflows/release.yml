@@ -184,16 +184,32 @@ jobs:
         run: |
           if [ "${{ steps.detect.outputs.released }}" = "true" ]; then
             NEXT="${{ steps.detect.outputs.version }}"
+            echo "Syncing documentation version stamps to ${NEXT}..."
+            # Handles the ~70 header docstrings, the Python modules, the
+            # (vX.Y.Z) marker in _cdefs.h, the numeric macros of config.h and
+            # the AGENTS.md line. Replaces the former chain of sed one-liners:
+            # it is idempotent, preserves line endings and fails loudly if a
+            # stamp format ever changes.
+            #
+            # This runs BEFORE semantic-release on purpose. semantic-release
+            # commits and tags only the three files it manages
+            # (python/pyproject.toml, CMakeLists.txt, config.h) and discards the
+            # rest of the runner worktree, so stamps written after it would
+            # never reach the tag: the compiled library would report ${NEXT}
+            # while _cdefs.h still advertised the previous version, and every
+            # wheel built from that tag would ship the mismatch (caught by
+            # test_init.py::test_binding_ffi_lib). Committing first makes the
+            # tagged commit the complete tree, with no tag rewrite needed.
+            python scripts/sync_version.py --version "${NEXT}"
+            if ! git diff --quiet HEAD --; then
+              git -c user.name="github-actions[bot]" \
+                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                  commit -am "chore(release): sync version stamps to ${NEXT} [skip ci]"
+            fi
             echo "Stamping version ${NEXT} with python-semantic-release..."
             # version_toml / version_variables (root pyproject.toml) stamp:
             #   python/pyproject.toml, CMakeLists.txt, config.h
             semantic-release version
-            echo "Syncing documentation version stamps to ${NEXT}..."
-            # Handles the ~70 header docstrings, the Python modules, the
-            # (vX.Y.Z) marker in _cdefs.h and the AGENTS.md line. Replaces the
-            # former chain of sed one-liners: it is idempotent, preserves line
-            # endings and fails loudly if a stamp format ever changes.
-            python scripts/sync_version.py --version "${NEXT}"
             # Verify every machine-readable source agrees
             PY=$(grep -oP '^version = "\K[^"]+' python/pyproject.toml)
             C=$(grep -oP 'LIBEMBEDDING_VERSION_STRING "\K[^"]+' include/libembedding/config.h)
