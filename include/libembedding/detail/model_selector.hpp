@@ -3,7 +3,7 @@
  * Auto model selection based on hardware and use case
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.8.0
  *
  * SPDX-License-Identifier: MIT
  */

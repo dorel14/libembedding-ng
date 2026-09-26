@@ -7,7 +7,7 @@ The Python wrapper never holds a pointer owned by the C cache: reads go
 through ``lembed_cache_get_copy()``, which copies under the cache lock.
 
 Auteur: David Orel
-Version: 1.6.0
+Version: 1.8.0
 
 SPDX-License-Identifier: MIT
 """

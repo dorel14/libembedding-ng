@@ -1,7 +1,7 @@
 """High-level sparse text embedding API.
 
 Auteur: David Orel
-Version: 1.6.0
+Version: 1.8.0
 """
 
 from __future__ import annotations

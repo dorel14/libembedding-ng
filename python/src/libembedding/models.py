@@ -1,7 +1,7 @@
 """Model name resolution and registry queries.
 
 Auteur: David Orel
-Version: 1.6.0
+Version: 1.8.0
 """
 
 import os
