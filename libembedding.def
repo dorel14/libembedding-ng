@@ -151,6 +151,7 @@ EXPORTS
     lembed_cache_free
     lembed_cache_clear
     lembed_cache_get
+    lembed_cache_get_copy
     lembed_cache_put
     lembed_cache_size
     lembed_cache_capacity

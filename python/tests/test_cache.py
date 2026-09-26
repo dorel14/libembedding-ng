@@ -234,3 +234,138 @@ def test_text_embedding_partial_cache_hits(bge_small):
         assert result.shape == (3, model.dim)
     finally:
         model.close()
+
+
+# ---------------------------------------------------------------------------
+# lembed_cache_get_copy(): the race-free read path used by the wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_get_copy_symbol_is_exported():
+    """The wrapper depends on this symbol: a missing .def export must fail."""
+    from libembedding._binding import lib
+
+    assert hasattr(lib, "lembed_cache_get_copy")
+
+
+def test_get_copy_dimension_query():
+    """capacity 0 reports the stored dimension without copying."""
+    from libembedding._binding import ffi, lib
+
+    cache = EmbeddingCache(capacity=4)
+    cache.put("a", _vec(1, dim=8))
+    c_buf = ffi.new("char[]", b"a")
+    out_dim = ffi.new("int *")
+
+    # A NULL buffer is a pure dimension query: -1 (hit, nothing copied).
+    assert lib.lembed_cache_get_copy(cache._cache, c_buf, ffi.NULL, 0, out_dim) == -1
+    assert out_dim[0] == 8
+
+    # A miss stays a miss.
+    c_missing = ffi.new("char[]", b"missing")
+    assert lib.lembed_cache_get_copy(cache._cache, c_missing, ffi.NULL, 0, out_dim) == 0
+
+
+def test_get_copy_too_small_buffer_is_left_untouched():
+    from libembedding._binding import ffi, lib
+
+    cache = EmbeddingCache(capacity=4)
+    cache.put("a", _vec(1, dim=8))
+    c_buf = ffi.new("char[]", b"a")
+    out_dim = ffi.new("int *")
+    buf = ffi.new("float[]", 4)
+    for i in range(4):
+        buf[i] = -99.0
+
+    assert lib.lembed_cache_get_copy(cache._cache, c_buf, buf, 4, out_dim) == -1
+    assert out_dim[0] == 8
+    assert [buf[i] for i in range(4)] == [-99.0] * 4
+
+
+def test_get_copy_rejects_invalid_arguments():
+    from libembedding._binding import ffi, lib
+
+    cache = EmbeddingCache(capacity=4)
+    cache.put("a", _vec(1))
+    c_buf = ffi.new("char[]", b"a")
+    out_dim = ffi.new("int *")
+    buf = ffi.new("float[]", 4)
+
+    assert lib.lembed_cache_get_copy(ffi.NULL, c_buf, buf, 4, out_dim) == 0
+    assert lib.lembed_cache_get_copy(cache._cache, ffi.NULL, buf, 4, out_dim) == 0
+    assert lib.lembed_cache_get_copy(cache._cache, c_buf, buf, 4, ffi.NULL) == 0
+
+
+def test_eviction_between_the_two_passes_is_a_miss():
+    """The wrapper reads the dim, then copies: an eviction in between is a miss.
+
+    This is the sequence that used to be a use-after-free with the borrowed
+    pointer of lembed_cache_get().
+    """
+    from libembedding._binding import ffi, lib
+
+    cache = EmbeddingCache(capacity=2)
+    cache.put("a", _vec(1))
+    c_buf = ffi.new("char[]", b"a")
+    out_dim = ffi.new("int *")
+
+    # Pass 1 succeeds and tells us the dimension.
+    assert lib.lembed_cache_get_copy(cache._cache, c_buf, ffi.NULL, 0, out_dim) == -1
+    assert out_dim[0] == 4
+
+    # The entry is evicted before pass 2 runs.
+    cache.put("b", _vec(2))
+    cache.put("c", _vec(3))
+    buf = ffi.new("float[]", out_dim[0])
+    assert lib.lembed_cache_get_copy(cache._cache, c_buf, buf, out_dim[0], out_dim) == 0
+
+    # And the high-level wrapper degrades to a miss instead of crashing.
+    assert cache.get("a") is None
+
+
+def test_realistic_dimension_roundtrip():
+    """A 384-dimension embedding must survive the two-pass copy."""
+    dim = 384
+    cache = EmbeddingCache(capacity=4)
+    expected = np.linspace(0.0, 1.0, dim, dtype=np.float32)
+    cache.put("emb", expected)
+    got = cache.get("emb")
+    assert got is not None
+    assert got.shape == (dim,)
+    np.testing.assert_array_equal(got, expected)
+
+
+def test_concurrent_reads_while_evicting():
+    """Readers must only ever see valid vectors, never freed memory.
+
+    With the borrowed pointer, an eviction racing a read corrupted the heap;
+    with lembed_cache_get_copy() the copy happens under the cache lock.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    capacity = 4
+    n_entries = 64
+    dim = 32
+    cache = EmbeddingCache(capacity=capacity)
+    expected = {f"key-{i}": np.full(dim, float(i), dtype=np.float32) for i in range(8)}
+
+    def writer():
+        for i in range(n_entries):
+            key = f"key-{i % 8}"
+            cache.put(key, expected[key])
+
+    def reader(_):
+        for i in range(n_entries):
+            key = f"key-{i % 8}"
+            got = cache.get(key)
+            if got is not None:
+                # Either a valid cached vector, or a miss: never garbage.
+                assert got.shape == (dim,)
+                assert np.all(got == expected[key]), f"corrupted read for {key}"
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(writer)] + [pool.submit(reader, i) for i in range(3)]
+        for future in futures:
+            future.result()
+
+    assert cache.current_size <= capacity

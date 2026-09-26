@@ -93,6 +93,7 @@ def test_binding_ffi_lib():
         "lembed_sparse_text_embedding_stats_v2",
         "lembed_image_embedding_stats_v2",
         "lembed_cache_get",
+        "lembed_cache_get_copy",
     ):
         assert hasattr(lib, symbol), f"Missing C symbol: {symbol}"
 

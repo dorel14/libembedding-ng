@@ -36,8 +36,34 @@ void lembed_cache_clear(lembed_cache_t* cache);
  * entry is overwritten by lembed_cache_put(), evicted by LRU pressure,
  * cleared by lembed_cache_clear(), or released by lembed_cache_free().
  * The caller must copy the data it needs and must never free() that pointer
- * (doing so would be a double free at the next eviction). */
+ * (doing so would be a double free at the next eviction).
+ *
+ * Because the cache keeps no lock once this function returns, a concurrent
+ * put/eviction/clear on the same key can free the buffer while the caller
+ * copies it. Prefer lembed_cache_get_copy(), which copies under the lock.
+ *
+ * DEPRECATED: use lembed_cache_get_copy(), which has no such hazard.
+ * Kept for ABI compatibility with existing C callers. */
 int lembed_cache_get(lembed_cache_t* cache, const char* text, float** out_vec, int* dim);
+
+/* Copies the cached embedding into caller-owned storage, under the cache lock.
+ * No cache-owned pointer escapes, so the copy is safe against a concurrent
+ * eviction, overwrite or clear(). The caller keeps ownership of out_vec.
+ *
+ * `capacity` is the number of floats out_vec can hold. On a hit, *out_dim
+ * always receives the stored dimension, even when the copy does not happen,
+ * so a caller that does not know the dimension can query it by passing
+ * capacity 0 and a NULL out_vec.
+ *
+ * Return value:
+ *    1  hit, `capacity` was large enough and out_vec holds the embedding
+ *    0  miss (absent key or expired entry), or invalid argument
+ *   -1  hit, but `capacity` is too small (or out_vec is NULL): *out_dim holds
+ *       the required size and out_vec is left untouched
+ *
+ * Thread-safe with respect to the other cache functions. */
+int lembed_cache_get_copy(lembed_cache_t* cache, const char* text, float* out_vec,
+                          int capacity, int* out_dim);
 void lembed_cache_put(lembed_cache_t* cache, const char* text, const float* vec, int dim);
 size_t lembed_cache_size(const lembed_cache_t* cache);
 size_t lembed_cache_capacity(const lembed_cache_t* cache);
@@ -97,6 +123,16 @@ void lembed_cache_clear(lembed_cache_t* cache) {
 int lembed_cache_get(lembed_cache_t* cache, const char* text, float** out_vec, int* dim) {
     if (!cache || !text || !out_vec || !dim) return 0;
     return cache->cache.get(text, out_vec, dim) ? 1 : 0;
+}
+
+int lembed_cache_get_copy(lembed_cache_t* cache, const char* text, float* out_vec,
+                          int capacity, int* out_dim) {
+    if (!cache || !text || !out_dim) return 0;
+    int dim = 0;
+    int r = cache->cache.get_copy(text, out_vec, capacity, &dim);
+    if (r == 0) return 0;
+    *out_dim = dim;
+    return r;
 }
 
 void lembed_cache_put(lembed_cache_t* cache, const char* text, const float* vec, int dim) {

@@ -657,6 +657,7 @@ lembed_cache_t* lembed_cache_create(const lembed_cache_config_t* config);
 void lembed_cache_free(lembed_cache_t* cache);
 void lembed_cache_clear(lembed_cache_t* cache);
 int lembed_cache_get(lembed_cache_t* cache, const char* text, float** out_vec, int* dim);
+int lembed_cache_get_copy(lembed_cache_t* cache, const char* text, float* out_vec, int capacity, int* out_dim);
 void lembed_cache_put(lembed_cache_t* cache, const char* text, const float* vec, int dim);
 size_t lembed_cache_size(const lembed_cache_t* cache);
 size_t lembed_cache_capacity(const lembed_cache_t* cache);
