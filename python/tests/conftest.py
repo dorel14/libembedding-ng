@@ -56,7 +56,7 @@ def bge_small():
 # Locate the built shared library and ensure its directory is on PATH
 # so Windows can resolve the runtime DLLs (onnxruntime, libcurl, MSVC runtime).
 # The import is deliberately placed here: it needs sys.path to be patched first.
-from libembedding._binding import _find_library
+from libembedding._binding import _find_library  # noqa: E402
 
 _lib_path = _find_library()
 if os.path.exists(_lib_path):
