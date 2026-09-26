@@ -86,7 +86,7 @@ Les corrections de code doivent être faites en  mode 'edit', je ne tolère aucu
 | Dépendance | Requise | Notes |
 |---|---|---|
 | ONNX Runtime >= 1.16 | Oui | Bundlé dans les wheels et `third_party/onnxruntime/` sur Windows |
-| llama.cpp | Oui | Backend GGUF. Récupéré via CMake `FetchContent` (v0.3.0). |
+| llama.cpp | Oui | Backend GGUF. Vendorisé dans `third_party/llama.cpp` et compilé via `add_subdirectory` (aucun téléchargement à la configure). |
 | libcurl >= 7.0 | Non | Téléchargement de modèles. Désactivée avec `-DLIBEMBEDDING_NO_DOWNLOAD=ON` |
 | libcurl runtime DLL (Windows) | Non | Aucun binaire n'est versionné. Installer via `pwsh -File scripts/fetch_windows_libcurl.ps1` (curl-for-win, version déduite de `curlver.h`, SHA-256 épinglé) qui place `libcurl-x64.dll` dans `third_party/curl/bin/`. Sinon CMake échoue à la configure. |
 | cJSON | Oui | Bundlé dans `third_party/` |

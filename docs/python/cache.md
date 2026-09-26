@@ -38,6 +38,17 @@ cache = EmbeddingCache(capacity=4096, ttl_seconds=0, dim=0)
 | `capacity` | `int` | Capacité maximale du cache |
 | `current_size` | `int` | Nombre actuel d'entrées |
 
+## Propriété des données renvoyées
+
+`get()` renvoie un tableau NumPy **appartenant à Python** : la copie est faite
+par `lembed_cache_get_copy()` pendant que le cache C tient encore son verrou.
+Aucun pointeur détenu par le cache n'est exposé, donc une éviction, un
+écrasement ou un `clear()` concurrent ne peut pas libérer le tampon pendant la
+copie. Le tableau renvoyé reste valide après l'éviction de son entrée, et deux
+lectures successives de la même clé renvoient deux copies indépendantes.
+
+Voir [Cache LRU C API](c_api/embedding_cache.html) pour l'équivalent C.
+
 ## Contexte manager
 
 ```python
