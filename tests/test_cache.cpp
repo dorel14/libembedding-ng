@@ -17,6 +17,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+/* Required on Linux/macOS, where libembedding is a header-only INTERFACE
+ * target: exactly one translation unit must define this to emit the code. */
+#define LIBEMBEDDING_IMPLEMENTATION
 #include <libembedding/libembedding.h>
 
 #include <cstdio>
