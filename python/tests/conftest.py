@@ -8,12 +8,28 @@ from pathlib import Path
 import pytest
 
 # Ensure the src layout is importable when running tests from the repo root.
-ROOT = Path(__file__).resolve().parent.parent
+# conftest.py lives in <repo>/python/tests, so the repository root is three
+# levels up (tests -> python -> repo).
+ROOT = Path(__file__).resolve().parent.parent.parent
 SRC = ROOT / "python" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 BGE_SMALL_MODEL = "BAAI/bge-small-en-v1.5"
+
+# Fixtures that build a model, i.e. that need the model cache or the network.
+# pytest ignores marks applied to a fixture, so the `network` marker is added at
+# collection time from these names (see pytest_collection_modifyitems).
+NETWORK_FIXTURES = frozenset({"bge_small", "image_model", "sparse_model"})
+
+
+def pytest_collection_modifyitems(items):
+    """Mark every test requesting a model fixture with `network`."""
+    for item in items:
+        if "network" in item.keywords:
+            continue
+        if NETWORK_FIXTURES.intersection(getattr(item, "fixturenames", ())):
+            item.add_marker("network")
 
 
 @pytest.fixture
@@ -39,7 +55,8 @@ def bge_small():
 
 # Locate the built shared library and ensure its directory is on PATH
 # so Windows can resolve the runtime DLLs (onnxruntime, libcurl, MSVC runtime).
-from libembedding._binding import _find_library
+# The import is deliberately placed here: it needs sys.path to be patched first.
+from libembedding._binding import _find_library  # noqa: E402
 
 _lib_path = _find_library()
 if os.path.exists(_lib_path):

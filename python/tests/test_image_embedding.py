@@ -1,7 +1,7 @@
 """Integration tests for ImageEmbedding.
 
-These tests require either a cached model or network access.
-They are skipped if the model cannot be loaded.
+Tests taking the ``image_model`` fixture require either a cached model or
+network access; they are skipped when the model cannot be loaded.
 """
 
 import os
@@ -11,16 +11,21 @@ import numpy as np
 import pytest
 
 
-def _image_model(**kwargs):
-    """Create an image embedding model, skipping if download fails."""
-    from libembedding import ImageEmbedding
-    from libembedding.exceptions import DownloadError
+@pytest.fixture
+def image_model():
+    """Factory building an ImageEmbedding, skipping if the download fails."""
 
-    kwargs.setdefault("show_download_progress", False)
-    try:
-        return ImageEmbedding("Qdrant/clip-ViT-B-32-vision", **kwargs)
-    except DownloadError:
-        pytest.skip("image model download unavailable")
+    def _factory(**kwargs):
+        from libembedding import ImageEmbedding
+        from libembedding.exceptions import DownloadError
+
+        kwargs.setdefault("show_download_progress", False)
+        try:
+            return ImageEmbedding("Qdrant/clip-ViT-B-32-vision", **kwargs)
+        except DownloadError:
+            pytest.skip("image model download unavailable")
+
+    return _factory
 
 
 def _create_test_image(path: str) -> None:
@@ -113,8 +118,8 @@ def test_image_list_supported_models():
         assert m.model_code
 
 
-def test_image_embed_files():
-    model = _image_model()
+def test_image_embed_files(image_model):
+    model = image_model()
     with tempfile.TemporaryDirectory() as tmpdir:
         img_path = os.path.join(tmpdir, "test.png")
         _create_test_image(img_path)
@@ -125,8 +130,8 @@ def test_image_embed_files():
     model.close()
 
 
-def test_image_embed_files_multiple():
-    model = _image_model()
+def test_image_embed_files_multiple(image_model):
+    model = image_model()
     with tempfile.TemporaryDirectory() as tmpdir:
         paths = []
         for i in range(3):
@@ -138,15 +143,15 @@ def test_image_embed_files_multiple():
     model.close()
 
 
-def test_image_embed_files_empty():
-    model = _image_model()
+def test_image_embed_files_empty(image_model):
+    model = image_model()
     result = model.embed_files([])
     assert result.shape == (0, model.dim)
     model.close()
 
 
-def test_image_embed_bytes():
-    model = _image_model()
+def test_image_embed_bytes(image_model):
+    model = image_model()
     with tempfile.TemporaryDirectory() as tmpdir:
         img_path = os.path.join(tmpdir, "test.png")
         _create_test_image(img_path)
@@ -158,15 +163,15 @@ def test_image_embed_bytes():
     model.close()
 
 
-def test_image_embed_bytes_empty():
-    model = _image_model()
+def test_image_embed_bytes_empty(image_model):
+    model = image_model()
     result = model.embed_bytes([])
     assert result.shape == (0, model.dim)
     model.close()
 
 
-def test_image_info():
-    model = _image_model()
+def test_image_info(image_model):
+    model = image_model()
     info = model.info()
     assert info.dimension > 0
     # max_length is 0 for image models (N/A)
@@ -174,14 +179,14 @@ def test_image_info():
     model.close()
 
 
-def test_image_name():
-    model = _image_model()
+def test_image_name(image_model):
+    model = image_model()
     assert "clip" in model.name.lower() or "vision" in model.name.lower()
     model.close()
 
 
-def test_image_stats():
-    model = _image_model()
+def test_image_stats(image_model):
+    model = image_model()
     with tempfile.TemporaryDirectory() as tmpdir:
         img_path = os.path.join(tmpdir, "test.png")
         _create_test_image(img_path)
@@ -194,16 +199,25 @@ def test_image_stats():
     model.close()
 
 
-def test_image_context_manager():
-    try:
-        with _image_model() as model:
-            assert model.dim > 0
-    except pytest.skip.Exception:
-        pass
+def test_image_context_manager(image_model):
+    """Leaving the context must release the C context."""
+    with image_model() as model:
+        assert model.dim > 0
+        ctx = model._ctx
+    assert model._ctx is None, "__exit__ must close the context"
+    assert ctx is not None, "the context must be live inside the with block"
 
 
-def test_image_batch_size_override():
-    model = _image_model()
+def test_image_context_manager_closes_twice(image_model):
+    """close() must stay idempotent so a manual close in a with block is safe."""
+    with image_model() as model:
+        model.close()
+        model.close()
+    assert model._ctx is None
+
+
+def test_image_batch_size_override(image_model):
+    model = image_model()
     with tempfile.TemporaryDirectory() as tmpdir:
         img_path = os.path.join(tmpdir, "test.png")
         _create_test_image(img_path)

@@ -17,16 +17,23 @@ def test_reranker_list_supported_models():
         assert m.max_tokens > 0
 
 
+@pytest.mark.network
 def test_reranker_auto_profile_map():
+    """Every documented profile must build a usable reranker (or skip offline)."""
     from libembedding.reranker import Reranker_auto
 
-    # Should not raise for valid profiles (may skip due to network)
     for profile in ("fast", "balanced", "quality"):
         try:
             reranker = Reranker_auto(profile, offline=True)
-            reranker.close()
         except (OSError, RuntimeError, ValueError, LembedError):
-            pytest.skip("model download unavailable for reranker auto-config")
+            pytest.skip(f"model unavailable for reranker profile {profile!r}")
+        try:
+            desc = reranker.info()
+            assert reranker.name, f"empty name for profile {profile!r}"
+            assert desc.max_length > 0, f"invalid max_length for profile {profile!r}"
+            assert desc.batch_size > 0, f"invalid batch_size for profile {profile!r}"
+        finally:
+            reranker.close()
 
 
 def test_reranker_rerank_result_dataclass():
@@ -81,11 +88,17 @@ def test_reranker_model_desc_dataclass():
 
 
 def test_reranker_clear_cache():
+    """Clearing the reranker autotune cache must reach the C layer, twice."""
+    from libembedding._binding import lib
     from libembedding.reranker import clear_reranker_autotune_cache
 
-    # Should not raise
-    clear_reranker_autotune_cache()
-    clear_reranker_autotune_cache("jinaai/jina-reranker-v1-turbo-en-quantized")
+    assert hasattr(lib, "lembed_autotune_unified_clear_cache")
+    assert clear_reranker_autotune_cache() is None
+    assert clear_reranker_autotune_cache() is None
+    assert (
+        clear_reranker_autotune_cache("jinaai/jina-reranker-v1-turbo-en-quantized")
+        is None
+    )
 
 
 def test_reranker_auto_config_invalid_objective():

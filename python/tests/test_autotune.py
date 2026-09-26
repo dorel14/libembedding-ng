@@ -15,11 +15,21 @@ from libembedding.exceptions import LembedError
 
 
 def test_clear_autotune_cache_no_args():
-    clear_autotune_cache()
+    """Clearing every entry must reach the C layer and stay idempotent."""
+    from libembedding._binding import lib
+
+    assert hasattr(lib, "lembed_autotune_clear_cache")
+    assert clear_autotune_cache() is None
+    assert clear_autotune_cache() is None
 
 
 def test_clear_autotune_cache_with_model():
-    clear_autotune_cache("BAAI/bge-small-en-v1.5")
+    """Clearing a single model must also be idempotent."""
+    from libembedding._binding import lib
+
+    assert hasattr(lib, "lembed_autotune_clear_cache")
+    assert clear_autotune_cache("BAAI/bge-small-en-v1.5") is None
+    assert clear_autotune_cache("BAAI/bge-small-en-v1.5") is None
 
 
 @pytest.mark.network
