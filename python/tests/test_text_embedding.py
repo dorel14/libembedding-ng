@@ -8,18 +8,6 @@ import pytest
 from libembedding import TextEmbedding
 
 
-def _bge_small(**kwargs):
-    """Create a BGE-small model, skipping the test if download fails."""
-    from libembedding import TextEmbedding
-    from libembedding.exceptions import DownloadError
-
-    kwargs.setdefault("show_download_progress", False)
-    try:
-        return TextEmbedding("BAAI/bge-small-en-v1.5", **kwargs)
-    except DownloadError:
-        pytest.skip("model download unavailable (network restriction in CI)")
-
-
 def test_list_text_models():
     from libembedding import list_text_models
 
@@ -31,8 +19,8 @@ def test_list_text_models():
         assert m.model_code
 
 
-def test_text_embedding_basic():
-    model = _bge_small()
+def test_text_embedding_basic(bge_small):
+    model = bge_small()
     assert model.dim == 384
     result = model.embed(["Hello world", "How are you?"])
     assert isinstance(result, np.ndarray)
@@ -43,15 +31,15 @@ def test_text_embedding_basic():
     model.close()
 
 
-def test_text_embedding_empty():
-    model = _bge_small()
+def test_text_embedding_empty(bge_small):
+    model = bge_small()
     result = model.embed([])
     assert result.shape == (0, model.dim)
     model.close()
 
 
-def test_text_embedding_cosine_similarity():
-    model = _bge_small()
+def test_text_embedding_cosine_similarity(bge_small):
+    model = bge_small()
     result = model.embed(
         [
             "The cat sat on the mat",
@@ -65,24 +53,24 @@ def test_text_embedding_cosine_similarity():
     model.close()
 
 
-def test_text_embedding_threads_param():
-    model = _bge_small(threads=2)
+def test_text_embedding_threads_param(bge_small):
+    model = bge_small(threads=2)
     info = model.info()
     assert info.num_threads == 2
     model.close()
 
 
-def test_text_embedding_num_threads_deprecated():
+def test_text_embedding_num_threads_deprecated(bge_small):
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        _bge_small(num_threads=2)
+        bge_small(num_threads=2)
         assert len(w) == 1
         assert issubclass(w[0].category, DeprecationWarning)
         assert "num_threads" in str(w[0].message)
 
 
-def test_text_embedding_batch_size():
-    model = _bge_small(batch_size=64)
+def test_text_embedding_batch_size(bge_small):
+    model = bge_small(batch_size=64)
     assert model.batch_size == 64
     info = model.info()
     assert info.batch_size == 64
@@ -93,8 +81,8 @@ def test_text_embedding_batch_size():
     model.close()
 
 
-def test_text_embedding_info():
-    model = _bge_small()
+def test_text_embedding_info(bge_small):
+    model = bge_small()
     info = model.info()
     assert info.dimension == 384
     assert info.dimension > 0
@@ -103,14 +91,14 @@ def test_text_embedding_info():
     model.close()
 
 
-def test_text_embedding_name():
-    model = _bge_small()
+def test_text_embedding_name(bge_small):
+    model = bge_small()
     assert "bge-small" in model.name
     model.close()
 
 
-def test_text_embedding_offline_param():
-    model = _bge_small(offline=False)
+def test_text_embedding_offline_param(bge_small):
+    model = bge_small(offline=False)
     assert model.dim == 384
     info = model.info()
     assert info.batch_size == 256
@@ -125,8 +113,8 @@ def test_text_embedding_offline_missing_model():
         TextEmbedding("BAAI/bge-large-en-v1.5", offline=True)
 
 
-def test_text_embedding_stats():
-    model = _bge_small()
+def test_text_embedding_stats(bge_small):
+    model = bge_small()
     model.embed(["Hello world", "Test sentence"])
     stats = model.stats()
     assert stats.texts_embedded == 2
@@ -135,8 +123,8 @@ def test_text_embedding_stats():
     model.close()
 
 
-def test_text_embedding_max_length():
-    model = _bge_small()
+def test_text_embedding_max_length(bge_small):
+    model = bge_small()
     assert model.info().max_length > 0
     model.close()
 
@@ -177,23 +165,23 @@ def test_text_embedding_from_mode_invalid():
         TextEmbedding.from_mode("invalid_mode")
 
 
-def test_text_embedding_repr():
-    model = _bge_small()
+def test_text_embedding_repr(bge_small):
+    model = bge_small()
     r = repr(model)
     assert "TextEmbedding" in r
     assert f"dim={model.dim}" in r
     model.close()
 
 
-def test_text_embedding_context_manager():
-    with _bge_small() as model:
+def test_text_embedding_context_manager(bge_small):
+    with bge_small() as model:
         assert model.dim == 384
         result = model.embed(["test"])
         assert result.shape == (1, 384)
 
 
-def test_text_embedding_stream():
-    model = _bge_small()
+def test_text_embedding_stream(bge_small):
+    model = bge_small()
     texts = ["Hello", "World", "Test"]
     received = []
 
@@ -207,8 +195,8 @@ def test_text_embedding_stream():
     model.close()
 
 
-def test_text_embedding_batched():
-    model = _bge_small()
+def test_text_embedding_batched(bge_small):
+    model = bge_small()
     texts = ["a", "b", "c", "d", "e"]
     batches = list(model.embed_batched(texts, batch_size=2))
     assert len(batches) == 5

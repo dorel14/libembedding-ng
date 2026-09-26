@@ -24,6 +24,26 @@
 /* Define to disable image embedding support */
 /* #define LIBEMBEDDING_NO_IMAGE */
 
+/* =========================================================================
+ * Header-only implementation guard
+ *
+ * On Linux/macOS the library is an INTERFACE (header-only) target: the user
+ * must define LIBEMBEDDING_IMPLEMENTATION in EXACTLY ONE .cpp file:
+ *
+ *     // libembedding_impl.cpp  (the only file that defines it)
+ *     #define LIBEMBEDDING_IMPLEMENTATION
+ *     #include <libembedding/libembedding.h>
+ *
+ * Every other translation unit just includes <libembedding/libembedding.h>.
+ * Defining it twice causes duplicate symbols; forgetting it causes link
+ * errors. Both mistakes are caught at compile time here and by the
+ * `#error` guards at the top of every detail/*_impl.hpp header.
+ * On Windows the DLL is prebuilt, so nothing has to be defined.
+ * ========================================================================= */
+#if defined(LIBEMBEDDING_IMPLEMENTATION) && !defined(__cplusplus)
+#error "LIBEMBEDDING_IMPLEMENTATION must be defined in a C++ file (.cpp), not in a C file (.c)"
+#endif
+
 /* Default configuration values */
 #define LEMBED_DEFAULT_BATCH_SIZE    256
 #define LEMBED_DEFAULT_MAX_LENGTH    512

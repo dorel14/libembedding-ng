@@ -43,7 +43,8 @@ def _find_library() -> str:
 # On Windows the loader resolves a DLL's imports from the executable directory,
 # the directories registered with SetDllDirectoryW, and PATH. The libcurl build
 # that ships inside the package lives in the package directory, which is not the
-# same directory as libembedding.dll in a source checkout, so both are registered.
+# same directory as libembedding.dll in a source checkout, so both are registered
+# (see _runtime_dirs for the bundled third_party/curl/bin location).
 _DEPENDENT_DLLS = (
     "onnxruntime.dll",
     "onnxruntime_providers_shared.dll",
@@ -62,6 +63,10 @@ def _runtime_dirs(lib_path: Path) -> list[Path]:
     # Common build trees, so a source checkout works without extra setup.
     root = Path(__file__).parent.parent.parent.parent
     dirs += [root / "build" / "bin" / "Debug", root / "build" / "bin" / "Release"]
+    # Bundled libcurl runtime on Windows (installed by
+    # scripts/fetch_windows_libcurl.ps1); absent from a wheel install, hence
+    # the is_dir() filter below.
+    dirs.append(root / "third_party" / "curl" / "bin")
     seen: set[Path] = set()
     ordered: list[Path] = []
     for d in dirs:

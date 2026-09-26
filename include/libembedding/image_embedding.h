@@ -47,13 +47,19 @@ lembed_status_t lembed_image_embedding_embed_bytes(
 
 int lembed_image_embedding_dim(const lembed_image_embedding_t* ctx);
 
-/* Introspection */
+/* Introspection
+ * NOTE: desc/model_name return memory owned by the context: the pointers are
+ * dangling after lembed_image_embedding_free(). Copy the fields you need. */
 const lembed_model_desc_t* lembed_image_embedding_desc(const lembed_image_embedding_t* ctx);
 const char* lembed_image_embedding_model_name(const lembed_image_embedding_t* ctx);
 int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx);
 
 /* Runtime statistics */
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out);
+/* Versioned stats (cache fields present for API parity with the dense/rerank
+ * contexts). Image contexts have no embedding cache, so cache_hits,
+ * cache_misses and cache_size are always 0. */
+void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed_stats_v2_t* out);
 
 void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 
@@ -381,6 +387,17 @@ void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_st
 
 void lembed_image_embedding_free(lembed_image_embedding_t* ctx) {
     delete ctx;
+}
+
+void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed_stats_v2_t* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!ctx) return;
+    out->base.texts_embedded = ctx->texts_embedded;
+    out->base.batches_run = ctx->batches_run;
+    out->base.avg_latency_ms = ctx->stats_calls > 0
+        ? ctx->total_latency_ms / (double)ctx->stats_calls
+        : 0.0;
 }
 
 #ifdef __cplusplus

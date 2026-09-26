@@ -26,6 +26,7 @@ option(LIBEMBEDDING_BUILD_TESTS   "Build tests"                               ON
 option(LIBEMBEDDING_BUILD_EXAMPLES "Build examples"                           ON)
 option(LIBEMBEDDING_BUILD_BENCHMARKS "Build benchmarks"                       OFF)
 option(LIBEMBEDDING_BUILD_SHARED    "Build shared library for bindings"       OFF)
+option(LIBEMBEDDING_CURL_STATIC    "libcurl is linked statically or its runtime is managed by the caller" OFF)
 
 # =========================================================================
 # Dependencies
@@ -54,19 +55,62 @@ if(WIN32)
     endif()
     include_directories(${CURL_INCLUDE_DIR})
 
-    # CRITICAL: Create the missing target expected by tests and examples
-    if(NOT TARGET ONNXRuntime::ONNXRuntime)
-        add_library(ONNXRuntime::ONNXRuntime UNKNOWN IMPORTED)
-        set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
-            IMPORTED_LOCATION "${ONNXRuntime_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRuntime_INCLUDE_DIR}"
-        )
-    endif()
-
     # Disable conflicting min/max macros globally on Windows
     add_compile_definitions(NOMINMAX)
 else()
     find_package(CURL REQUIRED)
+endif()
+
+# -------------------------------------------------------------------------
+# libcurl runtime DLL (Windows)
+#
+# third_party/curl ships headers + an import library only. The link
+# succeeds, but libembedding.dll and every test/example import
+# libcurl-x64.dll at load time: without it the process dies with
+# 0xC0000135 (STATUS_DLL_NOT_FOUND), which ctest reports as a bogus
+# "Timeout". Resolve the runtime here so the failure is a configure-time
+# error with an actionable message instead.
+#
+# Search order: explicit override, bundled runtime, CURL_LIBRARY and its
+# sibling bin/ (vcpkg layout), Python package dir (wheel/dev artifact).
+# -------------------------------------------------------------------------
+if(WIN32 AND NOT LIBEMBEDDING_NO_DOWNLOAD AND NOT LIBEMBEDDING_CURL_STATIC)
+    if(CURL_RUNTIME_DLL AND EXISTS "${CURL_RUNTIME_DLL}")
+        set(LIBEMBEDDING_CURL_RUNTIME_DLL "${CURL_RUNTIME_DLL}")
+    else()
+        set(_curl_runtime_candidates "")
+        file(GLOB _bundled "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl/bin/libcurl*.dll")
+        list(APPEND _curl_runtime_candidates ${_bundled})
+        if(CURL_LIBRARY)
+            get_filename_component(_curl_lib_dir "${CURL_LIBRARY}" DIRECTORY)
+            file(GLOB _curl_same "${_curl_lib_dir}/libcurl*.dll")
+            file(GLOB _curl_bin "${_curl_lib_dir}/../bin/libcurl*.dll")
+            list(APPEND _curl_runtime_candidates ${_curl_same} ${_curl_bin})
+        endif()
+        file(GLOB _curl_python "${CMAKE_CURRENT_SOURCE_DIR}/python/src/libembedding/libcurl*.dll")
+        list(APPEND _curl_runtime_candidates ${_curl_python})
+
+        list(REMOVE_DUPLICATES _curl_runtime_candidates)
+        if(_curl_runtime_candidates)
+            list(GET _curl_runtime_candidates 0 LIBEMBEDDING_CURL_RUNTIME_DLL)
+        endif()
+        unset(_curl_runtime_candidates)
+    endif()
+
+    if(NOT LIBEMBEDDING_CURL_RUNTIME_DLL)
+        message(FATAL_ERROR
+            "libcurl runtime DLL not found.\n"
+            "libembedding.dll links against libcurl and needs libcurl-x64.dll next to the "
+            "executables at run time.\n"
+            "Fix it with one of:\n"
+            "  pwsh -File scripts/fetch_windows_libcurl.ps1        (installs the bundled runtime)\n"
+            "  -DCURL_LIBRARY=<vcpkg>\\installed\\x64-windows\\lib\\libcurl.lib\n"
+            "  -DCURL_RUNTIME_DLL=<path>\\libcurl-x64.dll\n"
+            "  -DLIBEMBEDDING_NO_DOWNLOAD=ON                       (no download code at all)\n"
+            "  -DLIBEMBEDDING_CURL_STATIC=ON                        (runtime managed by the caller)")
+    endif()
+    get_filename_component(LIBEMBEDDING_CURL_RUNTIME_DLL "${LIBEMBEDDING_CURL_RUNTIME_DLL}" ABSOLUTE)
+    message(STATUS "libcurl runtime: ${LIBEMBEDDING_CURL_RUNTIME_DLL}")
 endif()
 
 # ONNX Runtime (required)
@@ -269,14 +313,11 @@ if(WIN32)
             endif()
         endforeach()
 
-        # Curl DLL
-        if(DEFINED CURL_LIBRARY)
-            get_filename_component(_curl_lib_dir "${CURL_LIBRARY}" DIRECTORY)
-            if(EXISTS "${_curl_lib_dir}/../bin/libcurl-x64.dll")
-                list(APPEND _dlls "${_curl_lib_dir}/../bin/libcurl-x64.dll")
-            elseif(EXISTS "${_curl_lib_dir}/libcurl.dll")
-                list(APPEND _dlls "${_curl_lib_dir}/libcurl.dll")
-            endif()
+        # Curl DLL: the runtime resolved at configure time (bundled
+        # third_party/curl/bin, vcpkg bin/, or CURL_RUNTIME_DLL). Copying it
+        # is what keeps the test executables runnable.
+        if(LIBEMBEDDING_CURL_RUNTIME_DLL)
+            list(APPEND _dlls "${LIBEMBEDDING_CURL_RUNTIME_DLL}")
         endif()
 
         # llama.cpp runtime DLLs

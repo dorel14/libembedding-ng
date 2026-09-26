@@ -165,17 +165,70 @@ lembed_status_t lembed_text_embedding_embed(
 
         auto t_start = std::chrono::high_resolution_clock::now();
 
+        /* Embed the given subset of texts into a contiguous buffer */
+        auto embed_subset = [&](const std::vector<const char*>& subset,
+                                float* out) -> lembed_status_t {
+            int n = (int)subset.size();
+            if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
+                lembed__llama_embed_batch(ctx, subset.data(), n, out);
+                return LEMBED_OK;
+            }
+            return lembed__onnx_embed(ctx, subset.data(), n, batch_size, out);
+        };
+
         lembed_status_t s;
-        if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
-            lembed__llama_embed_batch(ctx, texts, num_texts, result->data);
-            ctx->texts_embedded += num_texts;
-            ctx->batches_run++;
+        if (ctx->cache) {
+            /* Serve hits from the LRU cache, run the model on misses only */
+            std::vector<const char*> miss_texts;
+            std::vector<int> miss_indices;
+            std::vector<float> hit_vec;
+            miss_texts.reserve(num_texts);
+            miss_indices.reserve(num_texts);
+
+            for (int i = 0; i < num_texts; i++) {
+                if (ctx->cache->get_copy(texts[i], hit_vec) && (int)hit_vec.size() == dim) {
+                    std::memcpy(result->data + (size_t)i * dim, hit_vec.data(),
+                                (size_t)dim * sizeof(float));
+                    ctx->cache_hits++;
+                } else {
+                    miss_texts.push_back(texts[i]);
+                    miss_indices.push_back(i);
+                    ctx->cache_misses++;
+                }
+            }
+
             s = LEMBED_OK;
-        } else {
-            s = lembed__onnx_embed(ctx, texts, num_texts, batch_size, result->data);
+            if (!miss_texts.empty()) {
+                std::vector<float> miss_buf((size_t)miss_texts.size() * dim);
+                s = embed_subset(miss_texts, miss_buf.data());
+                if (s == LEMBED_OK) {
+                    for (size_t k = 0; k < miss_indices.size(); k++) {
+                        const float* vec = miss_buf.data() + k * dim;
+                        std::memcpy(result->data + (size_t)miss_indices[k] * dim, vec,
+                                    (size_t)dim * sizeof(float));
+                        ctx->cache->put(texts[miss_indices[k]], vec, dim);
+                    }
+                }
+            }
             if (s == LEMBED_OK) {
                 ctx->texts_embedded += num_texts;
-                ctx->batches_run += lembed::detail::batch_count(num_texts, batch_size);
+                if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
+                    if (!miss_texts.empty()) ctx->batches_run++;
+                } else {
+                    ctx->batches_run += lembed::detail::batch_count(
+                        (int)miss_texts.size(), batch_size);
+                }
+            }
+        } else {
+            std::vector<const char*> all_texts(texts, texts + num_texts);
+            s = embed_subset(all_texts, result->data);
+            if (s == LEMBED_OK) {
+                ctx->texts_embedded += num_texts;
+                if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
+                    ctx->batches_run++;
+                } else {
+                    ctx->batches_run += lembed::detail::batch_count(num_texts, batch_size);
+                }
             }
         }
 
@@ -290,6 +343,9 @@ lembed_status_t lembed_text_embedding_create_from_path(
 
         ctx->model_name_str = std::filesystem::path(dir_path).filename().string();
         ctx->batch_size = (options->batch_size > 0) ? options->batch_size : LEMBED_DEFAULT_BATCH_SIZE;
+        if (options->cache_size > 0 && !ctx->cache) {
+            ctx->cache = new lembed::detail::LRUCache((size_t)options->cache_size, 0);
+        }
         lembed__text_update_desc(ctx);
         *out = ctx;
         return LEMBED_OK;
@@ -347,6 +403,9 @@ void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_s
 }
 
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx) {
+    if (!ctx) return;
+    delete ctx->cache;
+    ctx->cache = nullptr;
     delete ctx;
 }
 

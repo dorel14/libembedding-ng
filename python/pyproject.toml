@@ -76,6 +76,9 @@ libembedding = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "network: test requires network access (model download)",
+]
 
 [tool.ruff]
 line-length = 88

@@ -45,6 +45,7 @@ EXPORTS
     lembed_sparse_text_embedding_model_name
     lembed_sparse_text_embedding_max_length
     lembed_sparse_text_embedding_stats
+    lembed_sparse_text_embedding_stats_v2
     lembed_sparse_text_embedding_free
 
     ; ---- Image embedding ----
@@ -57,6 +58,7 @@ EXPORTS
     lembed_image_embedding_model_name
     lembed_image_embedding_max_length
     lembed_image_embedding_stats
+    lembed_image_embedding_stats_v2
     lembed_image_embedding_free
 
     ; ---- Reranker ----

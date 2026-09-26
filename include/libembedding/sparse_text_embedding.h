@@ -33,13 +33,19 @@ lembed_status_t lembed_sparse_text_embedding_embed(
     const lembed_sparse_options_t* sparse_opts,
     lembed_sparse_embeddings_t* result);
 
-/* Introspection */
+/* Introspection
+ * NOTE: desc/model_name return memory owned by the context: the pointers are
+ * dangling after lembed_sparse_text_embedding_free(). Copy the fields you need. */
 const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx);
 
 /* Runtime statistics */
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
+/* Versioned stats (cache fields present for API parity with the dense/rerank
+ * contexts). Sparse contexts have no embedding cache, so cache_hits,
+ * cache_misses and cache_size are always 0. */
+void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
 
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 
@@ -412,6 +418,17 @@ void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx
 
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx) {
     delete ctx;
+}
+
+void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!ctx) return;
+    out->base.texts_embedded = ctx->texts_embedded;
+    out->base.batches_run = ctx->batches_run;
+    out->base.avg_latency_ms = ctx->stats_calls > 0
+        ? ctx->total_latency_ms / (double)ctx->stats_calls
+        : 0.0;
 }
 
 /* Find optimal sparse configuration by benchmarking variants.

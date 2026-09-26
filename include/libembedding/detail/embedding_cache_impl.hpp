@@ -38,6 +38,9 @@ public:
 
     ~LRUCache() { clear(); }
 
+    // Returns a pointer owned by the cache (borrowed, see embedding_cache.h).
+    // The mutex is released before the caller reads the buffer: a concurrent
+    // put/eviction on the same key can free it while the caller is copying.
     bool get(const std::string& key, float** out_vec, int* dim) {
         std::lock_guard<std::mutex> lock(mtx_);
         auto it = map_.find(key);

@@ -192,12 +192,14 @@ class ImageEmbedding:
 
     def stats(self) -> Stats:
         """Return runtime usage statistics."""
-        s = ffi.new("lembed_stats_t *")
-        lib.lembed_image_embedding_stats(self._ctx, s)
+        s = ffi.new("lembed_stats_v2_t *")
+        lib.lembed_image_embedding_stats_v2(self._ctx, s)
         return Stats(
-            texts_embedded=s.texts_embedded,
-            batches_run=s.batches_run,
-            avg_latency_ms=s.avg_latency_ms,
+            texts_embedded=s.base.texts_embedded,
+            batches_run=s.base.batches_run,
+            avg_latency_ms=s.base.avg_latency_ms,
+            cache_hits=s.cache_hits,
+            cache_misses=s.cache_misses,
         )
 
     def close(self) -> None:

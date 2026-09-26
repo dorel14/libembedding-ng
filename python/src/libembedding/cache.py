@@ -40,14 +40,18 @@ class EmbeddingCache:
         if capacity <= 0:
             raise ValueError("capacity must be > 0")
         self._dim = dim
+        # cfg is already a "lembed_cache_config_t *": ffi.addressof() only
+        # accepts non-pointer cdata, so the pointer is passed as-is.
         cfg = ffi.new("lembed_cache_config_t *")
         cfg.capacity = capacity
         cfg.ttl_seconds = ttl_seconds
         self._cfg = cfg
         self._cache = ffi.gc(
-            lib.lembed_cache_create(ffi.addressof(cfg)),
+            lib.lembed_cache_create(cfg),
             lib.lembed_cache_free,
         )
+        if self._cache == ffi.NULL:
+            raise MemoryError("lembed_cache_create() failed")
 
     @property
     def capacity(self) -> int:
@@ -61,6 +65,11 @@ class EmbeddingCache:
 
     def get(self, text: str, dim: int | None = None) -> np.ndarray | None:
         """Look up a cached embedding by text.
+
+        The pointer returned by ``lembed_cache_get()`` is owned by the C cache
+        (it is freed on LRU eviction and on clear()), so it is never released
+        here: the data is copied and ownership stays with the cache. Freeing
+        it from Python would be a double free at the next eviction.
 
         Args:
             text: The text string to look up.
@@ -81,14 +90,11 @@ class EmbeddingCache:
 
         cached_dim = out_dim[0]
         if expected_dim > 0 and cached_dim != expected_dim:
-            lib.free(out_vec[0])
             return None
 
-        arr = np.frombuffer(
+        return np.frombuffer(
             ffi.buffer(out_vec[0], cached_dim * 4), dtype=np.float32
         ).copy()
-        lib.free(out_vec[0])
-        return arr
 
     def put(self, text: str, vec: np.ndarray) -> None:
         """Store an embedding in the cache.

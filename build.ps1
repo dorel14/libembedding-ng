@@ -26,6 +26,23 @@ if (-not (Test-Path $BuildDir)) {
     New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
 }
 
+# The libcurl runtime DLL is not vendored; CMake fails at configure time
+# without it. Install it on demand so a fresh clone builds in one command.
+$CurlRuntime = Join-Path $ProjectDir "third_party/curl/bin/libcurl-x64.dll"
+if (-not (Test-Path $CurlRuntime)) {
+    Write-Host "Installing the libcurl runtime (one-time)..." -ForegroundColor Cyan
+    try {
+        & (Join-Path $ProjectDir "scripts/fetch_windows_libcurl.ps1")
+    } catch {
+        Write-Host $_.Exception.Message -ForegroundColor Red
+    }
+    if (-not (Test-Path $CurlRuntime)) {
+        Write-Host "Could not install the libcurl runtime. Re-run with" -ForegroundColor Red
+        Write-Host "  -DLIBEMBEDDING_NO_DOWNLOAD=ON, or provide -DCURL_LIBRARY=<path>." -ForegroundColor Red
+        exit 1
+    }
+}
+
 cmake -S $ProjectDir -B $BuildDir `
     -DCMAKE_BUILD_TYPE=$BuildType `
     -DLIBEMBEDDING_BUILD_TESTS=ON `

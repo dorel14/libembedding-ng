@@ -342,6 +342,7 @@ const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx);
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
+void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 
 /* â”€â”€ Functions: Image embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -355,6 +356,7 @@ const lembed_model_desc_t* lembed_image_embedding_desc(const lembed_image_embedd
 const char* lembed_image_embedding_model_name(const lembed_image_embedding_t* ctx);
 int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx);
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out);
+void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 
 /* â”€â”€ Functions: Reranker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
@@ -755,27 +757,6 @@ lembed_status_t lembed_benchmark_detect_sessions(
 const char* lembed_benchmark_default_cache_dir(void);
 
 /* â”€â”€ Tuning Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-typedef struct {
-    char        cpu_name[128];
-    int         physical_cores;
-    int         logical_cores;
-    char        os_name[64];
-    int         ram_mb;
-    char        features[256];
-} lembed_hardware_info_t;
-
-typedef struct {
-    char        libembedding[32];
-    char        llama_cpp[32];
-} lembed_software_info_t;
-
-typedef struct {
-    char        model_id[128];
-    char        quantization[16];
-    int         dim;
-    int         file_size_bytes;
-} lembed_model_fingerprint_t;
 
 typedef struct {
     int         num_sessions;

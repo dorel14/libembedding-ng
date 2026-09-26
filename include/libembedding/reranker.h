@@ -59,7 +59,12 @@ lembed_status_t lembed_reranker_rerank(
     int batch_size,
     lembed_rerank_results_t* result);
 
-/* Introspection */
+/* Introspection
+ * NOTE: the desc/desc_v2 pointers reference memory owned by the context.
+ * They stay valid until the next create_* call on the same context and are
+ * dangling as soon as lembed_reranker_free() is called: copy the fields you
+ * need, never store the pointer. model_name() returns an internal
+ * std::string buffer with the same lifetime. */
 const lembed_model_desc_t* lembed_reranker_desc(const lembed_reranker_t* ctx);
 const lembed_model_desc_v2_t* lembed_reranker_desc_v2(const lembed_reranker_t* ctx);
 const char* lembed_reranker_model_name(const lembed_reranker_t* ctx);
