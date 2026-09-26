@@ -193,7 +193,7 @@ def test_many_entries_with_small_capacity():
     # The last 4 keys must still be present, the older ones evicted
     for i in range(196, 200):
         assert cache.get(f"text-{i}") is not None
-    for i in range(0, 100):
+    for i in range(100):
         assert cache.get(f"text-{i}") is None
 
 
