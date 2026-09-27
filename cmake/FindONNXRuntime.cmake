@@ -80,11 +80,37 @@ if(ONNXRuntime_FOUND)
     set(ONNXRuntime_LIBRARIES ${ONNXRuntime_LIBRARY})
 
     if(NOT TARGET ONNXRuntime::ONNXRuntime)
-        add_library(ONNXRuntime::ONNXRuntime SHARED IMPORTED)
-        set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
-            IMPORTED_LOCATION "${ONNXRuntime_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRuntime_INCLUDE_DIR}"
-        )
+        get_filename_component(_ort_ext "${ONNXRuntime_LIBRARY}" EXT)
+        get_filename_component(_ort_dir "${ONNXRuntime_LIBRARY}" DIRECTORY)
+        if(WIN32 AND _ort_ext STREQUAL ".lib")
+            get_filename_component(_ort_name "${ONNXRuntime_LIBRARY}" NAME_WE)
+            set(_ort_dll "${_ort_dir}/${_ort_name}.dll")
+        else()
+            set(_ort_dll "")
+        endif()
+
+        if(_ort_dll AND EXISTS "${_ort_dll}")
+            # MSVC import library: the linker needs the .lib, the runtime the .dll
+            add_library(ONNXRuntime::ONNXRuntime SHARED IMPORTED)
+            set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
+                IMPORTED_IMPLIB "${ONNXRuntime_LIBRARY}"
+                IMPORTED_LOCATION "${_ort_dll}"
+                INTERFACE_INCLUDE_DIRECTORIES "${ONNXRuntime_INCLUDE_DIR}"
+            )
+        elseif(_ort_ext STREQUAL ".lib")
+            # Import library without its DLL next to it: treat it as a plain library
+            add_library(ONNXRuntime::ONNXRuntime UNKNOWN IMPORTED)
+            set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
+                IMPORTED_LOCATION "${ONNXRuntime_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${ONNXRuntime_INCLUDE_DIR}"
+            )
+        else()
+            add_library(ONNXRuntime::ONNXRuntime SHARED IMPORTED)
+            set_target_properties(ONNXRuntime::ONNXRuntime PROPERTIES
+                IMPORTED_LOCATION "${ONNXRuntime_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${ONNXRuntime_INCLUDE_DIR}"
+            )
+        endif()
     endif()
 endif()
 

@@ -2,13 +2,27 @@
 # Forked from https://github.com/pacifio/libembedding.
 # The Python package is published on PyPI as `libembedding-ng` (see python/pyproject.toml).
 [tool.semantic_release]
+# Machine-readable sources of truth, stamped natively by semantic-release.
+# `python/pyproject.toml` is the canonical version: the others are derived.
 version_toml = [
     "python/pyproject.toml:project.version",
 ]
+# `version_variables` entries are "path:literal_variable_name". The variable name
+# is regex-escaped before being compiled into the search pattern, so it is always
+# a literal (not a regex), and each entry names exactly one file: no globs.
+# The generated pattern accepts ':', '=', '@' and a plain space as the assignment
+# operator, which is what makes the C macro form work:
+#   #define LIBEMBEDDING_VERSION_STRING "1.6.0"
+#   set(LIBEMBEDDING_VERSION "1.6.0")
 version_variables = [
     "CMakeLists.txt:LIBEMBEDDING_VERSION",
     "include/libembedding/config.h:LIBEMBEDDING_VERSION_STRING",
 ]
+# The remaining "Version: X.Y.Z" stamps (~70 documentation headers) plus the
+# _cdefs.h marker and AGENTS.md cannot be expressed here (one literal path per
+# entry, literal variable names, and the (vX.Y.Z) tag form has no variable).
+# They are synced by scripts/sync_version.py, which is idempotent, line-ending
+# preserving and self-verifying; see .github/workflows/release.yml.
 version_source = "commit"
 branch = "main"
 commit_parser = "conventional"

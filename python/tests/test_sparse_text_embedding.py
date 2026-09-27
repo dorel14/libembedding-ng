@@ -1,23 +1,28 @@
 """Integration tests for SparseTextEmbedding.
 
-These tests require either a cached model or network access.
-They are skipped if the model cannot be loaded.
+Tests taking the ``sparse_model`` fixture require either a cached model or
+network access; they are skipped when the model cannot be loaded.
 """
 
 import numpy as np
 import pytest
 
 
-def _sparse_model(**kwargs):
-    """Create a sparse embedding model, skipping if download fails."""
-    from libembedding import SparseTextEmbedding
-    from libembedding.exceptions import DownloadError
+@pytest.fixture
+def sparse_model():
+    """Factory building a SparseTextEmbedding, skipping if download fails."""
 
-    kwargs.setdefault("show_download_progress", False)
-    try:
-        return SparseTextEmbedding("prithivida/Splade_PP_en_v1", **kwargs)
-    except DownloadError:
-        pytest.skip("sparse model download unavailable")
+    def _factory(**kwargs):
+        from libembedding import SparseTextEmbedding
+        from libembedding.exceptions import DownloadError
+
+        kwargs.setdefault("show_download_progress", False)
+        try:
+            return SparseTextEmbedding("prithivida/Splade_PP_en_v1", **kwargs)
+        except DownloadError:
+            pytest.skip("sparse model download unavailable")
+
+    return _factory
 
 
 def test_sparse_list_supported_models():
@@ -31,8 +36,8 @@ def test_sparse_list_supported_models():
         assert m.max_tokens > 0
 
 
-def test_sparse_embed_basic():
-    model = _sparse_model()
+def test_sparse_embed_basic(sparse_model):
+    model = sparse_model()
     result = model.embed(["Hello world", "How are you?"])
     assert isinstance(result, list)
     assert len(result) == 2
@@ -45,23 +50,23 @@ def test_sparse_embed_basic():
     model.close()
 
 
-def test_sparse_embed_empty():
-    model = _sparse_model()
+def test_sparse_embed_empty(sparse_model):
+    model = sparse_model()
     result = model.embed([])
     assert result == []
     model.close()
 
 
-def test_sparse_embed_single():
-    model = _sparse_model()
+def test_sparse_embed_single(sparse_model):
+    model = sparse_model()
     result = model.embed(["single document"])
     assert len(result) == 1
     assert len(result[0].indices) > 0
     model.close()
 
 
-def test_sparse_info():
-    model = _sparse_model()
+def test_sparse_info(sparse_model):
+    model = sparse_model()
     info = model.info()
     # Sparse models have dimension 0 (variable dimension)
     assert info.max_length > 0
@@ -69,14 +74,14 @@ def test_sparse_info():
     model.close()
 
 
-def test_sparse_name():
-    model = _sparse_model()
+def test_sparse_name(sparse_model):
+    model = sparse_model()
     assert "SPLADE" in model.name or "splade" in model.name.lower()
     model.close()
 
 
-def test_sparse_stats():
-    model = _sparse_model()
+def test_sparse_stats(sparse_model):
+    model = sparse_model()
     model.embed(["Hello world"])
     stats = model.stats()
     assert stats.texts_embedded == 1
@@ -85,17 +90,18 @@ def test_sparse_stats():
     model.close()
 
 
-def test_sparse_context_manager():
-    try:
-        with _sparse_model() as model:
-            result = model.embed(["test"])
-            assert len(result) == 1
-    except pytest.skip.Exception:
-        pass
+def test_sparse_context_manager(sparse_model):
+    """Leaving the context must release the C context."""
+    with sparse_model() as model:
+        result = model.embed(["test"])
+        assert len(result) == 1
+        ctx = model._ctx
+    assert model._ctx is None, "__exit__ must close the context"
+    assert ctx is not None, "the context must be live inside the with block"
 
 
-def test_sparse_batch_size_override():
-    model = _sparse_model()
+def test_sparse_batch_size_override(sparse_model):
+    model = sparse_model()
     result = model.embed(["a", "b", "c"], batch_size=1)
     assert len(result) == 3
     model.close()
@@ -105,6 +111,7 @@ def test_sparse_top_terms():
     pytest.skip("top_terms feature not yet implemented in C API (P1)")
 
 
+@pytest.mark.network
 def test_sparse_min_weight():
     from libembedding import SparseTextEmbedding
     from libembedding.exceptions import DownloadError

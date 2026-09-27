@@ -80,11 +80,31 @@ def test_constants_exports():
 
 
 def test_binding_ffi_lib():
+    import re
+    from pathlib import Path
+
     from libembedding._binding import ffi, lib
 
-    assert ffi is not None
-    assert lib is not None
-    # Basic C API sanity check
-    version = lib.lembed_version()
-    assert version
-    assert len(ffi.string(version).decode()) > 0
+    # The shared library must expose the C entry points used by the bindings
+    for symbol in (
+        "lembed_version",
+        "lembed_text_embedding_create_v2",
+        "lembed_text_embedding_stats_v2",
+        "lembed_sparse_text_embedding_stats_v2",
+        "lembed_image_embedding_stats_v2",
+        "lembed_cache_get",
+        "lembed_cache_get_copy",
+    ):
+        assert hasattr(lib, symbol), f"Missing C symbol: {symbol}"
+
+    # C version (config.h) and the _cdefs.h stamp must be in sync
+    c_version = ffi.string(lib.lembed_version()).decode()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", c_version), c_version
+
+    cdefs = Path(__file__).parent.parent / "src" / "libembedding" / "_cdefs.h"
+    if cdefs.exists():
+        match = re.search(r"\(v(\d+\.\d+\.\d+)\)", cdefs.read_text(encoding="utf-8"))
+        assert match, "no (vX.Y.Z) marker in _cdefs.h"
+        assert match.group(1) == c_version, (
+            f"_cdefs.h says v{match.group(1)}, runtime says {c_version}"
+        )

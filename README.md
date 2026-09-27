@@ -178,14 +178,43 @@ with minimal overhead (~13%).
 | Dependency | Required | Notes |
 |---|---|---|
 | **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
-| **llama.cpp** | Yes | Fetched via CMake `FetchContent` (v0.3.0). Always enabled — provides the GGUF backend. |
-| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON` |
+| **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. |
+| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). |
 | **cJSON** | Bundled | Included in `third_party/` |
 | **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
 | **CMake** >= 3.18 | Build only | |
 | **C++17 compiler** | Build only | GCC 7+, Clang 5+, MSVC 2017+ |
 
 No Rust toolchain required. The tokenizer is implemented natively in C++ (supports WordPiece and BPE models via `tokenizer.json`).
+
+### Windows: libcurl runtime DLL
+
+`third_party/curl` ships the libcurl headers and the import library
+(`lib/libcurl.dll.a`) but **no runtime DLL** — no binary is versioned in this
+repository. The link therefore succeeds while `libembedding.dll` and every test
+or example executable fail at load time. Fetch the runtime once per checkout:
+
+```powershell
+pwsh -File scripts/fetch_windows_libcurl.ps1
+```
+
+The script downloads the official *curl-for-win* build matching the version in
+`third_party/curl/include/curl/curlver.h`, verifies its SHA-256 against the
+pinned value, and installs `libcurl-x64.dll` into `third_party/curl/bin/`
+(canonical location, git-ignored) together with a `.libcurl-source.txt`
+provenance record. `-CurlVersion` forces another version, `-Force` re-downloads.
+
+Alternatives at configure time: `-DCURL_LIBRARY=<vcpkg>\installed\x64-windows\lib\libcurl.lib`
+(what CI does), `-DCURL_RUNTIME_DLL=<path>\libcurl-x64.dll`,
+`-DLIBEMBEDDING_NO_DOWNLOAD=ON` (no download code at all) or
+`-DLIBEMBEDDING_CURL_STATIC=ON` (runtime managed by you). If none of these
+applies, CMake fails at **configure** time instead of letting the executables
+die later.
+
+> **Diagnostic** — a test that dies with `0xC0000135` (`STATUS_DLL_NOT_FOUND`)
+> or that `ctest` reports as `Timeout` while it really only took milliseconds is
+> almost always this missing DLL. Run the executable directly to see the real
+> exit code: `ctest` masks it.
 
 ---
 
@@ -733,7 +762,7 @@ Or via CMake, point to a custom llama.cpp installation if needed:
 set(LLAMACPP_ROOT "/path/to/llama.cpp")
 ```
 
-llama.cpp is fetched via CMake `FetchContent` (v0.3.0) by default. The `LEMBED_PROVIDER_LLAMACPP` execution provider and GGUF loading functions are always available:
+llama.cpp is vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download at configure time). The `LEMBED_PROVIDER_LLAMACPP` execution provider and GGUF loading functions are always available:
 
 ```c
 #include <libembedding/gguf_registry.h>
@@ -1005,7 +1034,7 @@ cmake --build . --parallel
 cd ../benchmarks && ./run_benchmarks.sh
 
 # Python bindings vs fastembed
-pip install libembedding
+pip install libembedding-ng
 PYTHONPATH=../python/src python3 bench_python_compare.py
 ```
 

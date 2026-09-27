@@ -54,6 +54,13 @@ jobs:
           ruff check python/src
           pyright python/src
 
+      - name: Version stamps are consistent
+        run: |
+          # Fails if any "Version: X.Y.Z" stamp has drifted from the canonical
+          # version in python/pyproject.toml. Cheap, and catches a half-applied
+          # bump long before the release job runs.
+          python scripts/sync_version.py --check
+
   # -----------------------------------------------------------------------
   # 2) Run tests BEFORE version bump
   # -----------------------------------------------------------------------
@@ -87,7 +94,7 @@ jobs:
             -DLIBEMBEDDING_BUILD_SHARED=ON \
             -DLIBEMBEDDING_INTEGRATION_TESTS=OFF \
             -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
-          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading
+          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes
 
       - name: Run C++ unit tests
         run: |
@@ -177,24 +184,46 @@ jobs:
         run: |
           if [ "${{ steps.detect.outputs.released }}" = "true" ]; then
             NEXT="${{ steps.detect.outputs.version }}"
+            echo "Syncing documentation version stamps to ${NEXT}..."
+            # Handles the ~70 header docstrings, the Python modules, the
+            # (vX.Y.Z) marker in _cdefs.h, the numeric macros of config.h and
+            # the AGENTS.md line. Replaces the former chain of sed one-liners:
+            # it is idempotent, preserves line endings and fails loudly if a
+            # stamp format ever changes.
+            #
+            # This runs BEFORE semantic-release on purpose. semantic-release
+            # commits and tags only the three files it manages
+            # (python/pyproject.toml, CMakeLists.txt, config.h) and discards the
+            # rest of the runner worktree, so stamps written after it would
+            # never reach the tag: the compiled library would report ${NEXT}
+            # while _cdefs.h still advertised the previous version, and every
+            # wheel built from that tag would ship the mismatch (caught by
+            # test_init.py::test_binding_ffi_lib). Committing first makes the
+            # tagged commit the complete tree, with no tag rewrite needed.
+            python scripts/sync_version.py --version "${NEXT}"
+            if ! git diff --quiet HEAD --; then
+              git -c user.name="github-actions[bot]" \
+                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                  commit -am "chore(release): sync version stamps to ${NEXT} [skip ci]"
+            fi
             echo "Stamping version ${NEXT} with python-semantic-release..."
+            # version_toml / version_variables (root pyproject.toml) stamp:
+            #   python/pyproject.toml, CMakeLists.txt, config.h
             semantic-release version
-            echo "Syncing version ${NEXT} to remaining headers/comments..."
-            find include -type f \( -name "*.h" -o -name "*.hpp" \) -not -path "*/third_party/*" -exec sed -i 's/^ \* Version: [0-9][0-9.]*/ * Version: '"${NEXT}"'/' {} \;
-            find python/src -type f -name "*.py" -exec sed -i 's/^Version: [0-9][0-9.]*/Version: '"${NEXT}"'/' {} \;
-            sed -i 's/(v[0-9][0-9.]*)/(v'"${NEXT}"')/' python/src/libembedding/_cdefs.h
-            sed -i 's/^> \*\*Version courante\*\* : [0-9][0-9.]*$/> **Version courante** : '"${NEXT}"'/' AGENTS.md
-            # Verify all versions match after bump
+            # Verify every machine-readable source agrees
             PY=$(grep -oP '^version = "\K[^"]+' python/pyproject.toml)
             C=$(grep -oP 'LIBEMBEDDING_VERSION_STRING "\K[^"]+' include/libembedding/config.h)
             CMAKE=$(grep -oP '^\s*VERSION\s+\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
             if [ -z "$CMAKE" ]; then
               CMAKE=$(grep -oP 'set\(LIBEMBEDDING_VERSION "\K[0-9][0-9.]*' CMakeLists.txt | head -n1)
             fi
-            if [ "$PY" != "$C" ] || [ "$PY" != "$CMAKE" ]; then
-              echo "Version mismatch after bump! PY=$PY C=$C CMAKE=$CMAKE"
+            if [ "$PY" != "$NEXT" ] || [ "$C" != "$NEXT" ] || [ "$CMAKE" != "$NEXT" ]; then
+              echo "Version mismatch after bump!"
+              echo "  target=$NEXT python=$PY config_h=$C cmake=$CMAKE"
               exit 1
             fi
+            # Verify every documentation stamp agrees too
+            python scripts/sync_version.py --check --version "${NEXT}"
             echo "All versions synced: ${PY}"
             # The bump commit is tagged vX.Y.Z - capture it for downstream jobs.
             TAG="$(git tag --points-at HEAD | grep -E '^v[0-9]' | head -n1)"

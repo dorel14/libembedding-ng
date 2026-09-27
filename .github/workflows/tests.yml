@@ -110,7 +110,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           cd build
-          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading
+          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes
 
       - name: Build tests (Windows)
         if: runner.os == 'Windows'
@@ -119,7 +119,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           Set-Location build
-          cmake --build . --parallel --target test_model_registry test_pooling test_similarity test_local_loading --config Release
+          cmake --build . --parallel --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes --config Release
 
       - name: Run C++ unit tests (Linux)
         if: runner.os == 'Linux'

@@ -1,7 +1,7 @@
 """High-level image embedding API.
 
 Auteur: David Orel
-Version: 1.6.0
+Version: 1.8.0
 """
 
 from __future__ import annotations
@@ -192,19 +192,20 @@ class ImageEmbedding:
 
     def stats(self) -> Stats:
         """Return runtime usage statistics."""
-        s = ffi.new("lembed_stats_t *")
-        lib.lembed_image_embedding_stats(self._ctx, s)
+        s = ffi.new("lembed_stats_v2_t *")
+        lib.lembed_image_embedding_stats_v2(self._ctx, s)
         return Stats(
-            texts_embedded=s.texts_embedded,
-            batches_run=s.batches_run,
-            avg_latency_ms=s.avg_latency_ms,
+            texts_embedded=s.base.texts_embedded,
+            batches_run=s.base.batches_run,
+            avg_latency_ms=s.base.avg_latency_ms,
+            cache_hits=s.cache_hits,
+            cache_misses=s.cache_misses,
         )
 
     def close(self) -> None:
         """Release the underlying C resources."""
         if self._ctx is not None:
             lib.lembed_image_embedding_free(self._ctx)
-            self._ctx = None
             self._ctx = None
 
     def __enter__(self):

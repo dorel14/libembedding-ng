@@ -87,7 +87,22 @@ def test_cache_path():
 
 
 def test_clear_cache():
+    """clear_cache() must remove the on-disk cache and stay idempotent."""
+    import os
+
+    from libembedding._binding import lib
+
+    # The cache is cleared through a C entry point: a missing export (see the
+    # .def file) must fail here rather than silently pass.
+    assert hasattr(lib, "lembed_tune_cache_clear")
+
+    cache_file = cache_path()
     clear_cache()
+    assert not os.path.exists(cache_file), f"{cache_file} still present after clear_cache()"
+
+    # Clearing an already-empty cache must not raise.
+    assert clear_cache() is None
+    assert detect_hardware().logical_cores >= 1
 
 
 def test_benchmark_hardware_cached():

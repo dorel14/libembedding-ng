@@ -37,6 +37,17 @@ cache = EmbeddingCache(capacity=4096, ttl_seconds=0, dim=0)
 | `capacity` | `int` | Maximum cache capacity |
 | `current_size` | `int` | Current number of entries |
 
+## Ownership of the returned data
+
+`get()` returns a NumPy array **owned by Python**: the copy is made by
+`lembed_cache_get_copy()` while the C cache still holds its lock. No
+cache-owned pointer is exposed, so a concurrent eviction, overwrite or
+`clear()` cannot free the buffer during the copy. The returned array stays
+valid after its entry is evicted, and two reads of the same key return two
+independent copies.
+
+See [Embedding Cache C API](c_api/embedding_cache.html) for the C equivalent.
+
 ## Context manager
 
 ```python

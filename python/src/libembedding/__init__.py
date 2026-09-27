@@ -44,9 +44,14 @@ from .reranker import (
     reranker_auto_config_profile,
     reranker_autotune,
     reranker_autotune_constrained,
+    reranker_autotune_custom,
 )
 from .similarity import cosine_similarity, dot_product, euclidean_distance
-from .sparse_text_embedding import SparseTextEmbedding, sparse_autotune
+from .sparse_text_embedding import (
+    SparseTextEmbedding,
+    sparse_autotune,
+    sparse_best_config,
+)
 from .text_embedding import (  # pyright: ignore[reportPrivateImportUsage]
     TextEmbedding,
     TextEmbeddingPool,  # pyright: ignore[reportPrivateImportUsage]
@@ -156,5 +161,7 @@ __all__ = [
     "reranker_auto_config_profile",
     "reranker_autotune",
     "reranker_autotune_constrained",
+    "reranker_autotune_custom",
     "sparse_autotune",
+    "sparse_best_config",
 ]

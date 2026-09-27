@@ -1,6 +1,7 @@
 """Unit tests for backend auto-detection."""
 
 import pytest
+
 from libembedding.backend import backend_to_enum, detect_backend
 
 

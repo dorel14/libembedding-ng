@@ -3,7 +3,7 @@
  * llama.cpp backend for GGUF embedding models
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.8.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -59,7 +59,7 @@ public:
             ctx_ = nullptr;
         }
         if (model_) {
-            llama_free_model(model_);
+            llama_model_free(model_);
             model_ = nullptr;
         }
     }
@@ -81,7 +81,7 @@ public:
         struct llama_model_params mparams = llama_model_default_params();
         mparams.n_gpu_layers = (n_gpu_layers < 0) ? 999 : n_gpu_layers;
 
-        model_ = llama_load_model_from_file(model_path, mparams);
+        model_ = llama_model_load_from_file(model_path, mparams);
         if (!model_) {
             std::string msg = "Failed to load GGUF model: ";
             msg += model_path;
@@ -113,7 +113,7 @@ public:
 
         ctx_ = llama_init_from_model(model_, cparams);
         if (!ctx_) {
-            llama_free_model(model_);
+            llama_model_free(model_);
             model_ = nullptr;
             throw std::runtime_error("Failed to create llama context for embeddings");
         }
@@ -266,7 +266,7 @@ public:
         for (auto& ctx : contexts_) {
             if (ctx && ctx->ctx) llama_free(ctx->ctx);
         }
-        if (model_) llama_free_model(model_);
+        if (model_) llama_model_free(model_);
     }
 
     LlamaSessionPool(const LlamaSessionPool&) = delete;
@@ -288,7 +288,7 @@ public:
         struct llama_model_params mparams = llama_model_default_params();
         mparams.n_gpu_layers = (n_gpu_layers < 0) ? 999 : n_gpu_layers;
 
-        model_ = llama_load_model_from_file(model_path, mparams);
+        model_ = llama_model_load_from_file(model_path, mparams);
         if (!model_) {
             std::string msg = "Failed to load GGUF: ";
             msg += model_path;
