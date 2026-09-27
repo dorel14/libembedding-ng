@@ -67,7 +67,14 @@ typedef struct {
     int         best_idx;           /* index into configs[] */
 } lembed_tune_cache_entry_t;
 
-#define LEMBED_TUNE_CACHE_SCHEMA_VERSION 1
+/* Written into every cache entry. Bumped to 2 when the key became a hash of the
+ * fingerprint (2026-09): entries keyed by the old concatenated string are no
+ * longer reachable, so they are regenerated instead of being misread. */
+#define LEMBED_TUNE_CACHE_SCHEMA_VERSION 2
+
+/* Buffer size required by lembed_tune_cache_key(): 16 hexadecimal characters
+ * of FNV-1a hash plus the terminating NUL. */
+#define LEMBED_TUNE_CACHE_KEY_SIZE 17
 
 /* Load cached result.
  * Returns LEMBED_OK on hit, LEMBED_ERROR_CACHE_MISS on miss. */
@@ -90,7 +97,12 @@ lembed_status_t lembed_cache_detect_hardware(lembed_cache_hardware_info_t* hw);
 /* Get software info for cache. */
 lembed_status_t lembed_cache_detect_software(lembed_cache_software_info_t* sw);
 
-/* Generate cache key from fingerprints. */
+/* Generate cache key from fingerprints.
+ * The key is a 64-bit FNV-1a hash of the full fingerprint (CPU, OS, library
+ * version, llama.cpp version, model id, backend), rendered as 16 lowercase
+ * hexadecimal characters: the readable fields can exceed any fixed buffer, and a
+ * truncated key would collide across different fingerprints.
+ * key_out must have room for LEMBED_TUNE_CACHE_KEY_SIZE bytes. */
 void lembed_tune_cache_key(const lembed_cache_hardware_info_t* hw,
                            const lembed_cache_software_info_t* sw,
                            const lembed_cache_model_info_t* model,
@@ -107,12 +119,6 @@ void lembed_tune_cache_add_config(lembed_tune_cache_entry_t* entry,
 /* Set best config index. */
 void lembed_tune_cache_set_best(lembed_tune_cache_entry_t* entry, int idx);
 
-/* Clear all cache. */
-lembed_status_t lembed_tune_cache_clear(void);
-
-/* Cache file path (static). */
-const char* lembed_tune_cache_path(void);
-
 #ifdef __cplusplus
 }
 #endif
@@ -124,8 +130,4 @@ const char* lembed_tune_cache_path(void);
 #define LIBEMBEDDING_AUTOTUNE_CACHE_IMPL
 #include "detail/autotune_cache_impl.hpp"
 #endif
-
-
-
-
 
