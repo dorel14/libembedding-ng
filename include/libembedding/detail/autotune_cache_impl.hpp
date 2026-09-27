@@ -16,6 +16,7 @@
 #include "cJSON.h"
 #include "autotune_cache.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -42,11 +43,19 @@ static std::string cache_file() {
 static std::string read_file(const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return "";
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return ""; }
     long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    if (size < 0) { fclose(f); return ""; }
+    std::rewind(f);
     std::string content((size_t)size, '\0');
-    if (size > 0) fread(&content[0], 1, size, f);
+    /* A short read (file truncated between the seeks, I/O error) would leave
+     * NUL bytes in the middle: the caller parses it with cJSON_Parse(), which
+     * stops at the first NUL and would silently read a truncated cache. Treat
+     * it as "no cache" instead. */
+    if (size > 0 && fread(&content[0], 1, (size_t)size, f) != (size_t)size) {
+        fclose(f);
+        return "";
+    }
     fclose(f);
     return content;
 }
@@ -137,13 +146,38 @@ void lembed_tune_cache_key(const lembed_cache_hardware_info_t* hw,
                            const char* backend,
                            char* key_out) {
     if (!key_out) return;
-    snprintf(key_out, 256, "%s|%s|%s|%s|%s|%s",
-             hw ? hw->cpu_name : "unknown",
-             hw ? hw->os_name : "unknown",
-             sw ? sw->libembedding : "unknown",
-             sw ? sw->llama_cpp : "unknown",
-             model ? model->model_id : "unknown",
-             backend ? backend : "unknown");
+    /* The fingerprint fields can hold up to 415 bytes in total (127 + 63 + 31
+     * + 31 + 127 + 31 plus the separators), which does not fit in a fixed key
+     * buffer: a truncated key would make two different fingerprints collide and
+     * hand back a tuning result measured on another CPU or model. The key is
+     * therefore a 64-bit FNV-1a hash of the whole fingerprint, rendered as
+     * 16 hex characters. The readable fields are still stored in the cache
+     * entry ("cpu", "os", "libembedding", "llama_cpp", "model", "backend"). */
+    std::string fp;
+    fp.reserve(512);
+    auto append = [&fp](const char* value, char separator) {
+        fp.append(value ? value : "unknown");
+        fp.push_back(separator);
+    };
+    append(hw ? hw->cpu_name : nullptr, '|');
+    append(hw ? hw->os_name : nullptr, '|');
+    append(sw ? sw->libembedding : nullptr, '|');
+    append(sw ? sw->llama_cpp : nullptr, '|');
+    append(model ? model->model_id : nullptr, '|');
+    /* The last field is terminated by a NUL, which cannot appear inside the
+     * fixed-size fingerprint fields, so no two different fingerprints can build
+     * the same string. */
+    append(backend, '\0');
+
+    uint64_t hash = 1469598103934665603ULL; /* FNV-1a 64-bit offset basis */
+    for (unsigned char c : fp) {
+        hash ^= (uint64_t)c;
+        hash *= 1099511628211ULL; /* FNV-1a 64-bit prime */
+    }
+    /* %llx rather than PRIx64: <cinttypes> pulls in the whole inttypes family
+     * and does not compile cleanly with MSVC here. */
+    snprintf(key_out, LEMBED_TUNE_CACHE_KEY_SIZE, "%016llx",
+             (unsigned long long)hash);
 }
 
 void lembed_tune_cache_add_config(lembed_tune_cache_entry_t* entry,
@@ -164,7 +198,7 @@ lembed_status_t lembed_tune_cache_load(
     const char* backend,
     lembed_tune_cache_entry_t* entry) {
     if (!hw || !sw || !model || !backend || !entry) return LEMBED_ERROR_INVALID_ARGUMENT;
-    char key[256];
+    char key[LEMBED_TUNE_CACHE_KEY_SIZE];
     lembed_tune_cache_key(hw, sw, model, backend, key);
     cJSON* root = lembed::detail::load_cache();
     cJSON* item = cJSON_GetObjectItem(root, key);
@@ -200,7 +234,7 @@ lembed_status_t lembed_tune_cache_save(const lembed_tune_cache_entry_t* entry) {
     lembed_cache_hardware_info_t hw = entry->hardware;
     lembed_cache_software_info_t sw = entry->software;
     lembed_cache_model_info_t model = entry->model;
-    char key[256];
+    char key[LEMBED_TUNE_CACHE_KEY_SIZE];
     lembed_tune_cache_key(&hw, &sw, &model, entry->backend, key);
     cJSON* root = lembed::detail::load_cache();
     cJSON* item = cJSON_CreateObject();
