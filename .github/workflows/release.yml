@@ -177,6 +177,17 @@ jobs:
             echo "No release needed on this push (next=${NEXT}, last=${LAST})."
           fi
 
+      - name: Ensure up to date with origin/main
+        run: |
+          git fetch origin main
+          git rebase origin/main || {
+            echo "Rebase failed, attempting merge..."
+            git merge origin/main --no-edit || {
+              echo "Merge failed, aborting"
+              exit 1
+            }
+          }
+
       - name: Create release
         id: resolve
         env:
