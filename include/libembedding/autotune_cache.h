@@ -5,7 +5,7 @@
  * Cache key = hash of hardware + software + model
  *
  * Auteur: David Orel
- * Version: 1.8.0
+ * Version: 1.9.0
  *
  * SPDX-License-Identifier: MIT
  */
