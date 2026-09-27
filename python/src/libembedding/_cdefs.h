@@ -113,6 +113,13 @@ typedef enum {
 } lembed_sparse_model_t;
 
 typedef enum {
+    LEMBED_SPARSE_FORMAT_DICT = 0,
+    LEMBED_SPARSE_FORMAT_INDEX_ORDER = 1,
+    LEMBED_SPARSE_FORMAT_CSR = 2,
+    LEMBED_SPARSE_FORMAT_NUMPY = 3,
+} lembed_sparse_format_t;
+
+typedef enum {
     LEMBED_IMAGE_CLIP_VIT_B32 = 0,
     LEMBED_IMAGE_RESNET50,
     LEMBED_IMAGE_UNICOM_VIT_B16,
@@ -398,6 +405,22 @@ lembed_status_t lembed_ensure_image_model(lembed_image_model_t model, const char
 lembed_status_t lembed_ensure_reranker_model(lembed_reranker_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
 lembed_status_t lembed_ensure_gguf_model(const char* repo, const char* filename, const char* cache_dir, int show_progress, int offline, char** model_path_out);
 void lembed_free_string(char* s);
+
+/* Model Cache Cleanup */
+lembed_status_t lembed_cleanup_model_cache(
+    const char* cache_dir,
+    const char* const* keep_models,
+    int dry_run,
+    size_t* deleted_count,
+    uint64_t* freed_bytes);
+
+lembed_status_t lembed_cleanup_model_cache_except(
+    const char* cache_dir,
+    const char* active_model_dir,
+    int dry_run,
+    size_t* deleted_count,
+    uint64_t* freed_bytes);
+
 
 /* â”€â”€ Functions: Similarity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 

@@ -119,8 +119,15 @@ typedef enum {
 #define LEMBED_TEXT_MODEL_DEFAULT LEMBED_TEXT_BGE_SMALL_EN_V15
 
 /* =========================================================================
- * Sparse Embedding Models
+ * Sparse Storage Format
  * ========================================================================= */
+
+typedef enum {
+    LEMBED_SPARSE_FORMAT_DICT = 0,      /* Dictionary: indices + values arrays, sorted by weight desc (default) */
+    LEMBED_SPARSE_FORMAT_INDEX_ORDER = 1, /* Dictionary: indices + values arrays, sorted by index asc */
+    LEMBED_SPARSE_FORMAT_CSR = 2,       /* Compressed Sparse Row: indptr + indices + values (requires API extension) */
+    LEMBED_SPARSE_FORMAT_NUMPY = 3,     /* NumPy compatible: COO format for Python interop (requires API extension) */
+} lembed_sparse_format_t;
 
 typedef enum {
     LEMBED_SPARSE_SPLADE_PP_V1 = 0,     /* default */

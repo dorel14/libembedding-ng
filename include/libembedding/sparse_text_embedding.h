@@ -117,6 +117,7 @@ struct lembed_sparse_embedding {
     uint64_t batches_run = 0;
     double   total_latency_ms = 0.0;
     int      stats_calls = 0;
+    int      storage_format = 0;  /* lembed_sparse_format_t */
 };
 
 #ifdef __cplusplus
@@ -169,6 +170,7 @@ lembed_status_t lembed_sparse_text_embedding_create(
         ctx->desc.device_id = ctx->device_id;
         ctx->top_k = options->top_k;
         ctx->min_weight = options->min_weight;
+        ctx->storage_format = options->storage_format;
 
         *out = ctx;
         return LEMBED_OK;
@@ -232,6 +234,7 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
         ctx->desc.device_id = ctx->device_id;
         ctx->top_k = options->top_k;
         ctx->min_weight = options->min_weight;
+        ctx->storage_format = options->storage_format;
 
         *out = ctx;
         return LEMBED_OK;
@@ -306,6 +309,8 @@ lembed_status_t lembed_sparse_text_embedding_embed(
             const int top_k = sparse_opts ? sparse_opts->top_k : ctx->top_k;
             const float min_weight = sparse_opts ? sparse_opts->min_weight
                                                  : ctx->min_weight;
+            const int storage_format = sparse_opts ? sparse_opts->storage_format
+                                                   : ctx->storage_format;
 
             /* Copy to C output */
             for (int i = 0; i < bsz; i++) {
@@ -349,6 +354,23 @@ lembed_status_t lembed_sparse_text_embedding_embed(
                     }
                     sr.indices = std::move(filt_idx);
                     sr.values = std::move(filt_val);
+                }
+
+                /* Apply storage format: INDEX_ORDER sorts by index ascending */
+                if (storage_format == LEMBED_SPARSE_FORMAT_INDEX_ORDER) {
+                    std::vector<std::pair<int32_t, float>> idx_val;
+                    idx_val.reserve(sr.indices.size());
+                    for (size_t j = 0; j < sr.indices.size(); j++) {
+                        idx_val.emplace_back(sr.indices[j], sr.values[j]);
+                    }
+                    std::sort(idx_val.begin(), idx_val.end(),
+                              [](const auto& a, const auto& b) {
+                                  return a.first < b.first;
+                              });
+                    for (size_t j = 0; j < sr.indices.size(); j++) {
+                        sr.indices[j] = idx_val[j].first;
+                        sr.values[j] = idx_val[j].second;
+                    }
                 }
 
                 int idx = out_offset + i;

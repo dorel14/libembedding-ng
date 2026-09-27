@@ -97,6 +97,8 @@ EXPORTS
     lembed_ensure_reranker_model
     lembed_ensure_gguf_model
     lembed_free_string
+    lembed_cleanup_model_cache
+    lembed_cleanup_model_cache_except
 
     ; ---- Similarity ----
     lembed_cosine_similarity

@@ -66,6 +66,38 @@ lembed_status_t lembed_resolve_gguf_path(
 
 void lembed_free_string(char* s);
 
+/* =========================================================================
+ * Model Cache Cleanup
+ * ========================================================================= */
+
+/* Clean up model cache: keep only specified models, remove others.
+ * cache_dir: NULL = default cache directory
+ * keep_models: NULL-terminated list of model identifiers to keep (e.g., "BAAI/bge-small-en-v1.5")
+ * dry_run: 1 = only report what would be deleted, don't actually delete
+ * deleted_count: output parameter for number of directories deleted (can be NULL)
+ * freed_bytes: output parameter for total bytes freed (can be NULL)
+ * Returns LEMBED_OK on success. */
+lembed_status_t lembed_cleanup_model_cache(
+    const char* cache_dir,
+    const char* const* keep_models,
+    int dry_run,
+    size_t* deleted_count,
+    uint64_t* freed_bytes);
+
+/* Clean up all models except the specified active one.
+ * cache_dir: NULL = default cache directory
+ * active_model_dir: model identifier to keep (e.g., "BAAI/bge-small-en-v1.5")
+ * dry_run: 1 = only report, don't delete
+ * deleted_count: output parameter for number of directories deleted (can be NULL)
+ * freed_bytes: output parameter for total bytes freed (can be NULL)
+ * Returns LEMBED_OK on success. */
+lembed_status_t lembed_cleanup_model_cache_except(
+    const char* cache_dir,
+    const char* active_model_dir,
+    int dry_run,
+    size_t* deleted_count,
+    uint64_t* freed_bytes);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
@@ -77,6 +109,8 @@ void lembed_free_string(char* s);
 #include <cstring>
 #include <string>
 #include <filesystem>
+#include <unordered_set>
+#include <vector>
 #include "detail/downloader_impl.hpp"
 #include "detail/download_manager.hpp"
 #include "gguf_registry.h"
@@ -299,6 +333,104 @@ lembed_status_t lembed_resolve_gguf_path(
 
 void lembed_free_string(char* s) {
     free(s);
+}
+
+/* =========================================================================
+ * Model Cache Cleanup Implementation
+ * ========================================================================= */
+
+lembed_status_t lembed_cleanup_model_cache(
+        const char* cache_dir,
+        const char* const* keep_models,
+        int dry_run,
+        size_t* deleted_count,
+        uint64_t* freed_bytes) {
+    if (!cache_dir && !keep_models && !dry_run) {
+        /* Allow all-NULL for dry-run with defaults */
+    }
+    if (!keep_models) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    size_t local_deleted = 0;
+    uint64_t local_freed = 0;
+
+    try {
+        std::string cache = lembed::detail::get_cache_dir(cache_dir);
+        if (!std::filesystem::is_directory(cache)) {
+            /* Cache directory doesn't exist - nothing to do */
+            if (deleted_count) *deleted_count = 0;
+            if (freed_bytes) *freed_bytes = 0;
+            return LEMBED_OK;
+        }
+
+        /* Build set of model directories to keep */
+        std::unordered_set<std::string> keep_dirs;
+        for (int i = 0; keep_models[i]; i++) {
+            std::string repo_dir = lembed::detail::repo_to_dirname(keep_models[i]);
+            keep_dirs.insert("models--" + repo_dir);
+        }
+
+        /* Also always keep tune_cache.json and any non-model directories */
+        std::vector<std::string> to_delete;
+
+        for (const auto& entry : std::filesystem::directory_iterator(cache)) {
+            if (!entry.is_directory()) continue;
+            std::string dir_name = entry.path().filename().string();
+            if (dir_name.rfind("models--", 0) != 0) continue; /* Not a model dir */
+
+            if (keep_dirs.find(dir_name) == keep_dirs.end()) {
+                /* Calculate size before deletion */
+                uint64_t dir_size = 0;
+                for (const auto& f : std::filesystem::recursive_directory_iterator(entry.path())) {
+                    if (f.is_regular_file()) {
+                        dir_size += f.file_size();
+                    }
+                }
+                to_delete.push_back(entry.path().string());
+                local_freed += dir_size;
+            }
+        }
+
+        if (dry_run) {
+            /* Report what would be deleted */
+            for (const auto& path : to_delete) {
+                fprintf(stderr, "[cleanup] Would delete: %s\n", path.c_str());
+            }
+            fprintf(stderr, "[cleanup] Total: %zu directories, %llu bytes\n",
+                    to_delete.size(), (unsigned long long)local_freed);
+            if (deleted_count) *deleted_count = to_delete.size();
+            if (freed_bytes) *freed_bytes = local_freed;
+            return LEMBED_OK;
+        }
+
+        /* Actually delete */
+        for (const auto& path : to_delete) {
+            std::error_code ec;
+            std::filesystem::remove_all(path, ec);
+            if (!ec) local_deleted++;
+        }
+
+        if (deleted_count) *deleted_count = local_deleted;
+        if (freed_bytes) *freed_bytes = local_freed;
+        return LEMBED_OK;
+    } catch (const std::exception& e) {
+        lembed::detail::set_error(e.what());
+        if (deleted_count) *deleted_count = 0;
+        if (freed_bytes) *freed_bytes = 0;
+        return LEMBED_ERROR_IO;
+    }
+}
+
+lembed_status_t lembed_cleanup_model_cache_except(
+        const char* cache_dir,
+        const char* active_model_dir,
+        int dry_run,
+        size_t* deleted_count,
+        uint64_t* freed_bytes) {
+    if (!active_model_dir || !active_model_dir[0])
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    const char* keep_models[] = { active_model_dir, nullptr };
+    return lembed_cleanup_model_cache(cache_dir, keep_models, dry_run, deleted_count, freed_bytes);
 }
 
 #ifdef __cplusplus

@@ -198,3 +198,95 @@ def autotune_unified(
         p95_latency_ms=result.p95_latency_ms,
         memory_mb=result.memory_mb,
     )
+
+
+def cleanup_model_cache(
+    keep_models: list[str] | None = None,
+    *,
+    cache_dir: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Clean up model cache, keeping only specified models.
+
+    Args:
+        keep_models: List of model identifiers to keep (e.g., ["BAAI/bge-small-en-v1.5"]).
+            If None, all models are kept (no-op unless dry_run=True).
+        cache_dir: Custom cache directory (None = default).
+        dry_run: If True, only report what would be deleted without actually deleting.
+
+    Returns:
+        Dictionary with keys: "deleted_count", "freed_bytes", "details" (list of paths).
+
+    Example:
+        >>> result = cleanup_model_cache(keep_models=["BAAI/bge-small-en-v1.5"])
+        >>> print(f"Deleted {result['deleted_count']} models, freed {result['freed_bytes']} bytes")
+    """
+    if keep_models is None:
+        keep_models = []
+
+    c_keep = ffi.new("char*[]", len(keep_models) + 1)
+    c_strs = []
+    for i, m in enumerate(keep_models):
+        c_strs.append(ffi.new("char[]", m.encode("utf-8")))
+        c_keep[i] = c_strs[i]
+    c_keep[len(keep_models)] = ffi.NULL
+
+    cache_dir_c = ffi.NULL
+    if cache_dir:
+        cache_dir_c = ffi.new("char[]", cache_dir.encode("utf-8"))
+
+    deleted_count = ffi.new("size_t *")
+    freed_bytes = ffi.new("uint64_t *")
+
+    check_status(
+        lib.lembed_cleanup_model_cache(
+            cache_dir_c, c_keep, 1 if dry_run else 0, deleted_count, freed_bytes
+        )
+    )
+
+    return {
+        "deleted_count": deleted_count[0],
+        "freed_bytes": freed_bytes[0],
+        "details": [],
+    }
+
+
+def cleanup_model_cache_except(
+    active_model: str,
+    *,
+    cache_dir: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Clean up model cache, keeping only the active model.
+
+    Args:
+        active_model: Model identifier to keep (e.g., "BAAI/bge-small-en-v1.5").
+        cache_dir: Custom cache directory (None = default).
+        dry_run: If True, only report what would be deleted without actually deleting.
+
+    Returns:
+        Dictionary with keys: "deleted_count", "freed_bytes", "details" (list of paths).
+
+    Example:
+        >>> result = cleanup_model_cache_except(active_model="BAAI/bge-small-en-v1.5")
+        >>> print(f"Deleted {result['deleted_count']} models, freed {result['freed_bytes']} bytes")
+    """
+    active_model_c = ffi.new("char[]", active_model.encode("utf-8"))
+    cache_dir_c = ffi.NULL
+    if cache_dir:
+        cache_dir_c = ffi.new("char[]", cache_dir.encode("utf-8"))
+
+    deleted_count = ffi.new("size_t *")
+    freed_bytes = ffi.new("uint64_t *")
+
+    check_status(
+        lib.lembed_cleanup_model_cache_except(
+            cache_dir_c, active_model_c, 1 if dry_run else 0, deleted_count, freed_bytes
+        )
+    )
+
+    return {
+        "deleted_count": deleted_count[0],
+        "freed_bytes": freed_bytes[0],
+        "details": [],
+    }
