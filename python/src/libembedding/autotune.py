@@ -58,12 +58,14 @@ def autotune(
     model_name: str = "BAAI/bge-small-en-v1.5",
     *,
     full: bool = False,
+    texts: list[str] | None = None,
 ) -> TuningResult:
     """Run auto-tuning to find optimal configuration for a model.
 
     Args:
         model_name: HuggingFace model code (e.g. "Qdrant/all-MiniLM-L6-v2-onnx")
         full: If True, run exhaustive tuning (30-120s). Otherwise quick (5-15s).
+        texts: Optional custom corpus for benchmarking. If None, a synthetic corpus is generated.
 
     Returns:
         TuningResult with optimal workers, threads, batch_size.
@@ -79,7 +81,18 @@ def autotune(
     else:
         code = model_name
 
-    check_status(lib.lembed_autotune(code.encode("utf-8"), mode, result))
+    if texts:
+        n = len(texts)
+        encoded = [t.encode("utf-8") for t in texts]
+        c_strs = [ffi.new("char[]", e) for e in encoded]
+        c_texts = ffi.new("char*[]", c_strs)
+        check_status(
+            lib.lembed_autotune_custom(
+                code.encode("utf-8"), c_texts, n, mode, result
+            )
+        )
+    else:
+        check_status(lib.lembed_autotune(code.encode("utf-8"), mode, result))
 
     return TuningResult(
         workers=result.workers,

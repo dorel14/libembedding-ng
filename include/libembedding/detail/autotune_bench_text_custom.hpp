@@ -40,6 +40,13 @@ inline lembed_status_t autotune_text_custom_impl(
         model_code = info.model_code;
     }
 
+    /* Custom corpus cache: use separate cache key with _custom suffix
+     * to avoid mixing with standard autotune results */
+    std::string cache_model_code = model_code;
+    if (!cache_model_code.empty()) {
+        cache_model_code += "_custom";
+    }
+
     int cores = cpu_logical_cores();
     int n_samples = (int)corpus.size();
 
@@ -120,7 +127,7 @@ inline lembed_status_t autotune_text_custom_impl(
 
     /* Write to cache if we have a model code */
     if (model_code && model_code[0]) {
-        std::ofstream of(get_cache_path(model_code));
+        std::ofstream of(get_cache_path(cache_model_code.c_str()));
         if (of.is_open()) {
             of << "{\n";
             of << "  \"workers\": " << best.workers << ",\n";

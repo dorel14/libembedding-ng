@@ -26,6 +26,11 @@
 
 namespace lembed { namespace detail {
 
+/* Forward declarations for cache functions */
+inline std::string get_reranker_custom_cache_path(const char* model_name);
+inline void write_reranker_custom_cache(const char* model_name, const lembed_reranker_tuning_result_t& result);
+inline bool read_reranker_custom_cache(const char* model_name, lembed_reranker_tuning_result_t* out);
+
 /* Benchmark a single reranker configuration with custom documents */
 inline lembed_reranker_tuning_result_t bench_reranker_config_custom(
     const char* model_name,
@@ -146,6 +151,14 @@ inline lembed_status_t lembed_reranker_autotune_custom_run(
     if (!model_name || !texts || n_texts <= 0 || !result)
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    /* Check custom cache first */
+    lembed_reranker_tuning_result_t cached;
+    if (read_reranker_custom_cache(model_name, &cached)) {
+        fprintf(stderr, "reranker_autotune(custom): using cached result for %s\n", model_name);
+        *result = cached;
+        return LEMBED_OK;
+    }
+
     int cores = cpu_logical_cores();
     int warmup = 1;
     int bench_iters = (mode == LEMBED_AUTOTUNE_QUICK) ? 5 : 15;
@@ -220,6 +233,9 @@ inline lembed_status_t lembed_reranker_autotune_custom_run(
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
 
+    /* Write to custom cache */
+    write_reranker_custom_cache(model_name, best);
+
     *result = best;
     return LEMBED_OK;
 }
@@ -243,6 +259,54 @@ inline lembed_status_t lembed_reranker_autotune_custom_impl(
         fprintf(stderr, "reranker_autotune_custom: exception: %s\n", e.what());
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
+}
+
+/* Custom corpus cache for reranker */
+inline std::string get_reranker_custom_cache_path(const char* model_name) {
+    std::string dir = reranker_autotune_cache_dir();
+    std::filesystem::create_directories(dir);
+    int cores = cpu_logical_cores();
+    std::string key = std::string(model_name) + "_custom_cores_" + std::to_string(cores);
+    return dir + "/" + get_cache_key(key.c_str()) + ".json";
+}
+
+inline void write_reranker_custom_cache(const char* model_name, const lembed_reranker_tuning_result_t& result) {
+    std::string path = get_reranker_custom_cache_path(model_name);
+    std::ofstream f(path);
+    if (!f.is_open()) return;
+    f << "{\n";
+    f << "  \"threads\": " << result.threads << ",\n";
+    f << "  \"batch_size\": " << result.batch_size << ",\n";
+    f << "  \"max_tokens\": " << result.max_tokens << ",\n";
+    f << "  \"throughput_docs_sec\": " << result.throughput_docs_sec << ",\n";
+    f << "  \"latency_ms\": " << result.latency_ms << ",\n";
+    f << "  \"p95_latency_ms\": " << result.p95_latency_ms << ",\n";
+    f << "  \"memory_mb\": " << result.memory_mb << "\n";
+    f << "}\n";
+}
+
+inline bool read_reranker_custom_cache(const char* model_name, lembed_reranker_tuning_result_t* out) {
+    std::string path = get_reranker_custom_cache_path(model_name);
+    std::ifstream f(path);
+    if (!f.is_open()) return false;
+
+    std::string line;
+    while (std::getline(f, line)) {
+        auto find_val = [](const std::string& s, const char* key) -> double {
+            std::string search = std::string("\"") + key + "\": ";
+            size_t pos = s.find(search);
+            if (pos == std::string::npos) return -1;
+            return std::stod(s.substr(pos + search.length()));
+        };
+        if (line.find("\"threads\"") != std::string::npos) out->threads = (int)find_val(line, "threads");
+        if (line.find("\"batch_size\"") != std::string::npos) out->batch_size = (int)find_val(line, "batch_size");
+        if (line.find("\"max_tokens\"") != std::string::npos) out->max_tokens = (int)find_val(line, "max_tokens");
+        if (line.find("\"throughput_docs_sec\"") != std::string::npos) out->throughput_docs_sec = find_val(line, "throughput_docs_sec");
+        if (line.find("\"latency_ms\"") != std::string::npos) out->latency_ms = find_val(line, "latency_ms");
+        if (line.find("\"p95_latency_ms\"") != std::string::npos) out->p95_latency_ms = find_val(line, "p95_latency_ms");
+        if (line.find("\"memory_mb\"") != std::string::npos) out->memory_mb = find_val(line, "memory_mb");
+    }
+    return true;
 }
 
 }} /* namespace lembed::detail */
