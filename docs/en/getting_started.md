@@ -51,11 +51,14 @@ Check availability at runtime:
 ```python
 from libembedding import TextEmbedding
 
-if TextEmbedding.supports_llamacpp():
-    model = TextEmbedding.from_gguf(
-        "Xenova/all-MiniLM-L6-v2-GGUF",
-        filename="all-MiniLM-L6-v2-Q4_K_M.gguf",
-    )
+# The constructor detects .gguf and routes to the llama.cpp backend.
+# Either a bare local path...
+model = TextEmbedding("/path/to/all-MiniLM-L6-v2-Q4_K_M.gguf")
+
+# ...or "repo/filename.gguf" to fetch from HuggingFace.
+model = TextEmbedding(
+    "Xenova/all-MiniLM-L6-v2-GGUF/all-MiniLM-L6-v2-Q4_K_M.gguf"
+)
 ```
 
 ## Verifying the installation

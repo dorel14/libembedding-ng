@@ -9,12 +9,21 @@ Ce module permet d'interagir avec le backend llama.cpp pour les modèles GGUF.
 
 ## Fonctions
 
+L'en-tête n'expose que deux fonctions :
+
 | Fonction | Retour | Description |
 |----------|--------|-------------|
 | `lembed_llama_backend_available()` | `int` (1=yes, 0=no) | Vérifier la disponibilité |
-| `lembed_llama_version()` | `const char*` | Version de llama.cpp |
-| `lembed_llama_set_logging(enable)` | `void` | Activer/désactiver les logs |
-| `lembed_llama_get_n_gpu_layers(model_name)` | `int` | Nombre de couches GPU |
+| `lembed_llama_version()` | `const char*` | Identifiant du backend |
+
+> `lembed_llama_version()` ne renvoie pas un numéro de version : l'implémentation
+> actuelle retourne la chaîne littérale `"llama.cpp enabled"`. Ne l'utilisez pas
+> pour détecter une version.
+>
+> Il n'existe **pas** de `lembed_llama_set_logging()` ni de
+> `lembed_llama_get_n_gpu_layers()` dans cette API. Le nombre de couches GPU se
+> règle via les options du modèle (`LEMBED_BACKEND_LLAMACPP` et
+> `n_gpu_layers`), et les logs via la configuration de llama.cpp elle-même.
 
 ## Exemple
 

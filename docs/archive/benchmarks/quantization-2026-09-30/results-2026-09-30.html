@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quantization Benchmark Results</title>
+    <style>
+        body { font-family: monospace; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+        th { background-color: #f2f2f2; text-align: center; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .justification { font-size: 0.9em; color: #555; max-width: 300px; }
+        h1, h2 { color: #333; }
+        .env { font-size: 0.85em; color: #555; margin-bottom: 20px; }
+        .note { font-size: 0.85em; color: #a00; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Quantization Benchmark Results</h1>
+    <div class="env">timestamp: 2026-09-30T20:26:46+00:00, host: PC_Asus, platform: Windows 11 (AMD64), python: 3.12.10, libembedding_dist: 1.4.0, libembedding_source: 1.8.0, git: 6ef3b99</div>
+    <div class="note">Weights MB is the model file on disk (what the download costs). Peak MB is the resident high-water mark of a process that ran exactly this one configuration: it is larger than the file because ONNX Runtime maps the file and allocates its own arena on top.</div>
+    <h2>BAAI/bge-small-en-v1.5</h2>
+    <table>
+    <tr><th>Batch Size</th><th>Quantization</th><th>Model code</th><th>docs/s</th><th>ms/doc</th><th>Weights MB</th><th>Process peak MB</th><th>Justification</th></tr>
+    <tr><td>8</td><td>none</td><td>Xenova/bge-small-en-v1.5</td><td>48.2</td><td>20.75</td><td>126.9</td><td>249</td><td class="justification"></td></tr>
+    <tr><td>8</td><td>static</td><td>Qdrant/bge-small-en-v1.5-onnx-Q</td><td>5.0</td><td>199.69</td><td>63.4</td><td>176</td><td class="justification">9.6x slower, 1.4x less RAM</td></tr>
+    <tr><td>32</td><td>none</td><td>Xenova/bge-small-en-v1.5</td><td>48.6</td><td>20.57</td><td>126.9</td><td>249</td><td class="justification"></td></tr>
+    <tr><td>32</td><td>static</td><td>Qdrant/bge-small-en-v1.5-onnx-Q</td><td>5.1</td><td>197.42</td><td>63.4</td><td>177</td><td class="justification">9.6x slower, 1.4x less RAM</td></tr>
+    <tr><td>64</td><td>none</td><td>Xenova/bge-small-en-v1.5</td><td>48.1</td><td>20.79</td><td>126.9</td><td>249</td><td class="justification"></td></tr>
+    <tr><td>64</td><td>static</td><td>Qdrant/bge-small-en-v1.5-onnx-Q</td><td>5.0</td><td>199.88</td><td>63.4</td><td>177</td><td class="justification">9.6x slower, 1.4x less RAM</td></tr>
+    <tr><td>128</td><td>none</td><td>Xenova/bge-small-en-v1.5</td><td>50.5</td><td>19.79</td><td>126.9</td><td>249</td><td class="justification"></td></tr>
+    <tr><td>128</td><td>static</td><td>Qdrant/bge-small-en-v1.5-onnx-Q</td><td>5.0</td><td>200.49</td><td>63.4</td><td>177</td><td class="justification">10.1x slower, 1.4x less RAM</td></tr>
+    </table>
+    <h2>sentence-transformers/all-MiniLM-L6-v2</h2>
+    <table>
+    <tr><th>Batch Size</th><th>Quantization</th><th>Model code</th><th>docs/s</th><th>ms/doc</th><th>Weights MB</th><th>Process peak MB</th><th>Justification</th></tr>
+    <tr><td>8</td><td>dynamic</td><td>Xenova/all-MiniLM-L6-v2</td><td>161.0</td><td>6.21</td><td>21.9</td><td>118</td><td class="justification">1.8x faster, 1.7x less RAM</td></tr>
+    <tr><td>8</td><td>none</td><td>Qdrant/all-MiniLM-L6-v2-onnx</td><td>90.5</td><td>11.05</td><td>86.2</td><td>206</td><td class="justification"></td></tr>
+    <tr><td>32</td><td>dynamic</td><td>Xenova/all-MiniLM-L6-v2</td><td>157.2</td><td>6.36</td><td>21.9</td><td>118</td><td class="justification">1.6x faster, 1.7x less RAM</td></tr>
+    <tr><td>32</td><td>none</td><td>Qdrant/all-MiniLM-L6-v2-onnx</td><td>95.6</td><td>10.46</td><td>86.2</td><td>206</td><td class="justification"></td></tr>
+    <tr><td>64</td><td>dynamic</td><td>Xenova/all-MiniLM-L6-v2</td><td>162.2</td><td>6.16</td><td>21.9</td><td>118</td><td class="justification">1.8x faster, 1.7x less RAM</td></tr>
+    <tr><td>64</td><td>none</td><td>Qdrant/all-MiniLM-L6-v2-onnx</td><td>89.0</td><td>11.24</td><td>86.2</td><td>206</td><td class="justification"></td></tr>
+    <tr><td>128</td><td>dynamic</td><td>Xenova/all-MiniLM-L6-v2</td><td>112.1</td><td>8.92</td><td>21.9</td><td>118</td><td class="justification">1.2x faster, 1.7x less RAM</td></tr>
+    <tr><td>128</td><td>none</td><td>Qdrant/all-MiniLM-L6-v2-onnx</td><td>94.9</td><td>10.54</td><td>86.2</td><td>206</td><td class="justification"></td></tr>
+    </table>
+    <h2>Not measured</h2>
+    <table>
+    <tr><th>Model</th><th>Quantization</th><th>Reason</th></tr>
+    <tr><td>sentence-transformers/all-MiniLM-L6-v2</td><td>static</td><td>no static variant in the registry (available: dynamic, none)</td></tr>
+    <tr><td>BAAI/bge-small-en-v1.5</td><td>dynamic</td><td>no dynamic variant in the registry (available: none, static)</td></tr>
+    </table>
+</body>
+</html>

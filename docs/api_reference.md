@@ -48,7 +48,7 @@ TextEmbedding(
 | `pooling` | `str` | `"mean"` | Stratégie de pooling pour modèles locaux : `"cls"` ou `"mean"` |
 | `auto_workers` | `bool` | `False` | `True` = auto-détection du nombre optimal de sessions/workers pour llama.cpp |
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
-| `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"` (None = défaut du modèle) |
+| `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -59,17 +59,26 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
 | `dim` | `int` (property) | Dimension de l'embedding |
+| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
+| `model_name` | `str` (property) | Nom de registre du modèle chargé |
 | `info()` | `ModelDesc` | Descripteur du modèle chargé |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources C sous-jacentes |
-| `list_supported_models()` | `list[ModelInfo]` | (static) Liste tous les modèles de texte supportés |
 | `__enter__()` | `self` | Support du context manager |
 | `__exit__()` | `None` | Appelle `close()` automatiquement |
-| `from_gguf(repo, filename=None, provider="llamacpp", ...)` | `TextEmbedding` | Charge un modèle GGUF depuis HuggingFace (nécessite le backend llama.cpp) |
 | `from_mode(mode="balanced", **kwargs)` | `TextEmbedding` | (classmethod) Crée un TextEmbedding depuis un mode prédéfini : `"fast"`, `"balanced"`, `"quality"` |
-| `supports_llamacpp()` | `bool` | (static) Vérifie si le backend llama.cpp est compilé |
+
+> **Pas de méthode `list_supported_models()` sur `TextEmbedding`** — elle n'existe
+> que sur `SparseTextEmbedding`, `ImageEmbedding` et `Reranker`. Pour les modèles
+> texte, utilisez la fonction de module `list_text_models()`.
+
+> **Pas de `from_gguf()` ni de `supports_llamacpp()`.** Le chargement GGUF passe
+> par le constructeur : `_is_gguf_model()` reconnaît l'extension `.gguf` et
+> bascule sur le backend llama.cpp. Pour un dépôt HuggingFace, passer
+> `"repo/filename.gguf"` ; pour un fichier local, passer le chemin.
+> `detect_backend(model_name)` indique le backend retenu.
 
 #### Exemple
 
@@ -228,8 +237,17 @@ Reranker(
 | `BAAI/bge-reranker-base` | BGE Reranker base (défaut) |
 | `BAAI/bge-reranker-v2-m3` | BGE Reranker v2 multilingue |
 | `jinaai/jina-reranker-v1-turbo-en` | Jina Reranker v1 turbo |
-| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 multilingue |
-| `jinaai/jina-reranker-v1-turbo-en` (quantized) | Jina Reranker v1 turbo English (INT8) |
+| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 base multilingue |
+| `jinaai/jina-reranker-v1-turbo-en-quantized` | Jina Reranker v1 turbo English (INT8) |
+
+> **`quantization=` ne change pas les poids du reranker.** Contrairement à
+> `TextEmbedding`, il ne résout pas l'entrée de registre : il ne règle que des
+> options de session ONNX Runtime. Pour obtenir l'INT8, passer le **nom** de
+> l'entrée quantifiée — `jinaai/jina-reranker-v1-turbo-en-quantized`, qui pointe
+> sur `onnx/model_quantized.onnx` du dépôt `jinaai/jina-reranker-v1-turbo-en`.
+> Contrairement aux modèles texte, les entrées reranker quantifiées ont un
+> `model_name` **distinct** de leur version FP32, ce qui est précisément pourquoi
+> aucune résolution par mode n'y est possible aujourd'hui.
 
 #### Méthodes et propriétés
 
@@ -316,6 +334,47 @@ class TuningResult:
     memory_mb: float
 ```
 
+### SparseTuningResult
+
+```python
+@dataclass(frozen=True)
+class SparseTuningResult:
+    top_k: int
+    min_weight: float
+    storage_format: int
+    threads: int
+    batch_size: int
+    throughput_docs_sec: float
+    latency_ms: float
+    memory_mb: float
+```
+
+### ImageTuningResult
+
+```python
+@dataclass(frozen=True)
+class ImageTuningResult:
+    threads: int
+    batch_size: int
+    throughput_docs_sec: float
+    latency_ms: float
+    memory_mb: float
+```
+
+### RerankerTuningResult
+
+```python
+@dataclass(frozen=True)
+class RerankerTuningResult:
+    threads: int
+    batch_size: int
+    max_tokens: int
+    throughput_docs_sec: float
+    latency_ms: float
+    p95_latency_ms: float
+    memory_mb: float
+```
+
 ### ModelSelectionResult
 
 Résultat de la sélection automatique de modèle.
@@ -339,7 +398,7 @@ class ModelSelectionResult:
 
 | Fonction | Description |
 |----------|-------------|
-| `autotune(model_name, full=False)` | Auto-tune un modèle. Retourne `TuningResult`. |
+| `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune un modèle. Retourne `TuningResult`. `texts` fournit un corpus de mesure (échantillonné à `max_sample_size`) ; `None` utilise un corpus synthétique. |
 | `autotune_unified(task, model_name, mode="quick")` | Auto-tune unifié pour tous les types de tâches. Voir [Unified Tuning](#unified-tuning). |
 | `sparse_autotune(model_name, mode="quick")` | Auto-tune l'embedding sparse. Retourne `SparseTuningResult`. |
 | `image_autotune(model_name, mode="quick")` | Auto-tune l'embedding image. Retourne `ImageTuningResult`. |
@@ -391,13 +450,18 @@ class UnifiedTuningResult:
 
 ### LlamaError
 
-Exception levée pour les erreurs du backend llama.cpp/GGUF :
+Sous-classe de `LembedError`, levée pour les erreurs du backend llama.cpp/GGUF.
+Comme les autres exceptions, elle expose :
+
+- `status_code` (`int`) — `LEMBED_ERROR_LLAMA`
+- `message` (`str`) — `"llama.cpp error"`
+- `detail` (`str`) — détail technique renvoyé par llama.cpp
 
 ```python
 from libembedding import LlamaError
 
 try:
-    model = TextEmbedding.from_gguf("/path/to/model.gguf")
+    model = TextEmbedding("/path/to/model.gguf")
 except LlamaError as e:
     print(f"Erreur llama.cpp: {e.detail}")
 ```

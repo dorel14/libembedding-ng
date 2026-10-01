@@ -154,6 +154,7 @@ with minimal overhead (~13%).
 - **Autotune cache with hardware fingerprint** — results cached by CPU + OS + RAM + software version for instant re-configuration
 - **Automatic model selection** — `auto_select_model()` picks the best model for your hardware and use case
 - **Quantized image and reranker models** (INT8, ~4x smaller, minimal accuracy impact)
+- **Quantized text models** (INT8 static and dynamic variants, and some FP16 ones behind the `_Q` suffix) — measured at 2-4x smaller weights and 1.4-1.7x less peak RAM; throughput depends on the model and the real weight format (MiniLM dynamic INT8 is 1.8x *faster*, the BGE `_Q` entry is FP16 and 9.5x *slower*), see [Quantization: FP32 vs INT8](#quantization-fp32-vs-int8)
 - **Python bindings** via `pip install libembedding-ng` — drop-in fastembed replacement
 - Automatic model downloading and caching from HuggingFace Hub
 - Pure C API (`extern "C"`) for maximum FFI compatibility
@@ -1021,6 +1022,157 @@ Measured on Apple M-series (macOS arm64) with `all-MiniLM-L6-v2` (384-dim). Medi
 - C++ and Python share the same backend -- Python adds only 13% overhead (4.4ms vs 3.9ms)
 - C++ API is **1.7-2.7x faster** than fastembed-rs (Rust) across batch sizes
 
+### Quantization: FP32 vs INT8
+
+Measured by `benchmarks/quantization/bench_quantization.py` on 2026-09-30
+(host `PC_Asus`, Windows 11 AMD64, CPU provider, Python 3.12.10, libembedding
+1.8.0, commit `6ef3b99`). Corpus of 1,000 texts (50 warmup + 950 timed), models
+pre-cached. Each variant runs in its own subprocess, so peak RSS is attributable
+to the configuration that produced it. Every mode is measured at every batch size,
+and each quantized variant is compared against the FP32 baseline **at the same
+batch size** — comparing a batch-64 variant to a batch-8 baseline would measure the
+batch size, not the quantization:
+
+| Model | Variant | Weight size | Throughput | Peak RAM | vs FP32 (same batch) |
+|-------|---------|-------------|------------|----------|---------|
+| `all-MiniLM-L6-v2` | FP32 (`none`) | 86.2 MB | 89.0 docs/s @ batch 64 | 206 MB | -- |
+| `all-MiniLM-L6-v2` | INT8 (`dynamic`) | **21.9 MB** (3.9x smaller) | **162.2 docs/s** @ batch 64 | **118 MB** | **1.8x faster**, 1.7x less RAM |
+| `bge-small-en-v1.5` | FP32 (`none`) | 126.9 MB | 48.6 docs/s @ batch 32 | 249 MB | -- |
+| `bge-small-en-v1.5` | **FP16** (`static` in the registry) | 63.4 MB (2.0x smaller) | 5.1 docs/s @ batch 32 | 176 MB | **9.5x slower**, 1.4x less RAM |
+
+> **Read the variant column carefully: the two rows do not use the same
+> quantization technology.** `Xenova/all-MiniLM-L6-v2` really is INT8 (its
+> initializers are `INT8`/`UINT8`). The four `Qdrant/*-onnx-Q` entries —
+> including `bge-small-en-v1.5` — are **FP16**, not INT8: every one of their
+> 149 initializers is `FLOAT16`, and they ship an ORT-optimized graph
+> (`Attention` + `SkipLayerNormalization` + `FastGelu` fused). The registry
+> labels them `LEMBED_QUANTIZATION_STATIC` and their description says
+> "Quantized", which is why this row does not say INT8.
+>
+> There is **no INT8 variant of `bge-small-en-v1.5` in the registry**, so this
+> benchmark does not measure static INT8 for that model at all. What it measures
+> is FP16 against FP32 — and FP16 is the pathological case on a CPU without
+> native FP16 compute: it halves the file and the resident set, then converts
+> back to FP32 to work, which is why it is slower rather than faster.
+
+The two models do not behave the same way, and the honest summary is not one
+headline:
+
+- **MiniLM dynamic INT8 is faster *and* smaller.** 162.2 vs 89.0 docs/s (1.8x),
+  118 vs 206 MB peak (1.7x), 21.9 vs 86.2 MB on disk (3.9x). This is the one
+  genuinely optimized quantized path in the set, and on this machine it wins on
+  every axis.
+- **The BGE `_Q` entry is FP16 and 9.5x slower.** 5.1 vs 48.6 docs/s, even though
+  it saves RAM (176 vs 249 MB, 1.4x) and disk (63.4 vs 126.9 MB, 2.0x). Do not
+  select it for throughput; take it only when download or disk is the binding
+  constraint. Do not read this number as "INT8 is slow" — the same registry
+  serves true INT8 for MiniLM, and that one is 1.8x faster.
+- **Peak RAM is a real measurement now.** Each configuration ran alone, so the
+  high-water mark is attributable. It exceeds the weight file because ONNX Runtime
+  memory-maps the file and allocates its own arena on top — but the *difference*
+  between configurations is real, and it moves in the same direction as the weight
+  file for both models.
+- **The reliable win is disk, cache and download footprint** -- the practical
+  constraint for container images, air-gapped installs and cold starts.
+
+#### Full per-batch results
+
+`BAAI/bge-small-en-v1.5`:
+
+| Batch | Variant | docs/s | ms/doc | Weights | Peak RAM | vs FP32 |
+|-------|---------|--------|--------|---------|----------|---------|
+| 8 | FP32 (`none`) | 48.2 | 20.75 | 126.9 MB | 249 MB | -- |
+| 8 | FP16 (`static` in the registry) | 5.0 | 199.69 | 63.4 MB | 176 MB | 9.6x slower |
+| 32 | FP32 (`none`) | 48.6 | 20.57 | 126.9 MB | 249 MB | -- |
+| 32 | FP16 (`static` in the registry) | 5.1 | 197.42 | 63.4 MB | 177 MB | 9.5x slower |
+| 64 | FP32 (`none`) | 48.1 | 20.79 | 126.9 MB | 249 MB | -- |
+| 64 | FP16 (`static` in the registry) | 5.0 | 199.88 | 63.4 MB | 177 MB | 9.6x slower |
+| 128 | FP32 (`none`) | 50.5 | 19.79 | 126.9 MB | 249 MB | -- |
+| 128 | FP16 (`static` in the registry) | 5.0 | 200.49 | 63.4 MB | 177 MB | 10.1x slower |
+
+`sentence-transformers/all-MiniLM-L6-v2`:
+
+| Batch | Variant | docs/s | ms/doc | Weights | Peak RAM | vs FP32 |
+|-------|---------|--------|--------|---------|----------|---------|
+| 8 | FP32 (`none`) | 90.5 | 11.05 | 86.2 MB | 206 MB | -- |
+| 8 | INT8 (`dynamic`) | 161.0 | 6.21 | 21.9 MB | 118 MB | 1.8x faster |
+| 32 | FP32 (`none`) | 95.6 | 10.46 | 86.2 MB | 206 MB | -- |
+| 32 | INT8 (`dynamic`) | 157.2 | 6.36 | 21.9 MB | 118 MB | 1.6x faster |
+| 64 | FP32 (`none`) | 89.0 | 11.24 | 86.2 MB | 206 MB | -- |
+| 64 | INT8 (`dynamic`) | 162.2 | 6.16 | 21.9 MB | 118 MB | 1.8x faster |
+| 128 | FP32 (`none`) | 94.9 | 10.54 | 86.2 MB | 206 MB | -- |
+| 128 | INT8 (`dynamic`) | 112.1 | 8.92 | 21.9 MB | 118 MB | 1.2x faster |
+
+#### How to read these numbers
+
+- **Peak RAM is measured, not dismissed.** Every configuration ran in its own
+  process, so the resident high-water mark belongs to that configuration. It
+  exceeds the weight file because ONNX Runtime memory-maps the file and
+  allocates its own arena on top -- 118 MB for a 21.9 MB file, 249 MB for a
+  126.9 MB file -- but the *difference* between configurations is real.
+- **Run-to-run variance is around 10%.** A repeat of the same configuration
+  measured the MiniLM FP32 batch-64 baseline at 89.0 and 99.5 docs/s on the same
+  machine. Treat the small differences as noise and the order-of-magnitude ones
+  (1.8x, 9.5x) as real; the tables print two decimals because the raw run does,
+  not because the third digit is meaningful.
+- **`dynamic` collapses at batch 128** (112.1 docs/s, against 157-162 at batches
+  8 to 64). The quantized path is not batch-size-agnostic, so the best batch size
+  for a quantized variant is not necessarily the best one for its FP32 baseline.
+- **Not every mode exists for every model.** MiniLM has no `static` variant and
+  `bge-small-en-v1.5` no `dynamic` variant in the registry. These are reported as
+  *not measured* with the available modes listed, never as a failed run.
+- **`quantization=` selects the weights, not just the session options.** Each
+  quantized sibling is its own registry entry with its own `model_file`, and the
+  requested mode is resolved *before* the session is created. When a model has no
+  entry in that mode, creation fails with `LEMBED_ERROR_MODEL_NOT_FOUND` (Python:
+  `ModelNotFoundError`) naming the modes the model actually has:
+
+  ```python
+  from libembedding import TextEmbedding
+
+  # Resolved to the registry entry that provides the requested mode
+  TextEmbedding("sentence-transformers/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="static")
+
+  # Naming the quantized repo directly is equivalent and unambiguous -- this is
+  # what the benchmark does
+  TextEmbedding("Xenova/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("Qdrant/bge-small-en-v1.5-onnx-Q", quantization="static")
+  ```
+
+  In C, either the `_Q` enum or the `quantization` field of the v2 options selects
+  the entry:
+
+  ```c
+  opts.model = LEMBED_TEXT_BGE_SMALL_EN_V15_Q;   /* or LEMBED_TEXT_ALL_MINILM_L6_V2_Q */
+  ```
+
+  This resolution did not always exist: the mode used to be stamped on the context
+  without changing the loaded file. That is why the archived 2026-09-27 benchmark is
+  void — it measured the same FP32 weights under three labels, and the 2026-09-29
+  run published before the fix is void too. The 2026-09-30 run above is the first
+  one whose figures reflect the registry-entry selection.
+
+  Two caveats: `quantization="auto"` selects **no** weights (it loads the FP32
+  default while `.quantization` reports `"auto"`) — use
+  `preferred_quantization="auto"` for a measured auto-selection. And
+  `Reranker(quantization=...)` does not resolve a variant either: pass the name of
+  the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
+
+- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
+  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
+  corpus before switching a quality-critical index; static INT8 (`_Q`) is the safer
+  default.
+
+Full report, including the machine block, archived verbatim at
+`docs/archive/benchmarks/quantization-2026-09-30/` — every figure above is
+traceable to it line by line. `benchmarks/quantization/results.html` is only the
+benchmark's output path and is overwritten by each run. Earlier runs are archived
+in `docs/archive/benchmarks/quantization-2026-09-27/` and
+`docs/archive/benchmarks/quantization-2026-09-29/`; both are void because they
+predate the variant-selection fix. An incomplete run is archived in
+`docs/archive/benchmarks/quantization-2026-09-30-partial/`.
+
 ### Reproducing benchmarks
 
 ```bash
@@ -1037,6 +1189,24 @@ cd ../benchmarks && ./run_benchmarks.sh
 pip install libembedding-ng
 PYTHONPATH=../python/src python3 bench_python_compare.py
 ```
+
+### Reproducing the quantization benchmark
+
+Each variant runs in its own subprocess, so peak memory is attributable and one
+crashing configuration cannot take the run down:
+
+```bash
+# From the repository root
+python benchmarks/quantization/bench_quantization.py --num-texts 1000
+
+# Restrict to one model / one mode
+python benchmarks/quantization/bench_quantization.py \
+  --models BAAI/bge-small-en-v1.5 --quantizations none static
+```
+
+Writes `benchmarks/quantization/results.json` and `results.html`. Run it on an
+otherwise idle machine: the comparison is only meaningful if the FP32 baseline
+and the quantized variants see the same conditions.
 
 ---
 

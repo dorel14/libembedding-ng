@@ -1,0 +1,50 @@
+[
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "none",
+    "batch_size": 8,
+    "texts_per_second": 63.76388279829518,
+    "latency_ms_per_doc": 15.682859263186785,
+    "peak_memory_mb": 227.015625,
+    "dim": 384,
+    "num_docs": 950,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "none",
+    "batch_size": 32,
+    "texts_per_second": 74.049419226186,
+    "latency_ms_per_doc": 13.50449484209285,
+    "peak_memory_mb": 227.015625,
+    "dim": 384,
+    "num_docs": 950,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "static",
+    "batch_size": 8,
+    "texts_per_second": 93.7783910995253,
+    "latency_ms_per_doc": 10.663437368409513,
+    "peak_memory_mb": 227.015625,
+    "dim": 384,
+    "num_docs": 950,
+    "success": true,
+    "error": ""
+  },
+  {
+    "model_name": "BAAI/bge-small-en-v1.5",
+    "quantization": "static",
+    "batch_size": 32,
+    "texts_per_second": 93.05434712837477,
+    "latency_ms_per_doc": 10.74640821046686,
+    "peak_memory_mb": 227.015625,
+    "dim": 384,
+    "num_docs": 950,
+    "success": true,
+    "error": ""
+  }
+]
