@@ -53,7 +53,7 @@ identique :
 | 64 | `all-MiniLM-L6-v2` | FP32 | 86,2 Mo | 89,0 docs/s | 206 Mo | — |
 | 64 | `all-MiniLM-L6-v2` | INT8 `dynamic` | 21,9 Mo | **162,2 docs/s** | **118 Mo** | **1,8x plus rapide** |
 | 32 | `bge-small-en-v1.5` | FP32 | 126,9 Mo | 48,6 docs/s | 249 Mo | — |
-| 32 | `bge-small-en-v1.5` | **FP16** (`static` au registre) | 63,4 Mo | 5,1 docs/s | 176 Mo | **9,5x plus lent** |
+| 32 | `bge-small-en-v1.5` | **FP16** | 63,4 Mo | 5,1 docs/s | 176 Mo | **9,5x plus lent** |
 
 - MiniLM dynamique : 1,8x plus rapide, 3,9x plus petit, 1,7x moins de RAM.
 - BGE `_Q` : **FP16**, 9,5x plus lent, 2,0x plus petit, 1,4x moins de RAM.

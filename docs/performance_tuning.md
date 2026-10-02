@@ -347,9 +347,9 @@ model = TextEmbedding(
 
 ### Quantification : FP32 vs INT8
 
-Mesuré par `benchmarks/quantization/bench_quantization.py` le 2026-09-30
+Mesuré par `benchmarks/quantization/bench_quantization.py` le 2026-10-01
 (hôte `PC_Asus`, Windows 11 AMD64, provider CPU, Python 3.12.10,
-libembedding 1.8.0, commit `6ef3b99`). Corpus de 1 000 textes (50 de warmup +
+libembedding 1.8.0, commit `c2dbe95`). Corpus de 1 000 textes (50 de warmup +
 950 chronométrés), modèles pré-cachés. Chaque variante tourne dans son propre
 sous-processus : le pic RSS est donc attribuable à la configuration qui l'a
 produit. Tous les modes sont mesurés à toutes les tailles de batch, et chaque
@@ -359,39 +359,46 @@ batch, pas la quantification :
 
 | Modèle | Variante | Poids | Débit | Pic RAM | vs FP32 (même batch) |
 |--------|----------|-------|-------|---------|---------|
-| `all-MiniLM-L6-v2` | FP32 (`none`) | 86,2 Mo | 89,0 docs/s @ batch 64 | 206 Mo | — |
-| `all-MiniLM-L6-v2` | INT8 (`dynamic`) | **21,9 Mo** (3,9x plus petit) | **162,2 docs/s** @ batch 64 | **118 Mo** | **1,8x plus rapide**, 1,7x moins de RAM |
-| `bge-small-en-v1.5` | FP32 (`none`) | 126,9 Mo | 48,6 docs/s @ batch 32 | 249 Mo | — |
-| `bge-small-en-v1.5` | FP16 (`static` dans le registre) | **63,4 Mo** (2,0x plus petit) | 5,1 docs/s @ batch 32 | 176 Mo | **9,5x plus lent**, 1,4x moins de RAM |
+| `all-MiniLM-L6-v2` | FP32 (`none`) | 86,2 Mo | 90,5 docs/s @ batch 64 | 206 Mo | — |
+| `all-MiniLM-L6-v2` | INT8 (`dynamic`) | **21,9 Mo** (3,9x plus petit) | **151,7 docs/s** @ batch 64 | **117 Mo** | **1,7x plus rapide**, 1,8x moins de RAM |
+| `bge-small-en-v1.5` | FP32 (`none`) | 126,9 Mo | 47,4 docs/s @ batch 64 | 249 Mo | — |
+| `bge-small-en-v1.5` | INT8 (`dynamic`) | **32,2 Mo** (3,9x plus petit) | **95,5 docs/s** @ batch 64 | **120 Mo** | **2,0x plus rapide**, 2,1x moins de RAM |
+| `bge-small-en-v1.5` | **FP16** (`LEMBED_QUANTIZATION_FP16`) | 63,4 Mo (2,0x plus petit) | 5,0 docs/s @ batch 64 | 177 Mo | **9,5x plus lent**, 1,4x moins de RAM |
 
-> **Lisez attentivement la colonne « variante » : les deux lignes n'utilisent pas
-> la même technologie de quantification.** `Xenova/all-MiniLM-L6-v2` est bien
-> INT8 (ses initialiseurs sont `INT8`/`UINT8`). Les quatre entrées
-> `Qdrant/*-onnx-Q` — dont `bge-small-en-v1.5` — sont en **FP16**, pas en INT8 :
-> la totalité de leurs 149 initialiseurs est `FLOAT16`, et elles livrent un graphe
-> optimisé par ORT (`Attention` + `SkipLayerNormalization` + `FastGelu` fusionnés).
-> Le registre les étiquette `LEMBED_QUANTIZATION_STATIC` et leur description dit
-> « Quantized », ce qui explique que cette ligne ne dise pas INT8.
->
-> Le registre ne contient **aucune variante INT8 de `bge-small-en-v1.5`** : ce
-> benchmark ne mesure donc pas du tout l'INT8 statique sur ce modèle. Il mesure
-> FP16 contre FP32 — et le FP16 est le cas pathologique sur un CPU sans calcul
-> FP16 natif : le fichier et le jeu résident sont divisés par deux, puis le
-> travail se fait en FP32, d'où une lenteur au lieu d'un gain.
->
-> Les deux modèles ne se comportent pas de la même façon, et le résumé honnête
-> n'est pas une formule unique :
+**L'INT8 dynamique est le gagnant sur les deux modèles**, et il gagne sur tous
+les axes à la fois : 1,7x plus rapide sur MiniLM, 2,0x plus rapide sur BGE, 3,9x
+plus petit sur disque, et 1,8 à 2,1x moins de RAM résidente. Il n'y a aucun
+arbitrage ici, sauf la précision — que ce benchmark ne mesure pas.
 
-- **L'INT8 dynamique de MiniLM est plus rapide *et* plus petit.** 162,2 contre
-  89,0 docs/s (1,8x), 118 contre 206 Mo de pic (1,7x), 21,9 contre 86,2 Mo sur
-  disque (3,9x). C'est le seul chemin quantifié réellement optimisé de cet
-  ensemble, et il gagne sur tous les axes sur cette machine.
-- **L'entrée BGE `_Q` est en FP16 et 9,5x plus lente.** 5,1 contre 48,6 docs/s,
-  alors qu'elle économise de la RAM (176 contre 249 Mo, 1,4x) et du disque
-  (63,4 contre 126,9 Mo, 2,0x). Ne la choisissez pas pour le débit, seulement si
-  le téléchargement ou le disque est la contrainte. Ne lisez pas ce chiffre comme
-  « l'INT8 est lent » : le même registre sert du vrai INT8 pour MiniLM, et celui-là
-  est 1,8x plus rapide.
+> **Un autre piège, et c'est un problème de nommage.** Les quatre entrées
+> `Qdrant/*-onnx-Q` du registre — dont `bge-small-en-v1.5` — livrent des poids
+> **FP16**, pas INT8 : la totalité de leurs 149 initialiseurs est `FLOAT16` et
+> elles portent un graphe optimisé par ORT (`Attention` +
+> `SkipLayerNormalization` + `FastGelu` fusionnés). Elles déclaraient
+> `LEMBED_QUANTIZATION_STATIC` avec une description « Quantized », donc
+> `quantization="static"` renvoyait des poids float16 — **9,5x plus lent** que
+> FP32, ce qu'un lecteur d'une version antérieure de ce tableau aurait conclu de
+> « l'INT8 ». Le FP16 est le cas pathologique sur un CPU sans arithmétique FP16
+> native : le fichier est divisé par deux, puis le calcul revient en FP32. Le
+> registre déclare maintenant ces entrées `LEMBED_QUANTIZATION_FP16`, les
+> descriptions disent FP16, et `quantization="static"` échoue proprement via
+> `ModelNotFoundError` au lieu de renvoyer silencieusement du float16.
+>
+> L'export INT8 authentique de `bge-small-en-v1.5` est
+> `onnx-community/bge-small-en-v1.5-ONNX` (`onnx/model_quantized.onnx`, 33 Mo,
+> 144 initialiseurs `INT8` + 6 `UINT8`, 72 `MatMulInteger` alimentés par 48
+> `DynamicQuantizeLinear`). Il est enregistré sous
+> `LEMBED_TEXT_BGE_SMALL_EN_V15_INT8` et c'est lui que mesure la ligne INT8
+> ci-dessus.
+>
+> Lancez `python benchmarks/verify_quantization_modes.py` pour vérifier, pour
+> chaque entrée du registre, que le mode déclaré correspond aux dtypes
+> réellement présents dans son fichier. Il remonte 0 incohérence ; avant le
+> correctif `fp16` il en remontait 4.
+
+- **La précision n'est pas mesurée ici.** Les embeddings INT8 dynamiques varient
+  légèrement avec la composition du batch (cosinus ~0,984 face à la référence
+  FP32). Validez sur votre propre corpus avant de basculer un index critique.
 - **Le pic RAM est une vraie mesure.** Chaque configuration a tourné seule, donc
   la marque haute du jeu résident lui appartient. Il dépasse le fichier de poids
   parce qu'ONNX Runtime mappe le fichier en mémoire et alloue sa propre arène
@@ -408,26 +415,30 @@ batch, pas la quantification :
 | Batch | Variante | docs/s | ms/doc | Poids | Pic RAM | vs FP32 |
 |-------|----------|--------|--------|-------|---------|---------|
 | 8 | FP32 (`none`) | 48,2 | 20,75 | 126,9 Mo | 249 Mo | — |
-| 8 | FP16 (`static` dans le registre) | 5,0 | 199,69 | 63,4 Mo | 176 Mo | 9,6x plus lent |
-| 32 | FP32 (`none`) | 48,6 | 20,57 | 126,9 Mo | 249 Mo | — |
-| 32 | FP16 (`static` dans le registre) | 5,1 | 197,42 | 63,4 Mo | 177 Mo | 9,5x plus lent |
-| 64 | FP32 (`none`) | 48,1 | 20,79 | 126,9 Mo | 249 Mo | — |
-| 64 | FP16 (`static` dans le registre) | 5,0 | 199,88 | 63,4 Mo | 177 Mo | 9,6x plus lent |
-| 128 | FP32 (`none`) | 50,5 | 19,79 | 126,9 Mo | 249 Mo | — |
-| 128 | FP16 (`static` dans le registre) | 5,0 | 200,49 | 63,4 Mo | 177 Mo | 10,1x plus lent |
+| 8 | INT8 (`dynamic`) | 98,0 | 10,21 | 32,2 Mo | 120 Mo | 2,0x plus rapide |
+| 8 | FP16 | 5,0 | 198,99 | 63,4 Mo | 178 Mo | 9,6x plus lent |
+| 32 | FP32 (`none`) | 50,5 | 19,82 | 126,9 Mo | 249 Mo | — |
+| 32 | INT8 (`dynamic`) | 103,5 | 9,66 | 32,2 Mo | 120 Mo | 2,0x plus rapide |
+| 32 | FP16 | 5,0 | 201,47 | 63,4 Mo | 177 Mo | 10,1x plus lent |
+| 64 | FP32 (`none`) | 47,4 | 21,10 | 126,9 Mo | 249 Mo | — |
+| 64 | INT8 (`dynamic`) | 95,5 | 10,47 | 32,2 Mo | 120 Mo | 2,0x plus rapide |
+| 64 | FP16 | 5,0 | 199,18 | 63,4 Mo | 177 Mo | 9,5x plus lent |
+| 128 | FP32 (`none`) | 47,8 | 20,91 | 126,9 Mo | 249 Mo | — |
+| 128 | INT8 (`dynamic`) | 90,5 | 11,06 | 32,2 Mo | 120 Mo | 1,9x plus rapide |
+| 128 | FP16 | 5,0 | 200,67 | 63,4 Mo | 178 Mo | 9,6x plus lent |
 
 `sentence-transformers/all-MiniLM-L6-v2` :
 
 | Batch | Variante | docs/s | ms/doc | Poids | Pic RAM | vs FP32 |
 |-------|----------|--------|--------|-------|---------|---------|
-| 8 | FP32 (`none`) | 90,5 | 11,05 | 86,2 Mo | 206 Mo | — |
-| 8 | INT8 (`dynamic`) | 161,0 | 6,21 | 21,9 Mo | 118 Mo | 1,8x plus rapide |
-| 32 | FP32 (`none`) | 95,6 | 10,46 | 86,2 Mo | 206 Mo | — |
-| 32 | INT8 (`dynamic`) | 157,2 | 6,36 | 21,9 Mo | 118 Mo | 1,6x plus rapide |
-| 64 | FP32 (`none`) | 89,0 | 11,24 | 86,2 Mo | 206 Mo | — |
-| 64 | INT8 (`dynamic`) | 162,2 | 6,16 | 21,9 Mo | 118 Mo | 1,8x plus rapide |
-| 128 | FP32 (`none`) | 94,9 | 10,54 | 86,2 Mo | 206 Mo | — |
-| 128 | INT8 (`dynamic`) | 112,1 | 8,92 | 21,9 Mo | 118 Mo | 1,2x plus rapide |
+| 8 | FP32 (`none`) | 97,1 | 10,30 | 86,2 Mo | 206 Mo | — |
+| 8 | INT8 (`dynamic`) | 172,4 | 5,80 | 21,9 Mo | 118 Mo | 1,8x plus rapide |
+| 32 | FP32 (`none`) | 96,3 | 10,38 | 86,2 Mo | 206 Mo | — |
+| 32 | INT8 (`dynamic`) | 165,0 | 6,06 | 21,9 Mo | 118 Mo | 1,7x plus rapide |
+| 64 | FP32 (`none`) | 90,5 | 11,05 | 86,2 Mo | 206 Mo | — |
+| 64 | INT8 (`dynamic`) | 151,7 | 6,59 | 21,9 Mo | 117 Mo | 1,7x plus rapide |
+| 128 | FP32 (`none`) | 99,6 | 10,04 | 86,2 Mo | 206 Mo | — |
+| 128 | INT8 (`dynamic`) | 164,0 | 6,10 | 21,9 Mo | 118 Mo | 1,6x plus rapide |
 
 #### Comment lire ces chiffres
 
@@ -437,20 +448,23 @@ batch, pas la quantification :
   et alloue sa propre arène par-dessus — 118 Mo pour un fichier de 21,9 Mo,
   249 Mo pour un fichier de 126,9 Mo — mais *l'écart* entre configurations est
   réel.
-- **La variabilité entre deux exécutions est de l'ordre de 10 %.** Une
-  réexécution de la même configuration a mesuré la référence MiniLM FP32 batch 64
-  à 89,0 puis 99,5 docs/s sur la même machine. Traitez les faibles écarts comme
-  du bruit et les écarts d'ordre de grandeur (1,8x, 9,5x) comme réels ; les
+- **La variabilité entre deux exécutions est de l'ordre de 10 %.** La référence
+  MiniLM FP32 batch 64 a été mesurée à 82,7, 89,0, 90,5 puis 99,6 docs/s sur la
+  même machine au cours de quatre exécutions. Traitez les faibles écarts comme du
+  bruit et les écarts d'ordre de grandeur (1,7x, 2,0x, 9,5x) comme réels ; les
   tableaux affichent deux décimales parce que l'exécution brute le fait, pas
   parce que le troisième chiffre est significatif.
-- **Le mode `dynamic` s'effondre au batch 128** (112,1 docs/s, contre 157-162
-  aux batchs 8 à 64). Le chemin quantifié n'est pas indifférent à la taille de
-  batch : le meilleur batch d'une variante quantifiée n'est donc pas forcément le
-  meilleur batch de sa référence FP32.
-- **Tous les modes n'existent pas pour tous les modèles.** MiniLM n'a pas de
-  variante `static`, `bge-small-en-v1.5` pas de variante `dynamic`. Ces
-  combinaisons sont déclarées *non mesurées* avec les modes disponibles, jamais
-  comme un échec.
+- **Le chemin quantifié est stable sur les batchs** (151,7 à 172,4 docs/s sur
+  MiniLM, 90,5 à 103,5 sur BGE) : la taille de batch n'est donc pas ce qui
+  pilote la comparaison. Une exécution antérieure montrait un effondrement du
+  mode `dynamic` de MiniLM à 112,1 docs/s au batch 128 ; cela ne s'est pas
+  reproduit, et c'est le type de valeur aberrante que la variabilité de ~10 %
+  explique.
+- **Tous les modes n'existent pas pour tous les modèles.** Le registre propose
+  exactement `dynamic` (vrai INT8) pour MiniLM, et `none` + `dynamic` + `fp16`
+  pour `bge-small-en-v1.5`. Aucun modèle n'a d'entrée `static` (INT8 avec
+  calibration). Les combinaisons absentes sont déclarées *non mesurées* avec les
+  modes disponibles, jamais comme un échec.
 - **`quantization=` sélectionne les poids, pas seulement les options de session.**
   Chaque variante quantifiée est sa propre entrée de registre avec son propre
   `model_file`, et le mode demandé est résolu *avant* la création de la session.
@@ -463,27 +477,36 @@ batch, pas la quantification :
 
   # Résolu vers l'entrée de registre qui fournit le mode demandé
   TextEmbedding("sentence-transformers/all-MiniLM-L6-v2", quantization="dynamic")
-  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="static")
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="dynamic")   # vrai INT8
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="fp16")      # float16
 
-  # Nommer directement le dépôt quantifié est équivalent et sans ambiguïté —
+  # Nommer directement le dépôt est équivalent et sans ambiguïté —
   # c'est ce que fait le benchmark
   TextEmbedding("Xenova/all-MiniLM-L6-v2", quantization="dynamic")
-  TextEmbedding("Qdrant/bge-small-en-v1.5-onnx-Q", quantization="static")
+  TextEmbedding("onnx-community/bge-small-en-v1.5-ONNX", quantization="dynamic")
   ```
 
-  En C, l'enum `_Q` ou le champ `quantization` des options v2 sélectionne
-  l'entrée :
+  Demander un mode qu'un modèle n'a pas est une erreur, pas un repli silencieux :
+
+  ```python
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="static")
+  # ModelNotFoundError: Model 'BAAI/bge-small-en-v1.5' has no 'static'
+  # variant (available: dynamic, fp16, none)
+  ```
+
+  En C, l'enum de modèle sélectionne l'entrée, ou le champ `quantization` des
+  options v2 :
 
   ```c
-  opts.model = LEMBED_TEXT_BGE_SMALL_EN_V15_Q;   /* ou LEMBED_TEXT_ALL_MINILM_L6_V2_Q */
+  opts.model = LEMBED_TEXT_BGE_SMALL_EN_V15_INT8;  /* ou ..._Q pour le FP16 */
   ```
 
   Cette résolution n'a pas toujours existé : le mode était simplement marqué sur
   le contexte sans changer le fichier chargé. C'est pourquoi le benchmark archivé
   du 2026-09-27 est sans valeur — il mesurait les mêmes poids FP32 sous trois
   étiquettes, et l'exécution du 2026-09-29 publiée avant le correctif est
-  également sans valeur. L'exécution du 2026-09-30 ci-dessus est la première dont
-  les chiffres reflètent la sélection d'entrée de registre.
+  également sans valeur. L'exécution du 2026-10-01 ci-dessus est la première qui
+  résout les entrées de registre *et* mesure un vrai fichier INT8.
 
   Deux réserves : `quantization="auto"` ne sélectionne **aucun** poids (il charge
   l'entrée FP32 par défaut alors que `.quantization` rapporte `"auto"`) —
@@ -497,13 +520,16 @@ batch, pas la quantification :
   l'INT8 statique (`_Q`) est le choix par défaut le plus sûr.
 
 Rapport complet, bloc d'environnement inclus, archivé verbatim dans
-`docs/archive/benchmarks/quantization-2026-09-30/` : chaque chiffre publié
+`docs/archive/benchmarks/quantization-2026-10-01/` : chaque chiffre publié
 ci-dessus s'y retrouve ligne à ligne.
 `benchmarks/quantization/results.html` n'est que le chemin de sortie du
 benchmark, écrasé à chaque exécution. Les exécutions antérieures sont archivées
-dans `quantization-2026-09-27/` et `quantization-2026-09-29/` ; toutes deux sont
-sans valeur car antérieures au correctif de sélection de variante. Une
-exécution incomplète est archivée dans `quantization-2026-09-30-partial/`.
+dans `quantization-2026-09-27/`, `quantization-2026-09-29/` et
+`quantization-2026-09-30/` ; toutes trois sont sans valeur — la première
+mesurait des poids FP32 sous trois étiquettes, la deuxième précède le correctif
+de sélection de variante, la troisième mesurait des fichiers FP16 en les nommant
+INT8. Une exécution incomplète est archivée dans
+`quantization-2026-09-30-partial/`.
 
 ```bash
 # Chaque variante tourne dans son propre sous-processus : le pic mémoire est

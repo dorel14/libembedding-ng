@@ -1,13 +1,17 @@
 {
   "environment": {
-    "timestamp": "2026-10-01T21:01:19+00:00",
+    "timestamp": "2026-10-02T18:34:46+00:00",
     "host": "PC_Asus",
     "platform": "Windows 11 (AMD64)",
+    "cpu": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
     "python": "3.12.10",
     "libembedding_dist": "1.4.0",
     "libembedding_source": "1.8.0",
-    "git": "c2dbe95"
+    "onnxruntime": "1.29.0",
+    "execution_provider": "CPU",
+    "git": "1330f48"
   },
+  "runtime_consistency_problems": [],
   "warmup_texts": 50,
   "timed_texts": 950,
   "skipped": [
@@ -33,300 +37,420 @@
       "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
       "quantization": "none",
       "batch_size": 8,
-      "texts_per_second": 89.53302233288792,
-      "latency_ms_per_doc": 11.169063368395559,
+      "texts_per_second": 97.07883848140476,
+      "latency_ms_per_doc": 10.300906105212084,
       "weights_mb": 86.20036125183105,
-      "process_peak_mb": 205.8671875,
+      "process_peak_mb": 206.05078125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 101
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
       "quantization": "none",
       "batch_size": 32,
-      "texts_per_second": 90.57846045869341,
-      "latency_ms_per_doc": 11.040152315859144,
+      "texts_per_second": 96.31081718921162,
+      "latency_ms_per_doc": 10.383049684184554,
       "weights_mb": 86.20036125183105,
-      "process_peak_mb": 205.99609375,
+      "process_peak_mb": 206.328125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 101
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
       "quantization": "none",
       "batch_size": 64,
-      "texts_per_second": 82.72572233647197,
-      "latency_ms_per_doc": 12.088138631569516,
+      "texts_per_second": 90.47302822843717,
+      "latency_ms_per_doc": 11.053017894737422,
       "weights_mb": 86.20036125183105,
-      "process_peak_mb": 205.3046875,
+      "process_peak_mb": 205.9609375,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 101
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
       "quantization": "none",
       "batch_size": 128,
-      "texts_per_second": 86.68050799191317,
-      "latency_ms_per_doc": 11.53661905273207,
+      "texts_per_second": 99.62736533955501,
+      "latency_ms_per_doc": 10.037402841997775,
       "weights_mb": 86.20036125183105,
-      "process_peak_mb": 205.91015625,
+      "process_peak_mb": 206.09765625,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 101
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Xenova/all-MiniLM-L6-v2",
       "quantization": "dynamic",
       "batch_size": 8,
-      "texts_per_second": 158.2124405709995,
-      "latency_ms_per_doc": 6.320615473669022,
+      "texts_per_second": 172.42606007381406,
+      "latency_ms_per_doc": 5.799587368474979,
       "weights_mb": 21.908159255981445,
-      "process_peak_mb": 117.8359375,
+      "process_peak_mb": 118.45703125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "INT64": 1,
+        "FLOAT": 101,
+        "UINT8": 6,
+        "INT8": 72
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Xenova/all-MiniLM-L6-v2",
       "quantization": "dynamic",
       "batch_size": 32,
-      "texts_per_second": 142.80244415300115,
-      "latency_ms_per_doc": 7.002681263134275,
+      "texts_per_second": 164.999207832377,
+      "latency_ms_per_doc": 6.060635157811799,
       "weights_mb": 21.908159255981445,
-      "process_peak_mb": 118.04296875,
+      "process_peak_mb": 118.02734375,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "INT64": 1,
+        "FLOAT": 101,
+        "UINT8": 6,
+        "INT8": 72
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Xenova/all-MiniLM-L6-v2",
       "quantization": "dynamic",
       "batch_size": 64,
-      "texts_per_second": 158.6779580575819,
-      "latency_ms_per_doc": 6.302072526274347,
+      "texts_per_second": 151.72009221103943,
+      "latency_ms_per_doc": 6.591084842006431,
       "weights_mb": 21.908159255981445,
-      "process_peak_mb": 117.8671875,
+      "process_peak_mb": 117.484375,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "INT64": 1,
+        "FLOAT": 101,
+        "UINT8": 6,
+        "INT8": 72
+      }
     },
     {
       "model_name": "sentence-transformers/all-MiniLM-L6-v2",
       "model_code": "Xenova/all-MiniLM-L6-v2",
       "quantization": "dynamic",
       "batch_size": 128,
-      "texts_per_second": 159.5071571335526,
-      "latency_ms_per_doc": 6.26931115801103,
+      "texts_per_second": 163.98107665105786,
+      "latency_ms_per_doc": 6.098264631643695,
       "weights_mb": 21.908159255981445,
-      "process_peak_mb": 117.99609375,
+      "process_peak_mb": 118.1171875,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "INT64": 1,
+        "FLOAT": 101,
+        "UINT8": 6,
+        "INT8": 72
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Xenova/bge-small-en-v1.5",
       "quantization": "none",
       "batch_size": 8,
-      "texts_per_second": 44.15108234550826,
-      "latency_ms_per_doc": 22.649501368378925,
+      "texts_per_second": 48.18541267985602,
+      "latency_ms_per_doc": 20.75316873685408,
       "weights_mb": 126.92784309387207,
-      "process_peak_mb": 248.92578125,
+      "process_peak_mb": 249.49609375,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Xenova/bge-small-en-v1.5",
       "quantization": "none",
       "batch_size": 32,
-      "texts_per_second": 45.34500147738063,
-      "latency_ms_per_doc": 22.053147368378152,
+      "texts_per_second": 50.45245683628397,
+      "latency_ms_per_doc": 19.820640315791888,
       "weights_mb": 126.92784309387207,
-      "process_peak_mb": 248.9453125,
+      "process_peak_mb": 248.95703125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Xenova/bge-small-en-v1.5",
       "quantization": "none",
       "batch_size": 64,
-      "texts_per_second": 42.35551181777678,
-      "latency_ms_per_doc": 23.60967810523059,
+      "texts_per_second": 47.38218703468707,
+      "latency_ms_per_doc": 21.10497768429157,
       "weights_mb": 126.92784309387207,
-      "process_peak_mb": 248.8046875,
+      "process_peak_mb": 249.4765625,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Xenova/bge-small-en-v1.5",
       "quantization": "none",
       "batch_size": 128,
-      "texts_per_second": 46.89880029253884,
-      "latency_ms_per_doc": 21.32250705268234,
+      "texts_per_second": 47.828108958288055,
+      "latency_ms_per_doc": 20.908206947343913,
       "weights_mb": 126.92784309387207,
-      "process_peak_mb": 248.73046875,
+      "process_peak_mb": 248.64453125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "onnx-community/bge-small-en-v1.5-ONNX",
       "quantization": "dynamic",
       "batch_size": 8,
-      "texts_per_second": 94.65063032663302,
-      "latency_ms_per_doc": 10.565169999915126,
+      "texts_per_second": 97.9741402304394,
+      "latency_ms_per_doc": 10.206774947429565,
       "weights_mb": 32.24093818664551,
-      "process_peak_mb": 119.76171875,
+      "process_peak_mb": 120.0546875,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197,
+        "UINT8": 6,
+        "INT8": 144
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "onnx-community/bge-small-en-v1.5-ONNX",
       "quantization": "dynamic",
       "batch_size": 32,
-      "texts_per_second": 83.0973041877507,
-      "latency_ms_per_doc": 12.03408473685972,
+      "texts_per_second": 103.48539011775081,
+      "latency_ms_per_doc": 9.663199789478982,
       "weights_mb": 32.24093818664551,
-      "process_peak_mb": 119.5625,
+      "process_peak_mb": 120.0703125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197,
+        "UINT8": 6,
+        "INT8": 144
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "onnx-community/bge-small-en-v1.5-ONNX",
       "quantization": "dynamic",
       "batch_size": 64,
-      "texts_per_second": 94.39400089744483,
-      "latency_ms_per_doc": 10.593893578962275,
+      "texts_per_second": 95.50358371156914,
+      "latency_ms_per_doc": 10.470811263167937,
       "weights_mb": 32.24093818664551,
-      "process_peak_mb": 119.69921875,
+      "process_peak_mb": 120.09765625,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197,
+        "UINT8": 6,
+        "INT8": 144
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "onnx-community/bge-small-en-v1.5-ONNX",
       "quantization": "dynamic",
       "batch_size": 128,
-      "texts_per_second": 93.18589885545774,
-      "latency_ms_per_doc": 10.731237368339574,
+      "texts_per_second": 90.45246436391467,
+      "latency_ms_per_doc": 11.055530736860083,
       "weights_mb": 32.24093818664551,
-      "process_peak_mb": 119.6328125,
+      "process_peak_mb": 120.0390625,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT": 197,
+        "UINT8": 6,
+        "INT8": 144
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
       "quantization": "fp16",
       "batch_size": 8,
-      "texts_per_second": 4.95137685385859,
-      "latency_ms_per_doc": 201.96402526313537,
+      "texts_per_second": 5.025435724505013,
+      "latency_ms_per_doc": 198.98772063162667,
       "weights_mb": 63.38608169555664,
-      "process_peak_mb": 173.13671875,
+      "process_peak_mb": 177.89453125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT16": 149
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
       "quantization": "fp16",
       "batch_size": 32,
-      "texts_per_second": 4.953711681132377,
-      "latency_ms_per_doc": 201.86883378957742,
+      "texts_per_second": 4.9634319983482,
+      "latency_ms_per_doc": 201.4734966315231,
       "weights_mb": 63.38608169555664,
-      "process_peak_mb": 178.1484375,
+      "process_peak_mb": 176.578125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT16": 149
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
       "quantization": "fp16",
       "batch_size": 64,
-      "texts_per_second": 5.011223370597829,
-      "latency_ms_per_doc": 199.5520706315476,
+      "texts_per_second": 5.02049669831909,
+      "latency_ms_per_doc": 199.1834792630796,
       "weights_mb": 63.38608169555664,
-      "process_peak_mb": 176.8828125,
+      "process_peak_mb": 177.078125,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT16": 149
+      }
     },
     {
       "model_name": "BAAI/bge-small-en-v1.5",
       "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
       "quantization": "fp16",
       "batch_size": 128,
-      "texts_per_second": 4.966396592171251,
-      "latency_ms_per_doc": 201.35323094743254,
+      "texts_per_second": 4.98334972892809,
+      "latency_ms_per_doc": 200.66823610533518,
       "weights_mb": 63.38608169555664,
-      "process_peak_mb": 177.8203125,
+      "process_peak_mb": 177.87890625,
       "dim": 384,
       "num_docs": 950,
       "success": true,
       "error": "",
-      "batched": true
+      "batched": true,
+      "onnxruntime": "1.29.0",
+      "execution_provider": "CPU",
+      "weight_types": {
+        "FLOAT16": 149
+      }
     }
   ]
 }

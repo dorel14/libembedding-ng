@@ -6,7 +6,7 @@
 > helpers, streaming, a multi-worker pool, an autotuner and automatic model
 > selection. Imported as `libembedding`.
 
-Fast ONNX-based text, image, and sparse embeddings for Python. **5-8x faster than fastembed** with 3.5x less memory.
+Fast ONNX-based text, image, and sparse embeddings for Python. Dynamic INT8 ONNX models are ~4x smaller, ~2x lighter in memory and ~1.7-2.0x faster than FP32 on CPU (measured; see Benchmarks below).
 
 Built on a C/C++ backend using ONNX Runtime, exposed to Python via zero-overhead cffi bindings. The wheel bundles the **compiled shared library** (`libembedding.so` / `.dylib` / `.dll`) together with ONNX Runtime and libcurl, so no system ONNX Runtime install is required at runtime. Supports 44 text embedding models, 5 image models, 2 sparse models, and 4 rerankers with automatic model downloading from HuggingFace Hub.
 
@@ -261,14 +261,25 @@ model = TextEmbedding("/path/to/model_dir")
 
 ## Benchmarks
 
-Measured on Apple M-series with `all-MiniLM-L6-v2` (384-dim). Median of 10 runs.
+### Comparison with fastembed — withdrawn
 
-| Metric                   | libembedding | fastembed | Speedup |
-|--------------------------|-------------|-----------|---------|
-| Single text latency (ms) | **4.4**     | 38.0      | **8.6x**|
-| Batch 8 (texts/sec)      | **641**     | 92        | **7.0x**|
-| Batch 32 (texts/sec)     | **581**     | 89        | **6.5x**|
-| Peak RSS (MB)            | **567**     | 1,981     | **3.5x less**|
+An earlier version of this file published a table claiming libembedding is
+6.5-8.6x faster than `fastembed`, stated as "measured on Apple M-series". **It has
+been removed.** All four measurement harnesses hardcoded
+`"platform": "macOS arm64"` in their output, so no run could be traced to a
+machine, and the maintainer has no Mac to reproduce it on. The harnesses now
+report the real platform. See
+`docs/archive/benchmarks/cross-implementation-macos-claim/` for the withdrawn
+figures and the reasoning.
+
+Treat any cross-implementation speed claim about libembedding as unsubstantiated
+until it is re-measured on an identified machine.
+
+### Quantization — measured and reproducible
+
+The quantization benchmark in the main README reports its full environment (CPU,
+ONNX Runtime version, execution provider) and reads the weight dtypes from the
+ONNX files, so its provenance is verifiable.
 
 ### Unified Auto-Tuning
 
