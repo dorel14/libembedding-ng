@@ -4,10 +4,10 @@ Finds optimal: pruning_threshold, top_k, quantization, storage_format.
 """
 from __future__ import annotations
 
-import time
 import json
-import sys
 import os
+import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../python/src"))

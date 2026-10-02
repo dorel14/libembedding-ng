@@ -2,14 +2,14 @@
 Reranking memory benchmark - measures RSS per model.
 """
 import argparse
-import sys
 import os
-import subprocess
 import re
+import subprocess
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+from bench_common import generate_documents
 from libembedding import Reranker
-from bench_common import generate_documents, benchmark_rerank
 
 
 def get_rss_mb_tasklist():
@@ -18,15 +18,17 @@ def get_rss_mb_tasklist():
         pid = os.getpid()
         result = subprocess.run(
             ['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5, check=False)
         if result.returncode == 0:
             # Parse CSV: "name","pid","session","mem","status"
             match = re.search(r'"(\d[\d\s]*)\s*Ko"', result.stdout)
             if match:
                 kb = int(match.group(1).replace(' ', ''))
                 return kb / 1024
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # wmic is absent from recent Windows builds. Report the failure rather
+        # than returning a silent 0 MB, which reads as a real measurement.
+        print(f"warning: RSS probe failed ({exc}); reporting 0 MB", file=sys.stderr)
     return 0
 
 
@@ -36,14 +38,16 @@ def get_rss_mb_wmic():
         pid = os.getpid()
         result = subprocess.run(
             ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'WorkingSetSize'],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5, check=False)
         if result.returncode == 0:
             for line in result.stdout.strip().split('\n'):
                 line = line.strip()
                 if line.isdigit():
                     return int(line) / (1024 * 1024)
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # wmic is absent from recent Windows builds. Report the failure rather
+        # than returning a silent 0 MB, which reads as a real measurement.
+        print(f"warning: RSS probe failed ({exc}); reporting 0 MB", file=sys.stderr)
     return 0
 
 
@@ -99,11 +103,13 @@ def main():
                 'delta': delta,
             })
             reranker.close()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"{model_name:<40} SKIP: {e}")
+            # Closing a context that failed to build must not mask the
+            # error already reported just above.
             try:
                 reranker.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - deliberate cleanup
                 pass
     print()
 

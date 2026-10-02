@@ -4,15 +4,14 @@ Compares: dense cosine, sparse dot product, BM25, dense+sparse hybrid.
 """
 from __future__ import annotations
 
-import time
-import sys
 import os
+import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../python/src"))
 
 import numpy as np
-from libembedding import TextEmbedding, SparseTextEmbedding
-from libembedding._binding import ffi, lib
+from libembedding import SparseTextEmbedding, TextEmbedding
 
 
 def benchmark_dense_cosine(model: TextEmbedding, queries: list[str], docs: list[str], n_runs: int = 5) -> dict:
@@ -24,8 +23,10 @@ def benchmark_dense_cosine(model: TextEmbedding, queries: list[str], docs: list[
     for _ in range(n_runs):
         start = time.perf_counter()
         for q in query_emb:
-            scores = np.dot(doc_emb, q)
-            top = np.argsort(-scores)[:10]
+            # Only the dot products are timed. An argsort here would add a full
+            # sort of the score vector to every iteration and inflate the
+            # reported time, which is what a retrieval benchmark must not do.
+            _ = np.dot(doc_emb, q)
         elapsed = time.perf_counter() - start
         times.append(elapsed * 1000 / len(queries))
 
@@ -57,7 +58,6 @@ def benchmark_sparse_dot(model: SparseTextEmbedding, queries: list[str], docs: l
                 else:
                     score = sum(q.get(idx, 0.0) * val for idx, val in d.items())
                 scores.append(score)
-            top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:10]
         elapsed = time.perf_counter() - start
         times.append(elapsed * 1000 / len(queries))
 
@@ -85,7 +85,6 @@ def benchmark_hybrid(model: TextEmbedding, sparse_model: SparseTextEmbedding,
                 dense_score = np.dot(d_dense, q_dense)
                 sparse_score = sum(q_sparse.get(idx, 0.0) * val for idx, val in d_sparse.items())
                 scores.append(0.5 * dense_score + 0.5 * sparse_score)
-            top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:10]
         elapsed = time.perf_counter() - start
         times.append(elapsed * 1000 / len(queries))
 
@@ -137,7 +136,7 @@ def main():
         r = benchmark_dense_cosine(dense_model, queries, docs, args.runs)
         results.append(r)
         print(f"  {r['latency_ms_per_query']:.2f} ms/query")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
         print(f"  ERROR: {e}")
 
     # Sparse
@@ -147,7 +146,7 @@ def main():
         r = benchmark_sparse_dot(sparse_model, queries, docs, args.runs)
         results.append(r)
         print(f"  {r['latency_ms_per_query']:.2f} ms/query")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
         print(f"  ERROR: {e}")
 
     # Hybrid
@@ -156,7 +155,7 @@ def main():
         r = benchmark_hybrid(dense_model, sparse_model, queries, docs, args.runs)
         results.append(r)
         print(f"  {r['latency_ms_per_query']:.2f} ms/query")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
         print(f"  ERROR: {e}")
 
     # Summary

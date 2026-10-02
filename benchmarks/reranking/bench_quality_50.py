@@ -3,11 +3,12 @@ Expanded quality benchmark: 50+ queries across multiple domains.
 Measures NDCG@10, MRR, Recall@10 for FP32 vs INT8 with statistical significance.
 """
 import argparse
-import sys
 import os
+import sys
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -822,8 +823,8 @@ def main():
     # Markdown
     print("## Results (for markdown)")
     print()
-    print(f"| Metric | FP32 | INT8 | Diff |")
-    print(f"|--------|------|------|------|")
+    print("| Metric | FP32 | INT8 | Diff |")
+    print("|--------|------|------|------|")
     print(f"| NDCG@10 mean | {fp32['ndcg_mean']:.4f} | {int8['ndcg_mean']:.4f} | {ndcg_diff:+.4f} |")
     print(f"| MRR mean | {fp32['mrr_mean']:.4f} | {int8['mrr_mean']:.4f} | {mrr_diff:+.4f} |")
     print(f"| Recall@10 mean | {fp32['recall_mean']:.4f} | {int8['recall_mean']:.4f} | {recall_diff:+.4f} |")

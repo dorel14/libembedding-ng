@@ -8,12 +8,13 @@ This is the deciding factor for DEFAULT model selection:
 - If NDCG diff > 1%: keep FP32 as default
 """
 import argparse
-import sys
-import os
 import math
+import os
+import sys
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -290,8 +291,8 @@ def main():
     # Markdown summary
     print("## Results (for markdown)")
     print()
-    print(f"| Metric | FP32 | INT8 | Diff |")
-    print(f"|--------|------|------|------|")
+    print("| Metric | FP32 | INT8 | Diff |")
+    print("|--------|------|------|------|")
     for metric in ['ndcg@10', 'mrr', 'recall@10']:
         fp32_val = fp32[metric]
         int8_val = int8[metric]

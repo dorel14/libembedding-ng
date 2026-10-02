@@ -7,6 +7,7 @@ Same model, same corpus, same methodology.
 import json
 import math
 import os
+import platform
 import resource
 import sys
 import time
@@ -26,7 +27,7 @@ def p95(v):
     if not v:
         return 0.0
     s = sorted(v)
-    idx = int(math.ceil(0.95 * len(s))) - 1
+    idx = math.ceil(0.95 * len(s)) - 1
     return s[min(idx, len(s) - 1)]
 
 
@@ -112,7 +113,7 @@ def bench_libembedding(corpus):
     return {
         "library": "libembedding-py",
         "model": "all-MiniLM-L6-v2",
-        "platform": "macOS arm64",
+        "platform": platform.system() + " " + platform.machine(),
         "benchmarks": {
             "model_load_ms": {"median": round(median(load_times), 2), "p95": round(p95(load_times), 2)},
             "single_latency_ms": {"median": round(median(single_times), 2), "p95": round(p95(single_times), 2)},
@@ -184,7 +185,7 @@ def bench_fastembed(corpus):
     return {
         "library": "fastembed-py",
         "model": "all-MiniLM-L6-v2",
-        "platform": "macOS arm64",
+        "platform": platform.system() + " " + platform.machine(),
         "benchmarks": {
             "model_load_ms": {"median": round(median(load_times), 2), "p95": round(p95(load_times), 2)},
             "single_latency_ms": {"median": round(median(single_times), 2), "p95": round(p95(single_times), 2)},

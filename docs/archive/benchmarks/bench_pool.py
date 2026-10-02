@@ -2,14 +2,14 @@
 Benchmark TextEmbeddingPool - Python multi-worker embedding
 """
 
-import time
-import sys
 import os
+import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import TextEmbedding, TextEmbeddingPool
 import numpy as np
+from libembedding import TextEmbedding, TextEmbeddingPool
 
 # Multilingual corpus with various lengths
 CORPUS = [
@@ -71,7 +71,7 @@ def benchmark_single(threads, n_iter=5):
     times = []
     for _ in range(n_iter):
         t0 = time.perf_counter()
-        result = model.embed(CORPUS)
+        model.embed(CORPUS)
         t1 = time.perf_counter()
         times.append(t1 - t0)
 
@@ -103,7 +103,7 @@ def benchmark_pool(workers, threads_per_worker, n_iter=5):
     times = []
     for _ in range(n_iter):
         t0 = time.perf_counter()
-        result = pool.embed(CORPUS)
+        pool.embed(CORPUS)
         t1 = time.perf_counter()
         times.append(t1 - t0)
 

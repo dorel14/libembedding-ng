@@ -177,7 +177,19 @@ int main(int argc, char** argv) {
     fprintf(fp, "{\n");
     fprintf(fp, "  \"library\": \"libembedding\",\n");
     fprintf(fp, "  \"model\": \"all-MiniLM-L6-v2\",\n");
+    /* Report the machine this actually ran on. This used to be hardcoded to
+     * "macOS arm64", so every run -- including the Windows ones -- claimed to be
+     * an Apple Silicon measurement, and the published comparison table could not
+     * be traced to any real run. */
+#if defined(__APPLE__)
     fprintf(fp, "  \"platform\": \"macOS arm64\",\n");
+#elif defined(_WIN32)
+    fprintf(fp, "  \"platform\": \"Windows x86_64\",\n");
+#elif defined(__linux__)
+    fprintf(fp, "  \"platform\": \"Linux x86_64\",\n");
+#else
+    fprintf(fp, "  \"platform\": \"unknown\",\n");
+#endif
     fprintf(fp, "  \"benchmarks\": {\n");
 
     json_samples(fp, "model_load_ms", load_times);

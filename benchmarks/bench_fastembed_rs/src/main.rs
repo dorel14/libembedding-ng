@@ -121,7 +121,17 @@ fn main() {
     let result = json!({
         "library": "fastembed-rs",
         "model": "all-MiniLM-L6-v2",
-        "platform": "macOS arm64",
+        // Measured, not hardcoded: this used to claim "macOS arm64"
+        // unconditionally, so a run on any other machine mislabelled itself.
+        "platform": if cfg!(target_os = "macos") {
+            "macOS arm64"
+        } else if cfg!(target_os = "windows") {
+            "Windows x86_64"
+        } else if cfg!(target_os = "linux") {
+            "Linux x86_64"
+        } else {
+            "unknown"
+        },
         "benchmarks": {
             "model_load_ms": {
                 "median": (median(&mut load_times) * 100.0).round() / 100.0,

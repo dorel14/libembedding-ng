@@ -3,8 +3,8 @@ Reranking ORT settings investigation - tests GraphOptimizationLevel and Executio
 Based on the embedding benchmarks where ORT settings made a big difference.
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))

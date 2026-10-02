@@ -3,15 +3,15 @@ Python bindings benchmark for libembedding.
 Tests throughput with different models and configurations.
 """
 
-import time
-import sys
 import os
+import sys
+import time
 
 # Add the package to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import TextEmbedding
 import numpy as np
+from libembedding import TextEmbedding
 
 # Short corpus for fair comparison with C++
 CORPUS = [
@@ -34,7 +34,7 @@ def benchmark_model(model_name, threads, batch_size, n_iterations=5):
             offline=True,
             show_download_progress=False,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - report and skip, do not abort
         print(f"    SKIP: {e}")
         return None
 
@@ -48,7 +48,7 @@ def benchmark_model(model_name, threads, batch_size, n_iterations=5):
     times = []
     for i in range(n_iterations):
         t0 = time.perf_counter()
-        result = model.embed(CORPUS)
+        model.embed(CORPUS)
         t1 = time.perf_counter()
         elapsed = t1 - t0
         times.append(elapsed)
@@ -138,7 +138,7 @@ def main():
             has_nan = np.any(np.isnan(result)) or np.any(np.isinf(result))
             status = "FAIL" if has_nan else "OK"
             print(f"  {name:<20} {status}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report and continue
             print(f"  {name:<20} ERROR: {e}")
 
     model.close()

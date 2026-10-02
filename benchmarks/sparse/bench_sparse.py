@@ -3,19 +3,20 @@ Sparse embedding benchmark.
 Compares SPLADE++ vs BGE-M3 on latency, memory, and term distribution.
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
 cffi.FFI.cdef = _patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))
-from libembedding import SparseTextEmbedding, list_sparse_models
+from libembedding import SparseTextEmbedding
 
 
 def percentile(values, p):
@@ -30,13 +31,15 @@ def get_rss_mb():
         pid = os.getpid()
         result = subprocess.run(
             ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'WorkingSetSize'],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5, check=False)
         for line in result.stdout.strip().split('\n'):
             line = line.strip()
             if line.isdigit():
                 return int(line) / (1024 * 1024)
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # wmic is absent from recent Windows builds. Report the failure rather
+        # than returning a silent 0 MB, which reads as a real measurement.
+        print(f"warning: RSS probe failed ({exc}); reporting 0 MB", file=sys.stderr)
     return 0
 
 
@@ -159,7 +162,7 @@ def main():
             print(f"  P95: {r['p95']:.1f} ms")
             print(f"  Throughput: {r['docs_per_sec']:.1f} docs/s")
             print(f"  Avg terms/doc: {r['avg_terms']}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"  FAILED: {e}")
             results.append({
                 'model': model_name,

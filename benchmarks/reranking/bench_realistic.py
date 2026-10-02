@@ -8,12 +8,13 @@ This is the benchmark that matters for Whoosh-NG production use:
 - Multiple top_k values
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 # Patch cffi to handle duplicate declarations in _cdefs.h
 import cffi
+
 _original_cdef = cffi.FFI.cdef
 def _patched_cdef(self, csource, override=False, packed=False, pack=None):
     return _original_cdef(self, csource, override=True, packed=packed, pack=pack)

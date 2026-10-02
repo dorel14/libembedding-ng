@@ -5,8 +5,8 @@ This is the most useful benchmark for Whoosh-NG users.
 Question answered: "How many documents can I rerank before UX becomes too slow?"
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))

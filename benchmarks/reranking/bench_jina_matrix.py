@@ -2,12 +2,13 @@
 Jina-v1-turbo benchmark matrix: document length x top_k.
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 # Patch cffi to handle duplicate declarations in _cdefs.h
 import cffi
+
 _original_cdef = cffi.FFI.cdef
 def _patched_cdef(self, csource, override=False, packed=False, pack=None):
     return _original_cdef(self, csource, override=True, packed=packed, pack=pack)
@@ -89,7 +90,6 @@ def main():
 
     # Generate docs for max length
     max_k = max(top_k_values)
-    max_len = max(lengths)
 
     # Results matrix
     results = {}
@@ -216,13 +216,16 @@ def main():
         for target_tokens in lengths:
             for k in top_k_values:
                 val = results.get((target_tokens, k), 0)
-                if val <= budget:
-                    if best is None or k > best[1] or (k == best[1] and target_tokens > best[0]):
-                        best = (target_tokens, k, val)
+                if val <= budget and (
+                    best is None
+                    or k > best[1]
+                    or (k == best[1] and target_tokens > best[0])
+                ):
+                    best = (target_tokens, k, val)
         if best:
             print(f"    -> max: top_k={best[1]}, {best[0]} tokens/doc, {best[2]:.0f}ms")
         else:
-            print(f"    -> no combination fits within budget")
+            print("    -> no combination fits within budget")
     print()
 
 
