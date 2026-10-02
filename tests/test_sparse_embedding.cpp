@@ -37,7 +37,7 @@ int main(void) {
     };
 
     lembed_sparse_embeddings_t result = {0};
-    s = lembed_sparse_text_embedding_embed(ctx, texts, 2, 0, &result);
+    s = lembed_sparse_text_embedding_embed(ctx, texts, 2, 0, NULL, &result);
     ASSERT(s == LEMBED_OK, "embed sparse texts");
     ASSERT(result.count == 2, "got 2 sparse results");
 
