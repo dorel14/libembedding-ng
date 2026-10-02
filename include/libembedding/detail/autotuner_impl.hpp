@@ -13,6 +13,9 @@
 
 #include "libembedding/autotuner.h"
 #include "autotune_cache.hpp"
+/* Order matters: autotune_bench_text.hpp pulls the model/ONNX/llama impl chain
+ * that autotune_bench_reranker.hpp and the sparse/image headers rely on. Keep
+ * the text header first. */
 #include "autotune_bench_text.hpp"
 #include "autotune_bench_reranker.hpp"
 #include "autotune_bench_sparse.hpp"

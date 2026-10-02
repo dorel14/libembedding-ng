@@ -13,16 +13,89 @@
 
 #include "libembedding/autotuner.h"
 #include "libembedding/text_embedding.h"
+#include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace lembed { namespace detail {
+
+/* =========================================================================
+ * Text tuning cache
+ * ========================================================================= */
+
+/* Identity of a text tuning request. The corpus fingerprint is part of it, so
+ * a custom-corpus tuning can never be served for the synthetic one nor for
+ * another custom corpus. */
+inline autotune_cache_identity text_cache_identity(const char* model_code,
+                                                    const char* variant,
+                                                    const std::string& corpus,
+                                                    lembed_autotune_mode_t mode) {
+    autotune_cache_identity id;
+    id.model = model_code ? model_code : "";
+    id.variant = variant ? variant : "";
+    id.corpus = corpus;
+    id.objective = -1; /* the text tuner ranks with score_text_config only */
+    id.mode = (int)mode;
+    return id;
+}
+
+inline void write_text_cache(const autotune_cache_identity& id,
+                             const lembed_tuning_result_t& result) {
+    std::ostringstream os;
+    os << "{\n";
+    write_cache_identity(os, id);
+    os << "  \"workers\": " << result.workers << ",\n";
+    os << "  \"threads\": " << result.threads << ",\n";
+    os << "  \"batch_size\": " << result.batch_size << ",\n";
+    os << "  \"throughput_docs_sec\": " << result.throughput_docs_sec << ",\n";
+    os << "  \"latency_ms\": " << result.latency_ms << ",\n";
+    os << "  \"memory_mb\": " << result.memory_mb << "\n";
+    os << "}\n";
+    std::string variant = cache_variant_key(id.variant.c_str(), id.corpus, id.objective, id.mode);
+    write_file_atomic(get_cache_path(id.model.c_str(), "", variant), os.str());
+}
+
+/* Returns false on a miss, on a foreign entry and on a partial entry, so the
+ * caller never receives a half-filled result. */
+inline bool read_text_cache(const autotune_cache_identity& id, lembed_tuning_result_t* out) {
+    if (!out) return false;
+    std::string variant = cache_variant_key(id.variant.c_str(), id.corpus, id.objective, id.mode);
+    std::string path = get_cache_path(id.model.c_str(), "", variant);
+    if (!cache_identity_matches(path, id)) return false;
+
+    std::ifstream f(path);
+    if (!f.is_open()) return false;
+
+    *out = {0};
+    int found = 0;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (json_number(line, "workers", out->workers)) found++;
+        else if (json_number(line, "threads", out->threads)) found++;
+        else if (json_number(line, "batch_size", out->batch_size)) found++;
+        else if (json_number(line, "throughput_docs_sec", out->throughput_docs_sec)) found++;
+        else if (json_number(line, "latency_ms", out->latency_ms)) found++;
+        else if (json_number(line, "memory_mb", out->memory_mb)) found++;
+    }
+
+    /* A configuration field left at 0 would be applied as-is, so require every
+     * field to have been read before trusting the entry. */
+    static const int kExpectedFields = 6;
+    if (found < kExpectedFields) {
+        *out = {0};
+        return false;
+    }
+    return true;
+}
+
 
 /* Generate synthetic benchmark corpus with varied lengths */
 inline std::vector<std::string> generate_corpus(int n_samples) {
@@ -123,7 +196,13 @@ inline double benchmark_text_config(
     auto t1 = std::chrono::high_resolution_clock::now();
     double total_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-    double total_texts = n_batches * corpus.size();
+    double total_texts = (double)n_batches * (double)corpus.size();
+    if (total_texts <= 0.0 || total_ms <= 0.0) {
+        for (int i = 0; i < workers; i++)
+            lembed_text_embedding_free(emb[i]);
+        out_latency_ms = 0.0;
+        return 0.0;
+    }
     double docs_per_sec = total_texts / (total_ms / 1000.0);
     out_latency_ms = total_ms / total_texts;
 
@@ -160,34 +239,6 @@ inline lembed_status_t autotune_text_impl(
     }
     const char* model_code = info.model_code;
 
-    /* Check cache first */
-    lembed_tuning_result_t cached;
-    {
-        std::ifstream f(get_cache_path(model_code));
-        if (f.is_open()) {
-            std::string line;
-            while (std::getline(f, line)) {
-                auto pos = line.find(':');
-                if (pos == std::string::npos) continue;
-                std::string key = line.substr(0, pos);
-                std::string val = line.substr(pos + 1);
-                trim_json_value(key);
-                trim_json_value(val);
-                if (key == "workers") cached.workers = std::stoi(val);
-                else if (key == "threads") cached.threads = std::stoi(val);
-                else if (key == "batch_size") cached.batch_size = std::stoi(val);
-                else if (key == "throughput_docs_sec") cached.throughput_docs_sec = std::stod(val);
-                else if (key == "latency_ms") cached.latency_ms = std::stod(val);
-                else if (key == "memory_mb") cached.memory_mb = std::stod(val);
-            }
-            fprintf(stderr, "autotune: cache hit for %s\n", model_code);
-            if (result) *result = cached;
-            return LEMBED_OK;
-        }
-    }
-
-    fprintf(stderr, "autotune: cache miss for %s, running benchmark...\n", model_code);
-
     int cores = cpu_logical_cores();
     int n_samples = (mode == LEMBED_AUTOTUNE_QUICK) ? 16 : 64;
 
@@ -198,6 +249,22 @@ inline lembed_status_t autotune_text_impl(
     } else {
         bench_corpus = corpus;
     }
+    if (bench_corpus.empty()) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    /* The corpus that is actually benchmarked is part of the cache identity,
+     * so the synthetic and custom tunings never share an entry. */
+    autotune_cache_identity id =
+        text_cache_identity(model_code, corpus.empty() ? "synthetic" : "custom",
+                            corpus_fingerprint(bench_corpus), mode);
+
+    /* Check cache first */
+    lembed_tuning_result_t cached = {0};
+    if (read_text_cache(id, &cached)) {
+        if (result) *result = cached;
+        return LEMBED_OK;
+    }
+
+    fprintf(stderr, "autotune: cache miss for %s, running benchmark...\n", model_code);
 
     /* Configurations to test */
     struct Config { int workers; int threads; int batch; };
@@ -227,11 +294,19 @@ inline lembed_status_t autotune_text_impl(
 
     /* Benchmark each config */
     double best_score = -1e18;
+    int benchmarked = 0;
     lembed_tuning_result_t best = {1, 1, 64, 0, 0, 0};
 
     for (const auto& cfg : configs) {
         double latency = 0.0;
         double throughput = benchmark_text_config(bench_corpus, cfg.workers, cfg.threads, cfg.batch, latency);
+        if (throughput <= 0.0) {
+            /* Configuration failed to run (model load error, etc.) */
+            fprintf(stderr, "  autotune: workers=%d threads=%d batch=%d -> FAILED\n",
+                    cfg.workers, cfg.threads, cfg.batch);
+            continue;
+        }
+        benchmarked++;
         double memory = cfg.workers * 100.0;
         double score = score_text_config(throughput, latency, memory);
 
@@ -249,20 +324,16 @@ inline lembed_status_t autotune_text_impl(
         }
     }
 
+    /* No configuration could be benchmarked: do not cache a default that was
+     * never measured, and do not report it as a tuning result. */
+    if (benchmarked == 0) {
+        if (result) memset(result, 0, sizeof(*result));
+        return LEMBED_ERROR_ONNX_RUNTIME;
+    }
+
     if (result) *result = best;
 
-    /* Write to cache */
-    std::ofstream of(get_cache_path(model_code));
-    if (of.is_open()) {
-        of << "{\n";
-        of << "  \"workers\": " << best.workers << ",\n";
-        of << "  \"threads\": " << best.threads << ",\n";
-        of << "  \"batch_size\": " << best.batch_size << ",\n";
-        of << "  \"throughput_docs_sec\": " << best.throughput_docs_sec << ",\n";
-        of << "  \"latency_ms\": " << best.latency_ms << ",\n";
-        of << "  \"memory_mb\": " << best.memory_mb << "\n";
-        of << "}\n";
-    }
+    write_text_cache(id, best);
 
     return LEMBED_OK;
 }

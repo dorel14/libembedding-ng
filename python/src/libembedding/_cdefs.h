@@ -22,6 +22,8 @@ typedef enum {
 const char* lembed_status_message(lembed_status_t status);
 const char* lembed_last_error(void);
 const char* lembed_version(void);
+const char* lembed_onnxruntime_version(void);
+const char* lembed_execution_provider_name(int provider);
 
 /* â”€â”€ Enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
@@ -396,6 +398,12 @@ int lembed_find_text_model_by_code(const char* model_code);
 int lembed_find_sparse_model_by_code(const char* model_code);
 int lembed_find_reranker_model_by_code(const char* model_code);
 int lembed_find_image_model_by_code(const char* model_code);
+int lembed_find_text_model_variant(const char* model_name, int quantization);
+
+/* Accepts the HuggingFace repo (model_code) or the canonical registry name
+ * (model_name); returns the entry index, or -1 with lembed_last_error() set. */
+int lembed_resolve_text_model(const char* model);
+int lembed_resolve_reranker_model(const char* model);
 
 /* â”€â”€ Functions: Downloader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 

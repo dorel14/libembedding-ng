@@ -13,10 +13,13 @@
 
 #ifndef LIBEMBEDDING_NO_IMAGE
 #include "libembedding/autotuner.h"
+#include "libembedding/image_embedding.h"
+#include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -81,7 +84,11 @@ inline lembed_image_tuning_result_t bench_image_config(
     opts.show_download_progress = 0;
 
     int model_idx = lembed_find_image_model_by_code(model_name);
-    if (model_idx < 0) model_idx = 0;
+    if (model_idx < 0) {
+        /* Unknown model: do not silently benchmark a different one. */
+        res.latency_ms = 999999;
+        return res;
+    }
     opts.model = static_cast<lembed_image_model_t>(model_idx);
 
     lembed_image_embedding_t* ctx = nullptr;
@@ -111,20 +118,29 @@ inline lembed_image_tuning_result_t bench_image_config(
 
     /* Benchmark */
     std::vector<double> times;
+    times.reserve(bench_iters > 0 ? (size_t)bench_iters : 0);
     for (int i = 0; i < bench_iters; i++) {
         auto t0 = std::chrono::high_resolution_clock::now();
         lembed_embeddings_t result = {0};
-        lembed_image_embedding_embed_bytes(ctx, images.data(), sizes.data(), n_images, batch_size, &result);
-        lembed_embeddings_free(&result);
+        lembed_status_t es = lembed_image_embedding_embed_bytes(ctx, images.data(), sizes.data(),
+                                                                n_images, batch_size, &result);
         auto t1 = std::chrono::high_resolution_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        times.push_back(ms);
+        if (es != LEMBED_OK) continue;
+        lembed_embeddings_free(&result);
+        times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
     }
 
     lembed_image_embedding_free(ctx);
 
+    /* Every iteration failed: report the sentinel so this configuration is
+     * never mistaken for a zero-latency winner. */
+    if (times.empty()) {
+        res.latency_ms = 999999;
+        return res;
+    }
+
     std::sort(times.begin(), times.end());
-    double p50 = times[times.size() / 2];
+    double p50 = percentile_sorted(times, 0.50);
 
     res.latency_ms = p50;
     res.throughput_docs_sec = (p50 > 0) ? (1000.0 / p50) * n_images : 0;
@@ -147,25 +163,36 @@ extern "C" lembed_status_t lembed_image_autotune(
     int threads_options[] = {1, 2, 4, 8};
     int batch_options[] = {1, 4, 8, 16};
 
+    int cores = cpu_logical_cores();
+    std::vector<int> valid_threads;
+    for (int t : threads_options) {
+        if (t <= cores) valid_threads.push_back(t);
+    }
+    if (valid_threads.empty()) valid_threads.push_back(1);
+
     lembed_image_tuning_result_t best = {0};
     best.latency_ms = 999999;
 
-    int total = sizeof(threads_options) / sizeof(int) * sizeof(batch_options) / sizeof(int);
-    int current = 0;
+    int total = (int)(valid_threads.size() * (sizeof(batch_options) / sizeof(int)));
 
     fprintf(stderr, "image_autotune: testing %d configurations (mode=%s)...\n",
             total, mode == LEMBED_AUTOTUNE_QUICK ? "QUICK" : "FULL");
 
-    for (int t : threads_options) {
+    for (int t : valid_threads) {
         for (int b : batch_options) {
-            current++;
-
             auto r = bench_image_config(model_name, t, b, n_images, warmup, bench_iters);
 
             if (r.latency_ms < best.latency_ms) {
                 best = r;
             }
         }
+    }
+
+    /* No configuration could be benchmarked: do not report the sentinel as a
+     * tuning result. */
+    if (best.latency_ms >= 999999) {
+        *result = {0};
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 
     fprintf(stderr, "image_autotune: best config: threads=%d batch=%d (P50=%.1fms)\n",

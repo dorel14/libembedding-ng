@@ -22,6 +22,19 @@
 #include <string>
 #include <vector>
 
+/* Implementation of the public lembed_onnxruntime_version() declared in
+ * config.h. It lives here because this is the first header that includes
+ * onnxruntime_c_api.h, and config.h is deliberately dependency-free so that a
+ * C consumer can read the library version without pulling in ORT.
+ *
+ * Benchmarks must record it: quantized throughput depends on the runtime as much
+ * as on the weights, since the QDQ fusion that turns DequantizeLinear +
+ * MatMulInteger into QLinearMatMul is a runtime feature. */
+extern "C" const char* lembed_onnxruntime_version(void) {
+    const OrtApiBase* base = OrtGetApiBase();
+    return (base && base->GetVersionString) ? base->GetVersionString() : "unknown";
+}
+
 namespace lembed { namespace detail {
 
 /* RAII helper to release ORT objects */
@@ -30,7 +43,6 @@ namespace lembed { namespace detail {
 inline const OrtApi* ort_api() {
     return OrtGetApiBase()->GetApi(ORT_API_VERSION);
 }
-
 inline OrtEnv* ort_env() {
     static OrtEnv* env = nullptr;
     static std::once_flag flag;

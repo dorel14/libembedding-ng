@@ -12,10 +12,13 @@
 #define LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_SPARSE_HPP
 
 #include "libembedding/autotuner.h"
+#include "libembedding/sparse_text_embedding.h"
+#include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -51,7 +54,11 @@ inline lembed_sparse_tuning_result_t bench_sparse_config(
 
     /* Resolve model */
     int model_idx = lembed_find_sparse_model_by_code(model_name);
-    if (model_idx < 0) model_idx = 0;
+    if (model_idx < 0) {
+        /* Unknown model: do not silently benchmark a different one. */
+        res.latency_ms = 999999;
+        return res;
+    }
     opts.model = static_cast<lembed_sparse_model_t>(model_idx);
 
     lembed_sparse_embedding_ctx_t* ctx = nullptr;
@@ -62,38 +69,43 @@ inline lembed_sparse_tuning_result_t bench_sparse_config(
     }
 
     /* Prepare texts */
-    const char** c_texts = new const char*[texts.size()];
-    std::vector<std::string> encoded;
+    std::vector<const char*> c_texts(texts.size());
     for (size_t i = 0; i < texts.size(); i++) {
-        encoded.push_back(texts[i]);
-        c_texts[i] = encoded[i].c_str();
+        c_texts[i] = texts[i].c_str();
     }
 
     /* Warmup */
     for (int i = 0; i < warmup_iters; i++) {
         lembed_sparse_embeddings_t result = {0};
-        lembed_sparse_text_embedding_embed(ctx, c_texts, texts.size(), batch_size, &opts, &result);
-        lembed_sparse_embeddings_free(&result);
+        if (lembed_sparse_text_embedding_embed(ctx, c_texts.data(), (int)texts.size(), batch_size, &opts, &result) == LEMBED_OK)
+            lembed_sparse_embeddings_free(&result);
     }
 
     /* Benchmark */
     std::vector<double> times;
+    times.reserve(bench_iters > 0 ? (size_t)bench_iters : 0);
     for (int i = 0; i < bench_iters; i++) {
         auto t0 = std::chrono::high_resolution_clock::now();
         lembed_sparse_embeddings_t result = {0};
-        lembed_sparse_text_embedding_embed(ctx, c_texts, texts.size(), batch_size, &opts, &result);
-        lembed_sparse_embeddings_free(&result);
+        lembed_status_t es = lembed_sparse_text_embedding_embed(ctx, c_texts.data(), (int)texts.size(), batch_size, &opts, &result);
         auto t1 = std::chrono::high_resolution_clock::now();
-        double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        times.push_back(ms);
+        if (es != LEMBED_OK) continue;
+        lembed_sparse_embeddings_free(&result);
+        times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
     }
 
     lembed_sparse_text_embedding_free(ctx);
-    delete[] c_texts;
+
+    /* Every iteration failed: report the sentinel so this configuration is
+     * never mistaken for the best one. */
+    if (times.empty()) {
+        res.latency_ms = 999999;
+        return res;
+    }
 
     /* Compute stats */
     std::sort(times.begin(), times.end());
-    double p50 = times[times.size() / 2];
+    double p50 = percentile_sorted(times, 0.50);
 
     res.latency_ms = p50;
     res.throughput_docs_sec = (p50 > 0) ? (1000.0 / p50) * texts.size() : 0;
@@ -129,8 +141,9 @@ extern "C" lembed_status_t lembed_sparse_autotune(
     lembed_sparse_tuning_result_t best = {0};
     best.latency_ms = 999999;
 
-    int total = sizeof(top_k_options) / sizeof(int) * sizeof(min_weight_options) / sizeof(float) * sizeof(storage_options) / sizeof(int);
-    int current = 0;
+    int total = (int)(sizeof(top_k_options) / sizeof(int) *
+                      sizeof(min_weight_options) / sizeof(float) *
+                      sizeof(storage_options) / sizeof(int));
 
     fprintf(stderr, "sparse_autotune: testing %d configurations (mode=%s)...\n",
             total, mode == LEMBED_AUTOTUNE_QUICK ? "QUICK" : "FULL");
@@ -138,15 +151,21 @@ extern "C" lembed_status_t lembed_sparse_autotune(
     for (int t : top_k_options) {
         for (float w : min_weight_options) {
             for (int s : storage_options) {
-                current++;
-
                 auto r = bench_sparse_config(model_name, t, w, s, threads, batch_size, texts, warmup, bench_iters);
 
+                if (r.latency_ms >= 999999) continue;
                 if (r.throughput_docs_sec > best.throughput_docs_sec) {
                     best = r;
                 }
             }
         }
+    }
+
+    /* No configuration could be benchmarked: do not report the sentinel as a
+     * tuning result. */
+    if (best.latency_ms >= 999999) {
+        *result = {0};
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 
     fprintf(stderr, "sparse_autotune: best config: top_k=%d min_weight=%.2f storage=%d (%.1f docs/s)\n",

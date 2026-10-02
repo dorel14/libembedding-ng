@@ -28,7 +28,9 @@ lembed_status_t lembed_autotune(
         lembed_tuning_result_t* result) {
     if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    int idx = lembed_find_text_model_by_code(model_name);
+    /* Accepts either the HuggingFace repo or the canonical registry name, so
+     * a caller does not have to know which of the two this entry point wants. */
+    int idx = lembed_resolve_text_model(model_name);
     if (idx < 0) return LEMBED_ERROR_MODEL_NOT_FOUND;
 
     return lembed::detail::autotune_text_impl(
@@ -67,6 +69,11 @@ lembed_status_t lembed_reranker_autotune_custom(
 }
 
 #include "libembedding/detail/model_selector.hpp"
+/* model_selector.h, not just the detail header: its LIBEMBEDDING_IMPLEMENTATION
+ * block defines lembed_detect_hardware(), which is declared in that public
+ * header and exported by libembedding.def. Including only the detail header
+ * left the definition uncompiled and the DLL failed to link with LNK2001. */
+#include "libembedding/model_selector.h"
 
 lembed_status_t lembed_auto_select_model(
         const char* use_case,
@@ -94,7 +101,17 @@ lembed_status_t lembed_auto_select_model(
 
 /* Autotune cache management */
 void lembed_autotune_clear_cache(const char* model_name) {
-    lembed::detail::clear_autotune_cache(model_name);
+    /* Cache entries record the model_code, so a caller holding the canonical
+     * name would otherwise purge nothing at all. Resolve to the stored string
+     * first. An unknown model is a no-op rather than a reason to empty the
+     * cache: a typo must not cost every other model its tuning. */
+    const char* canonical = model_name;
+    if (model_name) {
+        int idx = lembed_resolve_text_model(model_name);
+        if (idx < 0) return;
+        canonical = lembed__text_models[idx].model_code;
+    }
+    lembed::detail::clear_autotune_cache(canonical);
 }
 
 /* C-linkage wrappers for autotune unified API (exported from shared lib) */

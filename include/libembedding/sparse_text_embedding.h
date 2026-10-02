@@ -356,7 +356,8 @@ lembed_status_t lembed_sparse_text_embedding_embed(
                     sr.values = std::move(filt_val);
                 }
 
-                /* Apply storage format: INDEX_ORDER sorts by index ascending */
+                /* Apply storage format: DICT (default) sorts by weight descending,
+                 * INDEX_ORDER sorts by index ascending */
                 if (storage_format == LEMBED_SPARSE_FORMAT_INDEX_ORDER) {
                     std::vector<std::pair<int32_t, float>> idx_val;
                     idx_val.reserve(sr.indices.size());
@@ -370,6 +371,21 @@ lembed_status_t lembed_sparse_text_embedding_embed(
                     for (size_t j = 0; j < sr.indices.size(); j++) {
                         sr.indices[j] = idx_val[j].first;
                         sr.values[j] = idx_val[j].second;
+                    }
+                } else {
+                    /* LEMBED_SPARSE_FORMAT_DICT (0) or unknown: sort by weight descending */
+                    std::vector<std::pair<float, int32_t>> val_idx;
+                    val_idx.reserve(sr.indices.size());
+                    for (size_t j = 0; j < sr.indices.size(); j++) {
+                        val_idx.emplace_back(sr.values[j], sr.indices[j]);
+                    }
+                    std::sort(val_idx.begin(), val_idx.end(),
+                              [](const auto& a, const auto& b) {
+                                  return a.first > b.first;
+                              });
+                    for (size_t j = 0; j < sr.indices.size(); j++) {
+                        sr.indices[j] = val_idx[j].second;
+                        sr.values[j] = val_idx[j].first;
                     }
                 }
 

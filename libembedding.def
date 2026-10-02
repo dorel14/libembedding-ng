@@ -2,6 +2,8 @@ LIBRARY "libembedding"
 EXPORTS
     ; ---- Version / config ----
     lembed_version
+lembed_onnxruntime_version
+lembed_execution_provider_name
 
     ; ---- Error handling ----
     lembed_status_message
@@ -89,6 +91,9 @@ EXPORTS
     lembed_find_sparse_model_by_code
     lembed_find_reranker_model_by_code
     lembed_find_image_model_by_code
+    lembed_find_text_model_variant
+lembed_resolve_text_model
+lembed_resolve_reranker_model
 
     ; ---- Downloader ----
     lembed_ensure_text_model
@@ -146,6 +151,13 @@ EXPORTS
     lembed_list_gguf_models
     lembed_find_gguf_model
     lembed_default_gguf_model
+
+; Declared in downloader.h and implemented in its LIBEMBEDDING_IMPLEMENTATION
+; block. Without these two a Windows caller linking against the DLL gets an
+; undefined symbol even though the header declares the function.
+lembed_resolve_gguf_path
+; Deprecated, kept exported for compatibility with callers of older headers.
+lembed_detect_hardware
 
     ; ---- Embedding cache ----
     lembed_cache_config_default
