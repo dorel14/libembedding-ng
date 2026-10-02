@@ -16,7 +16,28 @@ def test_list_text_models():
         assert m.description
         assert m.max_tokens > 0
         assert m.pooling in ("cls", "mean")
-        assert m.quantization in ("none", "static", "dynamic")
+        assert m.quantization in ("none", "static", "dynamic", "fp16")
+
+
+def test_qsuffix_registry_entries_are_fp16():
+    """The ``_Q`` / ``-Q`` entries are not INT8.
+
+    Their initializers are FLOAT16 and their graph is ORT-optimized. They used
+    to declare ``static`` and to be described as "Quantized", which meant
+    ``quantization="static"`` handed back float16 weights: smaller on disk,
+    slower than FP32 on any CPU without native FP16 arithmetic. They declare
+    ``fp16`` now, and the description names the format.
+    """
+    from libembedding.models import list_text_models
+
+    q_entries = [m for m in list_text_models() if m.model_code.endswith("-Q")]
+    assert q_entries, "expected the Qdrant -Q entries in the registry"
+    for m in q_entries:
+        assert m.quantization == "fp16", f"{m.model_code} must declare fp16"
+        assert "FP16" in m.description, f"{m.model_code} description names the format"
+        assert "Quantized" not in m.description, (
+            f"{m.model_code} no longer claims to be quantized"
+        )
 
 
 def test_list_sparse_models():

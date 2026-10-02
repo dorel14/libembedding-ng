@@ -20,6 +20,7 @@ from .models import (
     _POOLING_ENUM,
     _PROVIDER_MAP,
     _QUANTIZATION_ENUM,
+    _QUANTIZATION_NAMES,
     _desc_from_c,
     _is_gguf_model,
     _is_local_path,
@@ -111,6 +112,7 @@ class TextEmbedding:
         self._ctx = None
         self._dim = 0
         self._batch_size = batch_size
+        self._quantization = "none"
 
         # Resolve preferred_quantization
         resolved_quant = quant_enum
@@ -127,6 +129,11 @@ class TextEmbedding:
                 pq_enum = _QUANTIZATION_ENUM.get(preferred_quantization.lower())
                 if pq_enum is not None:
                     resolved_quant = pq_enum
+
+        # Remember which mode was actually selected: with
+        # preferred_quantization="auto" the caller asked for a decision, and
+        # nothing else exposes the outcome.
+        self._quantization = _QUANTIZATION_NAMES.get(resolved_quant, "none")
 
         if _is_gguf_model(model_name):
             # GGUF model: use llama.cpp backend
@@ -219,6 +226,10 @@ class TextEmbedding:
                 )
             else:
                 opts = ffi.new("lembed_text_options_v2_t *")
+                # Registry index the session is built from. Without it the
+                # zero-initialised struct points at entry 0, so every
+                # HuggingFace name silently loaded all-MiniLM-L6-v2.
+                opts.base.model = resolve_text_model(model_name)
                 opts.base.provider = _PROVIDER_MAP.get(provider, 0)
                 opts.base.num_threads = threads
                 opts.base.batch_size = batch_size
@@ -307,6 +318,15 @@ class TextEmbedding:
     def dim(self) -> int:
         """Embedding dimension."""
         return self._dim
+
+    @property
+    def quantization(self) -> str:
+        """Quantization mode actually in use: "none", "static" or "dynamic".
+
+        With ``preferred_quantization="auto"`` this reports the mode that was
+        selected, not the request.
+        """
+        return self._quantization
 
     @property
     def batch_size(self) -> int:

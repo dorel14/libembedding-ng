@@ -8,87 +8,53 @@ from .models import resolve_text_model
 from .sampling import _sample_corpus
 from .types import ModelSelectionResult, TuningResult, UnifiedTuningResult
 
-
-def _do_autotune(
-    model_name: str,
-    provider: str = "cpu",
-    texts: list[str] | None = None,
-    max_sample_size: int = 100,
-) -> TuningResult:
-    """Run autotune with cache lookup."""
-    model_idx = resolve_text_model(model_name)
-    if model_idx >= 0:
-        info_ptr = ffi.new("lembed_model_info_t *")
-        lib.lembed_get_text_model_info(model_idx, info_ptr)
-        code = ffi.string(info_ptr.model_code).decode("utf-8")
-    else:
-        code = model_name
-
-    if texts:
-        sampled = _sample_corpus(texts, max_sample_size)
-        n = len(sampled)
-        result = ffi.new("lembed_tuning_result_t *")
-        c_texts = ffi.new("char*[]", n)
-        c_strs = []
-        for i, t in enumerate(sampled):
-            c_strs.append(ffi.new("char[]", t.encode("utf-8")))
-            c_texts[i] = c_strs[i]
-        check_status(
-            lib.lembed_autotune_custom(
-                code.encode("utf-8"), c_texts, n, lib.LEMBED_AUTOTUNE_QUICK, result
-            )
-        )
-    else:
-        result = ffi.new("lembed_tuning_result_t *")
-        check_status(
-            lib.lembed_autotune(code.encode("utf-8"), lib.LEMBED_AUTOTUNE_QUICK, result)
-        )
-
-    return TuningResult(
-        workers=result.workers,
-        threads=result.threads,
-        batch_size=result.batch_size,
-        throughput_docs_sec=result.throughput_docs_sec,
-        latency_ms=result.latency_ms,
-        memory_mb=result.memory_mb,
-    )
+# The C tuner benchmarks every configuration against the whole corpus, so an
+# unbounded user corpus would make a single call arbitrarily long. Cap it.
+_MAX_AUTOTUNE_SAMPLE = 100
 
 
-def autotune(
-    model_name: str = "BAAI/bge-small-en-v1.5",
-    *,
-    full: bool = False,
-    texts: list[str] | None = None,
-) -> TuningResult:
-    """Run auto-tuning to find optimal configuration for a model.
+def _resolve_model_code(model_name: str) -> str:
+    """Map a model name or code to the code the C layer expects."""
+    idx = resolve_text_model(model_name)
+    if idx < 0:
+        return model_name
+    info = ffi.new("lembed_model_info_t *")
+    lib.lembed_get_text_model_info(idx, info)
+    return ffi.string(info.model_code).decode("utf-8")
 
-    Args:
-        model_name: HuggingFace model code (e.g. "Qdrant/all-MiniLM-L6-v2-onnx")
-        full: If True, run exhaustive tuning (30-120s). Otherwise quick (5-15s).
-        texts: Optional custom corpus for benchmarking. If None, a synthetic corpus is generated.
 
-    Returns:
-        TuningResult with optimal workers, threads, batch_size.
+def _to_c_string_array(texts: list[str]) -> tuple:
+    """Build a ``const char* const*`` for ``texts``.
+
+    Returns the array and the list of owning ``char[]`` buffers: cffi may
+    collect them as soon as they become unreachable, and the C call reads
+    through them, so the caller must keep both alive across the call.
     """
-    mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
+    owners = [ffi.new("char[]", t.encode("utf-8")) for t in texts]
+    return ffi.new("char*[]", owners), owners
+
+
+def _run_autotune(
+    model_name: str,
+    mode,
+    texts: list[str] | None = None,
+    max_sample_size: int = _MAX_AUTOTUNE_SAMPLE,
+) -> TuningResult:
+    """Run the text auto-tuner, on a user corpus or on the synthetic one."""
+    code = _resolve_model_code(model_name)
     result = ffi.new("lembed_tuning_result_t *")
 
-    model_idx = resolve_text_model(model_name)
-    if model_idx >= 0:
-        info = ffi.new("lembed_model_info_t *")
-        lib.lembed_get_text_model_info(model_idx, info)
-        code = ffi.string(info.model_code).decode("utf-8")
-    else:
-        code = model_name
-
     if texts:
-        n = len(texts)
-        encoded = [t.encode("utf-8") for t in texts]
-        c_strs = [ffi.new("char[]", e) for e in encoded]
-        c_texts = ffi.new("char*[]", c_strs)
+        for text in texts:
+            if not isinstance(text, str):
+                raise TypeError(
+                    f"texts must contain str, got {type(text).__name__}"
+                )
+        sampled = _sample_corpus(list(texts), max_sample_size)
+        c_texts, _owners = _to_c_string_array(sampled)
         check_status(
             lib.lembed_autotune_custom(
-                code.encode("utf-8"), c_texts, n, mode, result
+                code.encode("utf-8"), c_texts, len(sampled), mode, result
             )
         )
     else:
@@ -102,6 +68,46 @@ def autotune(
         latency_ms=result.latency_ms,
         memory_mb=result.memory_mb,
     )
+
+
+def _do_autotune(
+    model_name: str,
+    provider: str = "cpu",
+    texts: list[str] | None = None,
+    max_sample_size: int = _MAX_AUTOTUNE_SAMPLE,
+) -> TuningResult:
+    """Run autotune with cache lookup."""
+    return _run_autotune(
+        model_name,
+        lib.LEMBED_AUTOTUNE_QUICK,
+        texts,
+        max_sample_size,
+    )
+
+
+def autotune(
+    model_name: str = "BAAI/bge-small-en-v1.5",
+    *,
+    full: bool = False,
+    texts: list[str] | None = None,
+    max_sample_size: int = _MAX_AUTOTUNE_SAMPLE,
+) -> TuningResult:
+    """Run auto-tuning to find optimal configuration for a model.
+
+    Args:
+        model_name: HuggingFace model code (e.g. "Qdrant/all-MiniLM-L6-v2-onnx")
+        full: If True, run exhaustive tuning (30-120s). Otherwise quick (5-15s).
+        texts: Optional custom corpus for benchmarking. If None, a synthetic
+            corpus is generated. The corpus is stratified-sampled down to
+            ``max_sample_size`` first, because the tuner benchmarks every
+            configuration against the whole corpus.
+        max_sample_size: Upper bound on the number of texts sent to the tuner.
+
+    Returns:
+        TuningResult with optimal workers, threads, batch_size.
+    """
+    mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
+    return _run_autotune(model_name, mode, texts, max_sample_size)
 
 
 def auto_select_model(

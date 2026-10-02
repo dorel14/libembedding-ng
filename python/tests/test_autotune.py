@@ -7,11 +7,16 @@ They are marked with @pytest.mark.network or skipped gracefully.
 import pytest
 
 from libembedding.autotune import (
+    _do_autotune,
+    _run_autotune,
+    _to_c_string_array,
     auto_select_model,
+    autotune,
     autotune_unified,
     clear_autotune_cache,
 )
 from libembedding.exceptions import LembedError
+from libembedding.sampling import _sample_corpus
 
 
 def test_clear_autotune_cache_no_args():
@@ -87,3 +92,49 @@ def test_autotune_unified_reranking_no_default():
 def test_autotune_unified_sparse_no_default():
     with pytest.raises(ValueError, match="No default model"):
         autotune_unified("sparse")
+
+
+class TestCustomCorpus:
+    """The custom-corpus path must validate its input and bound its work."""
+
+    def test_empty_list_falls_back_to_synthetic(self):
+        """An empty corpus means "no corpus", not "tune on nothing"."""
+        assert _sample_corpus([], 10) == []
+
+    def test_non_str_entry_is_rejected(self):
+        with pytest.raises(TypeError, match="texts must contain str"):
+            _run_autotune("BAAI/bge-small-en-v1.5", 0, ["ok", 42])
+
+    def test_corpus_is_sampled_to_the_cap(self):
+        """The C layer benchmarks every config against the whole corpus, so an
+        unbounded list would make one call arbitrarily long."""
+        texts = [f"document number {i} " * (i % 20 + 1) for i in range(5000)]
+        assert len(_sample_corpus(texts, 100)) <= 100
+
+    def test_c_string_array_keeps_its_owners_alive(self):
+        """The char[] owners must stay reachable for the whole C call."""
+        texts = ["alpha", "beta", "gamma"]
+        c_array, owners = _to_c_string_array(texts)
+        assert len(owners) == 3
+        assert all(owner is not None for owner in owners)
+        assert c_array is not None
+
+    def test_unicode_round_trip(self):
+        texts = ["héllo wörld", "naïve café", "日本語テキスト"]
+        _, owners = _to_c_string_array(texts)
+        assert len(owners) == 3
+
+
+@pytest.mark.network
+def test_autotune_with_custom_corpus():
+    result = autotune("BAAI/bge-small-en-v1.5", texts=["short text", "a longer document"])
+    assert result.workers >= 1
+    assert result.threads >= 1
+    assert result.batch_size >= 1
+
+
+@pytest.mark.network
+def test_do_autotune_with_custom_corpus():
+    result = _do_autotune("BAAI/bge-small-en-v1.5", texts=["short text", "another one"])
+    assert result.workers >= 1
+    assert result.batch_size >= 1

@@ -28,8 +28,20 @@ _PROVIDER_NAMES[5] = "llama"
 _POOLING_NAMES = {0: "cls", 1: "mean"}
 _POOLING_ENUM = {v: k for k, v in _POOLING_NAMES.items()}
 
-_QUANTIZATION_NAMES = {0: "none", 1: "static", 2: "dynamic", 3: "auto"}
-_QUANTIZATION_ENUM = {"none": 0, "static": 1, "dynamic": 2, "auto": 3}
+_QUANTIZATION_NAMES = {
+    0: "none",
+    1: "static",
+    2: "dynamic",
+    3: "auto",
+    4: "fp16",
+}
+_QUANTIZATION_ENUM = {
+    "none": 0,
+    "static": 1,
+    "dynamic": 2,
+    "auto": 3,
+    "fp16": 4,
+}
 
 
 def _model_info_from_c(info) -> ModelInfo:
