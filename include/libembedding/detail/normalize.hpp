@@ -3,7 +3,7 @@
  * L2 normalization for embedding vectors
  *
  * Auteur: David Orel
- * Version: 1.8.0
+ * Version: 1.8.1
  *
  * SPDX-License-Identifier: MIT
  */

@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.8.0
+Version: 1.8.1
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -165,6 +165,7 @@ with minimal overhead (~13%).
 - **Autotune cache with hardware fingerprint** — results cached by CPU + OS + RAM + software version for instant re-configuration
 - **Automatic model selection** — `auto_select_model()` picks the best model for your hardware and use case
 - **Quantized image and reranker models** (INT8, ~4x smaller, minimal accuracy impact)
+- **Quantized text models** — dynamic INT8 is measured at 3.9x smaller weights, 1.7-2.0x faster and 1.8-2.1x less peak RAM; a few entries behind the `_Q` suffix are FP16, not INT8, and are 9.5x slower, see [Quantization: FP32 vs INT8](#quantization-fp32-vs-int8)
 - **Python bindings** via `pip install libembedding-ng` — drop-in fastembed replacement
 - Automatic model downloading and caching from HuggingFace Hub
 - Pure C API (`extern "C"`) for maximum FFI compatibility
@@ -189,7 +190,7 @@ with minimal overhead (~13%).
 | Dependency | Required | Notes |
 |---|---|---|
 | **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
-| **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. |
+| **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. The snapshot is trimmed to what the `llama`/`ggml` targets need (`cmake/`, `ggml/`, `include/`, `src/`, `vendor/`, `LICENSE`); see `third_party/README.md`. |
 | **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). |
 | **cJSON** | Bundled | Included in `third_party/` |
 | **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
@@ -1001,36 +1002,229 @@ CMake options:
 
 ## Benchmarks
 
-Measured on Apple M-series (macOS arm64) with `all-MiniLM-L6-v2` (384-dim). Median of 10 runs, 1 warmup, pre-cached models.
+### Comparison with other implementations — not published
 
-### All implementations
+An earlier version of this README published a table comparing libembedding C++,
+libembedding Python, fastembed-rs (Rust) and fastembed (Python), stated as
+"measured on Apple M-series (macOS arm64)" and claiming 5-8x faster throughput,
+8.6x lower single-text latency and 3.5x less memory than fastembed.
 
-| Metric                   | libembedding C++ | libembedding Python | fastembed-rs (Rust) | fastembed (Python) |
-|--------------------------|------------------|---------------------|---------------------|--------------------|
-| Model load (ms)          | **81**           | **79**              | 88                  | 84                 |
-| Single text latency (ms) | **3.9**          | **4.4**             | 1.9                 | 38.0               |
-| Batch 8 (texts/sec)      | **632**          | **641**             | 231                 | 92                 |
-| Batch 32 (texts/sec)     | **687**          | **581**             | 326                 | 89                 |
-| Batch 128 (texts/sec)    | **626**          | **449**             | 402                 | 90                 |
-| Batch 512 (texts/sec)    | **526**          | **476**             | 398                 | 80                 |
-| Peak RSS (MB)            | 717              | **567**             | 672                 | 1,981              |
+**That table has been removed.** All four measurement harnesses hardcoded
+`"platform": "macOS arm64"` in their output, so every run — including Windows
+ones — reported itself as an Apple Silicon measurement. The `platform` field
+could not serve as evidence of provenance, and the maintainer has no Mac to
+reproduce the figures on. The claims are therefore unverified and withdrawn;
+the table and the reasoning are archived at
+`docs/archive/benchmarks/cross-implementation-macos-claim/`.
 
-### Python: libembedding vs fastembed (drop-in replacement)
+The harnesses now report the real platform, so the comparison can be re-measured
+and published with traceable provenance. Until then, treat any cross-implementation
+speed claim about libembedding as unsubstantiated.
 
-| Metric                   | libembedding | fastembed | Speedup     |
-|--------------------------|-------------|-----------|-------------|
-| Single text latency (ms) | **4.4**     | 38.0      | **8.6x**    |
-| Batch 8 (texts/sec)      | **641**     | 92        | **7.0x**    |
-| Batch 32 (texts/sec)     | **581**     | 89        | **6.5x**    |
-| Batch 128 (texts/sec)    | **449**     | 90        | **5.0x**    |
-| Peak RSS (MB)            | **567**     | 1,981     | **3.5x less** |
+### Quantization — measured and reproducible
 
-**Key takeaways:**
-- `pip install libembedding-ng` is a **5-8x faster** drop-in replacement for fastembed
-- **8.6x faster single-text latency** (4.4ms vs 38ms) -- the C backend does the heavy lifting
-- **3.5x less memory** (567MB vs 1.98GB peak RSS)
-- C++ and Python share the same backend -- Python adds only 13% overhead (4.4ms vs 3.9ms)
-- C++ API is **1.7-2.7x faster** than fastembed-rs (Rust) across batch sizes
+The quantization benchmark below is the one published comparison whose provenance
+is verifiable: the environment block records host, CPU, ONNX Runtime version and
+execution provider, and the weight dtypes are read from the ONNX files themselves.
+
+
+### Quantization: FP32 vs INT8
+
+Measured by `benchmarks/quantization/bench_quantization.py` on 2026-10-02
+(host `PC_Asus`, Windows 11 AMD64, **Intel Core i7-1065G7**, **ONNX Runtime
+1.29.0**, `CPUExecutionProvider`, Python 3.12.10, libembedding 1.8.0). Corpus of
+1,000 texts (50 warmup + 950 timed), models pre-cached. Each variant runs in its
+own subprocess, so peak RSS is attributable to the configuration that produced
+it.
+
+| Model | Variant | docs/s | Peak MB | Weight MB |
+|-------|---------|--------|---------|-----------|
+| MiniLM FP32 | `none` | 100 | 206 | 86 |
+| MiniLM INT8 | `dynamic` | 172 | 118 | 22 |
+| BGE FP32 | `none` | 51 | 249 | 127 |
+| BGE INT8 | `dynamic` | 104 | 120 | 32 |
+
+> **On an Intel Core i7-1065G7 CPU, INT8 ONNX models reduced model size by
+> ~4x, reduced peak memory by ~2x, and increased throughput by ~1.7-2.0x
+> compared to FP32 models.**
+
+Best measured throughput per variant, rounded; the exact same-batch numbers are
+in the per-batch tables below. Every number is backed by a `_quantized` weight
+file whose initializer dtypes were read and recorded in the report — the FP16 trap
+described further down could not have passed unnoticed.
+
+The full method, with every mode measured at every batch size and each quantized
+variant compared against the FP32 baseline **at the same batch size** — comparing
+a batch-64 variant to a batch-8 baseline would measure the batch size, not the
+quantization:
+
+| Model | Variant | Weight size | Throughput | Peak RAM | vs FP32 (same batch) |
+|-------|---------|-------------|------------|----------|---------|
+| `all-MiniLM-L6-v2` | FP32 (`none`) | 86.2 MB | 90.5 docs/s @ batch 64 | 206 MB | -- |
+| `all-MiniLM-L6-v2` | INT8 (`dynamic`) | **21.9 MB** (3.9x smaller) | **151.7 docs/s** @ batch 64 | **117 MB** | **1.7x faster**, 1.8x less RAM |
+| `bge-small-en-v1.5` | FP32 (`none`) | 126.9 MB | 47.4 docs/s @ batch 64 | 249 MB | -- |
+| `bge-small-en-v1.5` | INT8 (`dynamic`) | **32.2 MB** (3.9x smaller) | **95.5 docs/s** @ batch 64 | **120 MB** | **2.0x faster**, 2.1x less RAM |
+| `bge-small-en-v1.5` | **FP16** (`LEMBED_QUANTIZATION_FP16`) | 63.4 MB (2.0x smaller) | 5.0 docs/s @ batch 64 | 177 MB | **9.5x slower**, 1.4x less RAM |
+
+**Dynamic INT8 is the win on both models**, and it wins on every axis at once:
+1.7x faster on MiniLM, 2.0x faster on BGE, 3.9x smaller on disk, and 1.8 to 2.1x
+less resident memory. Nothing here is a trade-off except the accuracy, which this
+benchmark does not measure.
+
+> **One more trap, and it is a naming problem.** The four `Qdrant/*-onnx-Q`
+> registry entries — `bge-small-en-v1.5` among them — ship **FP16** weights, not
+> INT8: every one of their 149 initializers is `FLOAT16` and they carry an
+> ORT-optimized graph (`Attention` + `SkipLayerNormalization` + `FastGelu` fused).
+> They used to declare `LEMBED_QUANTIZATION_STATIC` and be described as
+> "Quantized", so `quantization="static"` handed back float16 weights — 9.5x
+> *slower* than FP32, which is what a reader of an earlier version of this table
+> would conclude about "INT8". FP16 is the pathological case on a CPU without
+> native FP16 arithmetic: it halves the file, then converts back to FP32 to
+> compute. The registry now declares these `LEMBED_QUANTIZATION_FP16`, the
+> descriptions say FP16, and `quantization="static"` correctly fails with
+> `ModelNotFoundError` rather than silently returning float16.
+>
+> The genuine INT8 export of `bge-small-en-v1.5` is
+> `onnx-community/bge-small-en-v1.5-ONNX` (`onnx/model_quantized.onnx`, 33 MB,
+> 144 `INT8` + 6 `UINT8` initializers, 72 `MatMulInteger` fed by 48
+> `DynamicQuantizeLinear`). It is registered as
+> `LEMBED_TEXT_BGE_SMALL_EN_V15_INT8` and is what the INT8 row above measures.
+>
+> Run `python benchmarks/verify_quantization_modes.py` to check every registry
+> entry's declared mode against the dtypes actually present in its file. It
+> reports 0 mismatches; before the `fp16` fix it reported 4.
+
+- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
+  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
+  corpus before switching a quality-critical index.
+- **Peak RAM is a real measurement now.** Each configuration ran alone, so the
+  high-water mark is attributable. It exceeds the weight file because ONNX Runtime
+  memory-maps the file and allocates its own arena on top — but the *difference*
+  between configurations is real, and it moves in the same direction as the weight
+  file for both models.
+- **The reliable win is disk, cache and download footprint** -- the practical
+  constraint for container images, air-gapped installs and cold starts.
+
+#### Full per-batch results
+
+`BAAI/bge-small-en-v1.5`:
+
+| Batch | Variant | docs/s | ms/doc | Weights | Peak RAM | vs FP32 |
+|-------|---------|--------|--------|---------|----------|---------|
+| 8 | FP32 (`none`) | 48.2 | 20.75 | 126.9 MB | 249 MB | -- |
+| 8 | INT8 (`dynamic`) | 98.0 | 10.21 | 32.2 MB | 120 MB | 2.0x faster |
+| 8 | FP16 | 5.0 | 198.99 | 63.4 MB | 178 MB | 9.6x slower |
+| 32 | FP32 (`none`) | 50.5 | 19.82 | 126.9 MB | 249 MB | -- |
+| 32 | INT8 (`dynamic`) | 103.5 | 9.66 | 32.2 MB | 120 MB | 2.0x faster |
+| 32 | FP16 | 5.0 | 201.47 | 63.4 MB | 177 MB | 10.1x slower |
+| 64 | FP32 (`none`) | 47.4 | 21.10 | 126.9 MB | 249 MB | -- |
+| 64 | INT8 (`dynamic`) | 95.5 | 10.47 | 32.2 MB | 120 MB | 2.0x faster |
+| 64 | FP16 | 5.0 | 199.18 | 63.4 MB | 177 MB | 9.5x slower |
+| 128 | FP32 (`none`) | 47.8 | 20.91 | 126.9 MB | 249 MB | -- |
+| 128 | INT8 (`dynamic`) | 90.5 | 11.06 | 32.2 MB | 120 MB | 1.9x faster |
+| 128 | FP16 | 5.0 | 200.67 | 63.4 MB | 178 MB | 9.6x slower |
+
+`sentence-transformers/all-MiniLM-L6-v2`:
+
+| Batch | Variant | docs/s | ms/doc | Weights | Peak RAM | vs FP32 |
+|-------|---------|--------|--------|---------|----------|---------|
+| 8 | FP32 (`none`) | 97.1 | 10.30 | 86.2 MB | 206 MB | -- |
+| 8 | INT8 (`dynamic`) | 172.4 | 5.80 | 21.9 MB | 118 MB | 1.8x faster |
+| 32 | FP32 (`none`) | 96.3 | 10.38 | 86.2 MB | 206 MB | -- |
+| 32 | INT8 (`dynamic`) | 165.0 | 6.06 | 21.9 MB | 118 MB | 1.7x faster |
+| 64 | FP32 (`none`) | 90.5 | 11.05 | 86.2 MB | 206 MB | -- |
+| 64 | INT8 (`dynamic`) | 151.7 | 6.59 | 21.9 MB | 117 MB | 1.7x faster |
+| 128 | FP32 (`none`) | 99.6 | 10.04 | 86.2 MB | 206 MB | -- |
+| 128 | INT8 (`dynamic`) | 164.0 | 6.10 | 21.9 MB | 118 MB | 1.6x faster |
+
+#### How to read these numbers
+
+- **Peak RAM is measured, not dismissed.** Every configuration ran in its own
+  process, so the resident high-water mark belongs to that configuration. It
+  exceeds the weight file because ONNX Runtime memory-maps the file and
+  allocates its own arena on top -- 118 MB for a 21.9 MB file, 249 MB for a
+  126.9 MB file -- but the *difference* between configurations is real.
+- **Run-to-run variance is around 10%.** The MiniLM FP32 batch-64 baseline has
+  measured 82.7, 89.0, 90.5 and 99.6 docs/s across four runs on the same machine.
+  Treat the small differences as noise and the order-of-magnitude ones
+  (1.7x, 2.0x, 9.5x) as real; the tables print two decimals because the raw run
+  does, not because the third digit is meaningful.
+- **Every configuration ran on the same runtime.** The report records
+  `onnxruntime` and `execution_provider` per configuration and fails loudly if
+  they differ, because quantized throughput depends on the runtime as much as on
+  the weights. It also records the initializer dtypes found in each weights file,
+  so a mislabelled variant cannot enter the tables unnoticed.
+- **The quantized path is stable across batch sizes here** (142.8 to 159.5 docs/s
+  on MiniLM, 83.1 to 94.7 on BGE), so the batch size is not what drives the
+  comparison. An earlier run showed MiniLM `dynamic` collapsing to 112.1 docs/s
+  at batch 128; that has not reproduced, and it is the kind of outlier the
+  ~10% variance note explains.
+- **Not every mode exists for every model.** The registry now offers exactly
+  `dynamic` (real INT8) for MiniLM, and `none` + `dynamic` + `fp16` for
+  `bge-small-en-v1.5`. No model has a `static` (INT8-with-calibration) entry.
+  Absent combinations are reported as *not measured* with the available modes
+  listed, never as a failed run.
+- **`quantization=` selects the weights, not just the session options.** Each
+  quantized sibling is its own registry entry with its own `model_file`, and the
+  requested mode is resolved *before* the session is created. When a model has no
+  entry in that mode, creation fails with `LEMBED_ERROR_MODEL_NOT_FOUND` (Python:
+  `ModelNotFoundError`) naming the modes the model actually has:
+
+  ```python
+  from libembedding import TextEmbedding
+
+  # Resolved to the registry entry that provides the requested mode
+  TextEmbedding("sentence-transformers/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="dynamic")   # real INT8
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="fp16")      # float16
+
+  # Naming the repo directly is equivalent and unambiguous -- this is what the
+  # benchmark does
+  TextEmbedding("Xenova/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("onnx-community/bge-small-en-v1.5-ONNX", quantization="dynamic")
+  ```
+
+  Asking for a mode a model does not have is an error, not a silent fallback:
+
+  ```python
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="static")
+  # ModelNotFoundError: Model 'BAAI/bge-small-en-v1.5' has no 'static'
+  # variant (available: dynamic, fp16, none)
+  ```
+
+  In C, either the `_Q` enum or the `quantization` field of the v2 options selects
+  the entry:
+
+  ```c
+  opts.model = LEMBED_TEXT_BGE_SMALL_EN_V15_Q;   /* or LEMBED_TEXT_ALL_MINILM_L6_V2_Q */
+  ```
+
+  This resolution did not always exist: the mode used to be stamped on the context
+  without changing the loaded file. That is why the archived 2026-09-27 benchmark is
+  void — it measured the same FP32 weights under three labels, and the 2026-09-29
+  run published before the fix is void too. The 2026-10-02 run above is the first
+  one that both resolves registry entries and measures a genuine INT8 file.
+
+  Two caveats: `quantization="auto"` selects **no** weights (it loads the FP32
+  default while `.quantization` reports `"auto"`) — use
+  `preferred_quantization="auto"` for a measured auto-selection. And
+  `Reranker(quantization=...)` does not resolve a variant either: pass the name of
+  the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
+
+- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
+  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
+  corpus before switching a quality-critical index.
+
+Full report, including the machine block, archived verbatim at
+`docs/archive/benchmarks/quantization-2026-10-02/` — every figure above is
+traceable to it line by line. `benchmarks/quantization/results.html` is only the
+benchmark's output path and is overwritten by each run. Earlier runs are archived
+in `docs/archive/benchmarks/quantization-2026-09-27/`,
+`quantization-2026-09-29/` and `quantization-2026-09-30/`; all three are void —
+the first measured FP32 weights under three labels, the second predates the
+variant-selection fix, and the third measured FP16 files while calling them
+INT8. An incomplete run is archived in
+`docs/archive/benchmarks/quantization-2026-09-30-partial/`.
 
 ### Reproducing benchmarks
 
@@ -1048,6 +1242,24 @@ cd ../benchmarks && ./run_benchmarks.sh
 pip install libembedding-ng
 PYTHONPATH=../python/src python3 bench_python_compare.py
 ```
+
+### Reproducing the quantization benchmark
+
+Each variant runs in its own subprocess, so peak memory is attributable and one
+crashing configuration cannot take the run down:
+
+```bash
+# From the repository root
+python benchmarks/quantization/bench_quantization.py --num-texts 1000
+
+# Restrict to one model / one mode
+python benchmarks/quantization/bench_quantization.py \
+  --models BAAI/bge-small-en-v1.5 --quantizations none static
+```
+
+Writes `benchmarks/quantization/results.json` and `results.html`. Run it on an
+otherwise idle machine: the comparison is only meaningful if the FP32 baseline
+and the quantized variants see the same conditions.
 
 ---
 
@@ -1248,11 +1460,14 @@ Check availability at runtime:
 ```python
 from libembedding import TextEmbedding
 
-if TextEmbedding.supports_llamacpp():
-    model = TextEmbedding.from_gguf(
-        "Xenova/all-MiniLM-L6-v2-GGUF",
-        filename="all-MiniLM-L6-v2-Q4_K_M.gguf",
-    )
+# The constructor detects .gguf and routes to the llama.cpp backend.
+# Either a bare local path...
+model = TextEmbedding("/path/to/all-MiniLM-L6-v2-Q4_K_M.gguf")
+
+# ...or "repo/filename.gguf" to fetch from HuggingFace.
+model = TextEmbedding(
+    "Xenova/all-MiniLM-L6-v2-GGUF/all-MiniLM-L6-v2-Q4_K_M.gguf"
+)
 ```
 
 ## Verifying the installation
@@ -1395,7 +1610,7 @@ TextEmbedding(
 | `pooling` | `str` | `"mean"` | Pooling strategy for local models: `"cls"` or `"mean"` |
 | `auto_workers` | `bool` | `False` | `True` = auto-detect optimal sessions/workers for llama.cpp backend |
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
-| `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"` (None = model default) |
+| `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -1406,17 +1621,26 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
 | `dim` | `int` (property) | Embedding dimension |
+| `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name or local path |
+| `model_name` | `str` (property) | Registry name of the loaded model |
 | `info()` | `ModelDesc` | Loaded model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
-| `close()` | `None` | Release underlying C resources |
-| `list_supported_models()` | `list[ModelInfo]` | (static) List all supported text models |
+| `close()` | `None` | Release resources |
 | `__enter__()` | `self` | Context manager support |
 | `__exit__()` | `None` | Calls `close()` automatically |
-| `from_gguf(repo, filename=None, provider="llamacpp", ...)` | `TextEmbedding` | Load a GGUF model from HuggingFace (requires llama.cpp backend) |
-| `from_mode(mode="balanced", **kwargs)` | `TextEmbedding` | (classmethod) Create TextEmbedding from preset mode: `"fast"`, `"balanced"`, `"quality"` |
-| `supports_llamacpp()` | `bool` | (static) Check if llama.cpp backend is compiled in |
+| `from_mode(mode="balanced", **kwargs)` | `TextEmbedding` | (classmethod) Create a TextEmbedding from a preset mode: `"fast"`, `"balanced"`, `"quality"` |
+
+> **No `list_supported_models()` on `TextEmbedding`** — it only exists on
+> `SparseTextEmbedding`, `ImageEmbedding` and `Reranker`. For text models use the
+> module-level `list_text_models()`.
+
+> **No `from_gguf()` and no `supports_llamacpp()`.** GGUF loading goes through
+> the constructor: `_is_gguf_model()` recognises the `.gguf` extension and
+> switches to the llama.cpp backend. For a HuggingFace repo pass
+> `"repo/filename.gguf"`; for a local file pass the path.
+> `detect_backend(model_name)` reports the backend that was selected.
 
 #### Example
 
@@ -1576,8 +1800,17 @@ Reranker(
 | `BAAI/bge-reranker-base` | BGE Reranker base (default) |
 | `BAAI/bge-reranker-v2-m3` | Multilingual BGE Reranker v2 |
 | `jinaai/jina-reranker-v1-turbo-en` | Jina Reranker v1 turbo |
-  | `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 multilingual |
- | `jinaai/jina-reranker-v1-turbo-en` (quantized) | Jina Reranker v1 turbo English (INT8) |
+| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 base multilingual |
+| `jinaai/jina-reranker-v1-turbo-en-quantized` | Jina Reranker v1 turbo English (INT8) |
+
+> **`quantization=` does not change the reranker weights.** Unlike
+> `TextEmbedding`, it does not resolve a registry entry: it only sets ONNX
+> Runtime session options. To get INT8, pass the **name** of the quantized entry
+> — `jinaai/jina-reranker-v1-turbo-en-quantized`, which points at
+> `onnx/model_quantized.onnx` of the `jinaai/jina-reranker-v1-turbo-en` repo.
+> Unlike text models, a quantized reranker entry has a `model_name` **distinct**
+> from its FP32 version, which is precisely why no per-mode resolution exists
+> there today.
 
 #### Methods and properties
 
@@ -1724,7 +1957,7 @@ cache.clear()
 
 | Function | Description |
 |----------|-------------|
-| `autotune(model_name, full=False)` | Auto-tune a model. Returns `TuningResult`. |
+| `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune a model. Returns `TuningResult`. `texts` supplies a measurement corpus (sampled down to `max_sample_size`); `None` uses a synthetic corpus. |
 | `autotune_unified(task, model_name, mode="quick")` | Unified auto-tune for any task type. See [Unified Tuning](#unified-tuning). |
 | `sparse_autotune(model_name, mode="quick")` | Auto-tune sparse embedding. Returns `SparseTuningResult`. |
 | `image_autotune(model_name, mode="quick")` | Auto-tune image embedding. Returns `ImageTuningResult`. |
@@ -2192,7 +2425,7 @@ for m in libembedding.list_text_models():
 | `snowflake/snowflake-arctic-embed-l` | 1024 | CLS | none |
 | `snowflake/snowflake-arctic-embed-l` | 1024 | CLS | dynamic |
 
-> **Note:** Variants suffixed with `_Q` use quantization (static or dynamic) to reduce model size and speed up inference at the cost of slight accuracy loss.
+> **Note:** Variants suffixed with `_Q` use quantization (static or dynamic) to reduce model size — 2 to 4x on dense text embeddings, per the [quantization benchmark](performance_tuning.html#quantization-fp32-vs-int8) — at the cost of slight accuracy loss. The throughput effect depends on the model and on the weights' actual format, and must be measured, not assumed. Two traps: the `_Q` suffix and the "quantized" label often mean **FP16**, not INT8 — initializers can be `FLOAT16`, which is the case for all four `Qdrant/*-onnx-Q` entries. On the reference CPU (Intel Core i7-1065G7, ONNX Runtime 1.29.0), dynamic INT8 came out **1.7x faster** than FP32 on MiniLM and **2.0x** on BGE, with 3.9x less disk and 1.8-2.1x less peak RAM; the BGE `_Q` entry, being FP16, came out **9.5x slower**. Benchmark your own model before choosing.
 
 ---
 
@@ -2415,11 +2648,30 @@ Results are cached by machine + model:
 | First call | Benchmark + save cache |
 | Same machine + model | Cache hit (< 1ms) |
 | Change CPU/ORT/model | Cache miss → re-benchmark |
+| Same model, different corpus | Cache miss (the corpus fingerprint is part of the key) |
+| Same corpus, different objective or mode | Cache miss |
+
+A cache entry is reused only when **every** identity dimension matches: model,
+variant (`synthetic` / `custom`), corpus fingerprint, objective and mode. A
+corrupt or truncated file is treated as a miss, never as a result. Writes are
+atomic (temporary file then rename), so an interruption cannot leave a partial
+result behind.
+
+Tune on your own corpus:
+
+```python
+from libembedding import autotune
+
+result = autotune(
+    "Qdrant/all-MiniLM-L6-v2-onnx",
+    texts=my_documents,   # sampled down to max_sample_size (100 by default)
+)
+```
 
 ```python
 from libembedding import clear_autotune_cache
 
-# Clear cache for a model
+# Clear cache for a model (all its variants: synthetic and custom)
 clear_autotune_cache("Qdrant/all-MiniLM-L6-v2-onnx")
 
 # Clear all cache
@@ -2635,6 +2887,192 @@ model = TextEmbedding(
 | MiniLM-L6-v2 (FP32) | 305-361 | 740 MB | Yes |
 | BGE-small-en (FP32) | 143-150 | 1.1 GB | Yes |
 
+### Quantization: FP32 vs INT8
+
+Measured by `benchmarks/quantization/bench_quantization.py` on 2026-10-01
+(host `PC_Asus`, Windows 11 AMD64, CPU provider, Python 3.12.10, libembedding
+1.8.0, commit `c2dbe95`). Corpus of 1,000 texts (50 warmup + 950 timed), models
+pre-cached. Each variant runs in its own subprocess, so peak RSS is attributable
+to the configuration that produced it. Every mode is measured at every batch size,
+and each quantized variant is compared against the FP32 baseline **at the same
+batch size** — comparing a batch-64 variant to a batch-8 baseline would measure the
+batch size, not the quantization:
+
+| Model | Variant | Weights | Throughput | Peak RAM | vs FP32 (same batch) |
+|-------|---------|---------|------------|----------|---------|
+| `all-MiniLM-L6-v2` | FP32 (`none`) | 86.2 MB | 90.5 docs/s @ batch 64 | 206 MB | -- |
+| `all-MiniLM-L6-v2` | INT8 (`dynamic`) | **21.9 MB** (3.9x smaller) | **151.7 docs/s** @ batch 64 | **117 MB** | **1.7x faster**, 1.8x less RAM |
+| `bge-small-en-v1.5` | FP32 (`none`) | 126.9 MB | 47.4 docs/s @ batch 64 | 249 MB | -- |
+| `bge-small-en-v1.5` | INT8 (`dynamic`) | **32.2 MB** (3.9x smaller) | **95.5 docs/s** @ batch 64 | **120 MB** | **2.0x faster**, 2.1x less RAM |
+| `bge-small-en-v1.5` | **FP16** (`LEMBED_QUANTIZATION_FP16`) | 63.4 MB (2.0x smaller) | 5.0 docs/s @ batch 64 | 177 MB | **9.5x slower**, 1.4x less RAM |
+
+**Dynamic INT8 is the win on both models**, and it wins on every axis at once:
+1.7x faster on MiniLM, 2.0x faster on BGE, 3.9x smaller on disk, and 1.8 to 2.1x
+less resident memory. Nothing here is a trade-off except the accuracy, which this
+benchmark does not measure.
+
+> **One more trap, and it is a naming problem.** The four `Qdrant/*-onnx-Q`
+> registry entries — `bge-small-en-v1.5` among them — ship **FP16** weights, not
+> INT8: every one of their 149 initializers is `FLOAT16` and they carry an
+> ORT-optimized graph (`Attention` + `SkipLayerNormalization` + `FastGelu` fused).
+> They used to declare `LEMBED_QUANTIZATION_STATIC` and be described as
+> "Quantized", so `quantization="static"` handed back float16 weights — 9.5x
+> *slower* than FP32, which is what a reader of an earlier version of this table
+> would conclude about "INT8". FP16 is the pathological case on a CPU without
+> native FP16 arithmetic: it halves the file, then converts back to FP32 to
+> compute. The registry now declares these `LEMBED_QUANTIZATION_FP16`, the
+> descriptions say FP16, and `quantization="static"` correctly fails with
+> `ModelNotFoundError` rather than silently returning float16.
+>
+> The genuine INT8 export of `bge-small-en-v1.5` is
+> `onnx-community/bge-small-en-v1.5-ONNX` (`onnx/model_quantized.onnx`, 33 MB,
+> 144 `INT8` + 6 `UINT8` initializers, 72 `MatMulInteger` fed by 48
+> `DynamicQuantizeLinear`). It is registered as
+> `LEMBED_TEXT_BGE_SMALL_EN_V15_INT8` and is what the INT8 row above measures.
+>
+> Run `python benchmarks/verify_quantization_modes.py` to check every registry
+> entry's declared mode against the dtypes actually present in its file. It
+> reports 0 mismatches; before the `fp16` fix it reported 4.
+
+- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
+  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
+  corpus before switching a quality-critical index.
+- **Peak RAM is a real measurement now.** Each configuration ran alone, so the
+  high-water mark is attributable. It exceeds the weight file because ONNX Runtime
+  memory-maps the file and allocates its own arena on top — but the *difference*
+  between configurations is real, and it moves in the same direction as the weight
+  file for both models.
+- **The reliable win is disk, cache and download footprint** -- the practical
+  constraint for container images, air-gapped installs and cold starts.
+
+#### Full per-batch results
+
+`BAAI/bge-small-en-v1.5`:
+
+| Batch | Variant | docs/s | ms/doc | Weights | Peak RAM | vs FP32 |
+|-------|---------|--------|--------|---------|----------|---------|
+| 8 | FP32 (`none`) | 48.2 | 20.75 | 126.9 MB | 249 MB | -- |
+| 8 | INT8 (`dynamic`) | 98.0 | 10.21 | 32.2 MB | 120 MB | 2.0x faster |
+| 8 | FP16 | 5.0 | 198.99 | 63.4 MB | 178 MB | 9.6x slower |
+| 32 | FP32 (`none`) | 50.5 | 19.82 | 126.9 MB | 249 MB | -- |
+| 32 | INT8 (`dynamic`) | 103.5 | 9.66 | 32.2 MB | 120 MB | 2.0x faster |
+| 32 | FP16 | 5.0 | 201.47 | 63.4 MB | 177 MB | 10.1x slower |
+| 64 | FP32 (`none`) | 47.4 | 21.10 | 126.9 MB | 249 MB | -- |
+| 64 | INT8 (`dynamic`) | 95.5 | 10.47 | 32.2 MB | 120 MB | 2.0x faster |
+| 64 | FP16 | 5.0 | 199.18 | 63.4 MB | 177 MB | 9.5x slower |
+| 128 | FP32 (`none`) | 47.8 | 20.91 | 126.9 MB | 249 MB | -- |
+| 128 | INT8 (`dynamic`) | 90.5 | 11.06 | 32.2 MB | 120 MB | 1.9x faster |
+| 128 | FP16 | 5.0 | 200.67 | 63.4 MB | 178 MB | 9.6x slower |
+
+`sentence-transformers/all-MiniLM-L6-v2`:
+
+| Batch | Variant | docs/s | ms/doc | Weights | Peak RAM | vs FP32 |
+|-------|---------|--------|--------|---------|----------|---------|
+| 8 | FP32 (`none`) | 97.1 | 10.30 | 86.2 MB | 206 MB | -- |
+| 8 | INT8 (`dynamic`) | 172.4 | 5.80 | 21.9 MB | 118 MB | 1.8x faster |
+| 32 | FP32 (`none`) | 96.3 | 10.38 | 86.2 MB | 206 MB | -- |
+| 32 | INT8 (`dynamic`) | 165.0 | 6.06 | 21.9 MB | 118 MB | 1.7x faster |
+| 64 | FP32 (`none`) | 90.5 | 11.05 | 86.2 MB | 206 MB | -- |
+| 64 | INT8 (`dynamic`) | 151.7 | 6.59 | 21.9 MB | 117 MB | 1.7x faster |
+| 128 | FP32 (`none`) | 99.6 | 10.04 | 86.2 MB | 206 MB | -- |
+| 128 | INT8 (`dynamic`) | 164.0 | 6.10 | 21.9 MB | 118 MB | 1.6x faster |
+
+#### How to read these numbers
+
+- **Peak RAM is measured, not dismissed.** Every configuration ran in its own
+  process, so the resident high-water mark belongs to that configuration. It
+  exceeds the weight file because ONNX Runtime memory-maps the file and
+  allocates its own arena on top -- 118 MB for a 21.9 MB file, 249 MB for a
+  126.9 MB file -- but the *difference* between configurations is real.
+- **Run-to-run variance is around 10%.** The MiniLM FP32 batch-64 baseline has
+  measured 82.7, 89.0, 90.5 and 99.6 docs/s across four runs on the same machine.
+  Treat the small differences as noise and the order-of-magnitude ones
+  (1.7x, 2.0x, 9.5x) as real; the tables print two decimals because the raw run
+  does, not because the third digit is meaningful.
+- **Every configuration ran on the same runtime.** The report records
+  `onnxruntime` and `execution_provider` per configuration and fails loudly if
+  they differ, because quantized throughput depends on the runtime as much as on
+  the weights. It also records the initializer dtypes found in each weights file,
+  so a mislabelled variant cannot enter the tables unnoticed.
+- **The quantized path is stable across batch sizes here** (151.7 to 172.4 docs/s
+  on MiniLM, 90.5 to 103.5 on BGE), so the batch size is not what drives the
+  comparison. An earlier run showed MiniLM `dynamic` collapsing to 112.1 docs/s
+  at batch 128; that has not reproduced, and it is the kind of outlier the
+  ~10% variance note explains.
+- **Not every mode exists for every model.** The registry now offers exactly
+  `dynamic` (real INT8) for MiniLM, and `none` + `dynamic` + `fp16` for
+  `bge-small-en-v1.5`. No model has a `static` (INT8-with-calibration) entry.
+  Absent combinations are reported as *not measured* with the available modes
+  listed, never as a failed run.
+- **`quantization=` selects the weights, not just the session options.** Each
+  quantized sibling is its own registry entry with its own `model_file`, and the
+  requested mode is resolved *before* the session is created. When a model has no
+  entry in that mode, creation fails with `LEMBED_ERROR_MODEL_NOT_FOUND` (Python:
+  `ModelNotFoundError`) naming the modes the model actually has:
+
+  ```python
+  from libembedding import TextEmbedding
+
+  # Resolved to the registry entry that provides the requested mode
+  TextEmbedding("sentence-transformers/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="dynamic")   # real INT8
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="fp16")      # float16
+
+  # Naming the repo directly is equivalent and unambiguous -- this is what the
+  # benchmark does
+  TextEmbedding("Xenova/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("onnx-community/bge-small-en-v1.5-ONNX", quantization="dynamic")
+  ```
+
+  Asking for a mode a model does not have is an error, not a silent fallback:
+
+  ```python
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="static")
+  # ModelNotFoundError: Model 'BAAI/bge-small-en-v1.5' has no 'static'
+  # variant (available: dynamic, fp16, none)
+  ```
+
+  In C, the model enum selects the entry, or the `quantization` field of the v2
+  options does:
+
+  ```c
+  opts.model = LEMBED_TEXT_BGE_SMALL_EN_V15_INT8;  /* or ..._Q for the FP16 one */
+  ```
+
+  This resolution did not always exist: the mode used to be stamped on the context
+  without changing the loaded file. That is why the archived 2026-09-27 benchmark is
+  void -- it measured the same FP32 weights under three labels, and the 2026-09-29
+  run published before the fix is void too. The 2026-10-01 run above is the first
+  one that both resolves registry entries and measures a genuine INT8 file.
+
+  Two caveats: `quantization="auto"` selects **no** weights (it loads the FP32
+  default while `.quantization` reports `"auto"`) -- use
+  `preferred_quantization="auto"` for a measured auto-selection. And
+  `Reranker(quantization=...)` does not resolve a variant either: pass the name of
+  the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
+
+- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
+  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
+  corpus before switching a quality-critical index; static INT8 (`_Q`) is the safer
+  default.
+
+Full report, machine block included, archived verbatim in
+`docs/archive/benchmarks/quantization-2026-10-01/` — every figure published above
+is traceable to it line by line.
+`benchmarks/quantization/results.html` is only the benchmark's output path and is
+overwritten by each run. The earlier runs are archived in
+`quantization-2026-09-27/`, `quantization-2026-09-29/` and
+`quantization-2026-09-30/`; all three are void — the first measured FP32 weights
+under three labels, the second predates the variant-selection fix, and the third
+measured FP16 files while calling them INT8. An incomplete run is archived in
+`quantization-2026-09-30-partial/`.
+
+```bash
+# Each variant runs in its own subprocess: peak memory is attributable and one
+# crashing configuration cannot take the benchmark down.
+python benchmarks/quantization/bench_quantization.py --num-texts 1000
+```
+
 ---
 
 ## Best Practices
@@ -2818,7 +3256,11 @@ model = TextEmbedding("/path/to/model.Q4_K_M.gguf")
 embeddings = model.embed(["Hello world"])
 ```
 
-Use `TextEmbedding.supports_llamacpp()` to check if the llama.cpp backend is available at runtime.
+Routing happens inside the constructor: `_is_gguf_model()` recognises the `.gguf`
+extension and switches to the llama.cpp backend. There is **no**
+`TextEmbedding.supports_llamacpp()` in the Python API; to check whether the
+backend is available at runtime, use `detect_backend(model_name)` or the C call
+`lembed_llama_backend_available()`.
 
 ### Auto-tuning workers (llama.cpp)
 
@@ -3049,7 +3491,7 @@ For optimal performance:
 1. **Reuse the model** — create it once and embed multiple batches
 2. **Tune `batch_size`** — increase until memory saturation
 3. **Use a GPU provider** — `cuda`, `coreml`, or `directml`
-4. **Enable quantization** — choose `_Q` models for faster inference
+4. **Enable quantization** — choose `_Q` models to cut on-disk size by 2-4x (throughput effect is model-dependent: benchmark it, see [Performance](performance_tuning.html#quantization-fp32-vs-int8))
 5. **Disable progress** — `show_download_progress=False` for scripts
 
 ## Dynamic batching scheduler (llama.cpp)
@@ -3703,8 +4145,23 @@ This module handles model downloading and resolution (ONNX and GGUF) from Huggin
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `lembed_ensure_text_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Ensure a text model is cached |
-| `lembed_resolve_gguf_path(model_name, out_path)` | `lembed_status_t` | Resolve GGUF model path |
-| `lembed_download_model(model_code, dest_dir, progress)` | `lembed_status_t` | Download a model |
+| `lembed_ensure_sparse_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Same, for a sparse model |
+| `lembed_ensure_image_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Same, for an image model |
+| `lembed_ensure_reranker_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Same, for a reranker |
+| `lembed_ensure_gguf_model(repo, filename, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Same, for a GGUF model |
+| `lembed_resolve_gguf_path(name_or_path, cache_dir, offline, model_path_out)` | `lembed_status_t` | Resolve a `.gguf` path (file, URL or registry name) |
+| `lembed_cleanup_model_cache(cache_dir, keep_models, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purge the cache, keeping a list of models |
+| `lembed_cleanup_model_cache_except(cache_dir, active_model_dir, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purge the cache except the active model |
+| `lembed_free_string(s)` | `void` | Free a string allocated by the library |
+
+> There is **no** `lembed_download_model()`: downloading always goes through an
+> `lembed_ensure_*` function. The `ensure` prefix means "download if absent,
+> otherwise a no-op".
+>
+> `lembed_resolve_gguf_path()` is declared in this header and implemented inside
+> the `LIBEMBEDDING_IMPLEMENTATION` block. It **is** exported by
+> `libembedding.def` (line 156), so it works both against the Windows DLL and in
+> a header-only build.
 
 ## `lembed_ensure_text_model()`
 
@@ -3738,9 +4195,16 @@ This module provides interaction with the llama.cpp backend for GGUF models.
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `lembed_llama_backend_available()` | `int` (1=yes, 0=no) | Check availability |
-| `lembed_llama_version()` | `const char*` | llama.cpp version |
-| `lembed_llama_set_logging(enable)` | `void` | Enable/disable logging |
-| `lembed_llama_get_n_gpu_layers(model_name)` | `int` | Number of GPU layers |
+| `lembed_llama_version()` | `const char*` | Backend identifier |
+
+> `lembed_llama_version()` does not return a version number: the current
+> implementation returns the literal string `"llama.cpp enabled"`. Do not use it
+> to detect a version.
+>
+> There is **no** `lembed_llama_set_logging()` and no
+> `lembed_llama_get_n_gpu_layers()` in this API. GPU layers are set through the
+> model options (`LEMBED_BACKEND_LLAMACPP` and `n_gpu_layers`), and logging
+> through llama.cpp's own configuration.
 
 ## Example
 
@@ -3776,7 +4240,7 @@ This module defines status codes and thread-local error handling.
 | `0` | `LEMBED_OK` | Success |
 | `1` | `LEMBED_ERROR_INVALID_ARGUMENT` | Invalid argument |
 | `2` | `LEMBED_ERROR_OUT_OF_MEMORY` | Out of memory |
-| `3` | `LEMBED_ERROR_RUNTIME` | Runtime error (ONNX Runtime) |
+| `3` | `LEMBED_ERROR_ONNX_RUNTIME` | ONNX Runtime error |
 | `4` | `LEMBED_ERROR_TOKENIZER` | Tokenizer error |
 | `5` | `LEMBED_ERROR_DOWNLOAD` | Download error |
 | `6` | `LEMBED_ERROR_IO` | I/O error |
@@ -3784,13 +4248,24 @@ This module defines status codes and thread-local error handling.
 | `8` | `LEMBED_ERROR_UNSUPPORTED` | Unsupported feature |
 | `9` | `LEMBED_ERROR_BATCH_SIZE` | Invalid batch size |
 | `10` | `LEMBED_ERROR_LLAMA` | llama.cpp error |
+| `11` | `LEMBED_ERROR_CACHE_MISS` | Cache miss |
+
+> `LEMBED_ERROR_BATCH_SIZE` is kept in the enum but **no code path returns it
+> any more**: the guard that produced it was removed, and dynamic quantization
+> accepts batching again. It stays in the API so the values keep their order
+> (the ABI and the Python `_STATUS_MAP` mapping depend on it).
 
 ## Error handling functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `lembed_last_error()` | `const char*` | Last error message (thread-local) |
-| `lembed_status_to_string(status)` | `const char*` | Status code name |
+| `lembed_status_message(status)` | `const char*` | Message for the status code |
+| `lembed_version()` | `const char*` | Library version |
+
+> The function is named `lembed_status_message()`, **not**
+> `lembed_status_to_string()`. Note also that the `LEMBED_ERROR_` prefix of the
+> constants does not carry over to the function names.
 
 ## Example
 
@@ -3800,7 +4275,7 @@ This module defines status codes and thread-local error handling.
 lembed_status_t status = lembed_text_embedding_create(...);
 if (status != LEMBED_OK) {
     printf("Error: %s\n", lembed_last_error());
-    printf("Code: %s\n", lembed_status_to_string(status));
+    printf("Code: %d (%s)\n", status, lembed_status_message(status));
 }
 ```
 
@@ -3883,14 +4358,51 @@ This module selects the best model and configuration automatically based on avai
 
 | Type | Description |
 |------|-------------|
-| `lembed_model_selection_t` | Model selection result |
+| `lembed_model_selection_t` | Model selection result (declared in `autotuner.h`) |
+| `lembed_use_case_t` | Use case |
+| `lembed_model_candidate_t` | Model candidate |
+| `lembed_hardware_info_t` | **Deprecated** — detected hardware |
 
 ## Functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Select model automatically |
-| `lembed_detect_hardware(hw)` | `lembed_status_t` | Detect hardware |
+| `lembed_model_select(logical_cores, ram_mb, use_case, out_selected)` | `int` | Pick a candidate from a given hardware configuration |
+| `lembed_detect_hardware(out_info)` | `int` | **Deprecated** — detect hardware |
+
+> `lembed_detect_hardware()` returns an **`int`**, not a `lembed_status_t`: its
+> implementation wraps `lembed_cache_detect_hardware()` and returns 0 on failure.
+> Use `lembed_cache_detect_hardware(lembed_cache_hardware_info_t*)` instead --
+> that is what the header documentation recommends.
+
+## `lembed_use_case_t`
+
+| Constant | Description |
+|----------|-------------|
+| `LEMBED_USE_CASE_SPEED` | Optimized for speed |
+| `LEMBED_USE_CASE_QUALITY` | Optimized for quality |
+| `LEMBED_USE_CASE_BALANCED` | Balanced (default) |
+
+## `lembed_model_candidate_t`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model_name` | `char[256]` | Model name (e.g. `"BAAI/bge-small-en-v1.5"`) |
+| `dim` | `int` | Embedding dimension |
+| `max_length` | `int` | Max token length |
+| `pooling` | `int` | `LEMBED_POOLING_CLS` or `LEMBED_POOLING_MEAN` |
+| `estimated_ram_mb` | `int` | Estimated RAM (MB) |
+| `estimated_throughput` | `double` | Estimated throughput (docs/s) |
+
+## `lembed_hardware_info_t` (deprecated)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cpu_model` | `char[256]` | CPU model |
+| `physical_cores` | `int` | Physical cores |
+| `logical_cores` | `int` | Logical cores |
+| `ram_mb` | `int` | Total RAM (MB) |
 
 ## `lembed_model_selection_t`
 
@@ -3909,16 +4421,19 @@ This module selects the best model and configuration automatically based on avai
 
 ## Use cases
 
-| Value | Description |
-|-------|-------------|
-| `"speed"` | Optimized for speed |
-| `"quality"` | Optimized for quality |
-| `"balanced"` | Balanced (default) |
+`lembed_auto_select_model()` takes a **string**, not the enum:
+
+| String | Matching constant | Description |
+|--------|-------------------|-------------|
+| `"speed"` | `LEMBED_USE_CASE_SPEED` | Optimized for speed |
+| `"quality"` | `LEMBED_USE_CASE_QUALITY` | Optimized for quality |
+| `"balanced"` | `LEMBED_USE_CASE_BALANCED` | Balanced (default) |
 
 ## Example
 
 ```c
 #include <libembedding/model_selector.h>
+#include <libembedding/autotuner.h>
 
 lembed_model_selection_t result;
 lembed_status_t status = lembed_auto_select_model("balanced", &result);
@@ -3926,6 +4441,12 @@ if (status == LEMBED_OK) {
     printf("Model: %s\n", result.model_code);
     printf("Workers: %d, Threads: %d, Batch: %d\n",
         result.workers, result.threads, result.batch_size);
+}
+
+// Selection from a known hardware configuration, without probing the machine
+lembed_model_candidate_t chosen;
+if (lembed_model_select(8, 16384, LEMBED_USE_CASE_SPEED, &chosen) > 0) {
+    printf("Chosen: %s (%d dim)\n", chosen.model_name, chosen.dim);
 }
 ```
 
@@ -3962,16 +4483,53 @@ This module provides comprehensive auto-tuning to find optimal configuration (wo
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `lembed_autotune(model_code, mode, out)` | `lembed_status_t` | Autotune a text model |
-| `lembed_autotune_custom(model_code, texts, n, mode, out)` | `lembed_status_t` | Autotune with custom corpus |
-| `lembed_autotune_unified(task, model_code, mode, out)` | `lembed_status_t` | Unified autotune (all types) |
-| `lembed_autotune_clear_cache(model_name)` | `void` | Clear autotune cache |
-| `lembed_reranker_autotune(model_code, mode, objective, out)` | `lembed_status_t` | Autotune a reranker |
-| `lembed_reranker_autotune_constrained(...)` | `lembed_status_t` | Constrained autotune |
-| `lembed_reranker_auto_config(...)` | `lembed_status_t` | Latency-budget autoconfig |
-| `lembed_reranker_auto_config_profile(...)` | `lembed_status_t` | Profile-based autoconfig |
-| `lembed_sparse_autotune(model_code, mode, out)` | `lembed_status_t` | Autotune a sparse model |
-| `lembed_image_autotune(model_code, mode, out)` | `lembed_status_t` | Autotune an image model |
+| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Autotune a text model |
+| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Autotune with custom corpus |
+| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Unified autotune (all types) |
+| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Unified autotune with a latency budget |
+| `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Pick the best model for the machine |
+| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Autotune a sparse model |
+| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Autotune an image model |
+| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Autotune a reranker |
+| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Autotune a reranker on a supplied corpus |
+| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Constrained autotune |
+| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Latency-budget autoconfig |
+| `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Profile-based autoconfig |
+
+> **Both forms of the name are accepted.** The registry gives every model two
+> different strings -- the HuggingFace repo (`model_code`,
+> `Qdrant/all-MiniLM-L6-v2-onnx`) and the canonical name (`model_name`,
+> `sentence-transformers/all-MiniLM-L6-v2`). Every autotune entry point resolves
+> either one through `lembed_resolve_text_model()` /
+> `lembed_resolve_reranker_model()`, and the cache identity is always the
+> `model_code` form. A call using either form finds the same model and purges the
+> same entries.
+>
+> Resolution is exact `model_code` first, then exact `model_name`. One useful
+> consequence: a repo belongs to exactly one entry, so
+> `Xenova/all-MiniLM-L6-v2` (the INT8 repo) selects the quantized entry, while the
+> canonical name -- which carries no mode -- selects the first entry declaring it,
+> the FP32 one. An unknown name returns -1 with a diagnostic, never entry 0.
+>
+> This aligns the C API with what the Python bindings already do in
+> `resolve_text_model()`, and with what the reranker benchmark already did on its
+> own. Previously `lembed_autotune` required the HF repo while the note announced
+> the canonical name, so the note and the example below contradicted each other.
+>
+> `lembed_find_text_model_variant()` (below) stays deliberately strict: it matches
+> the **canonical name**, because that is the only way to name "this model, in
+> this quantization mode" without ambiguity.
+>
+> Both fields are described by `lembed_model_info_t` in
+> `include/libembedding/model_registry.h`.
+
+## Cache clearing
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `lembed_autotune_clear_cache(model_name)` | `void` | Clear the text autotune cache; `NULL` = whole cache |
+| `lembed_reranker_autotune_clear_cache(model_name)` | `void` | Clear the reranker autotune cache; `NULL` = whole reranker cache |
+| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Dispatch to the cache of the given task |
 
 ## Unified tasks
 
@@ -3990,6 +4548,70 @@ This module provides comprehensive auto-tuning to find optimal configuration (wo
 | `LEMBED_OBJECTIVE_THROUGHPUT` | Maximize throughput |
 | `LEMBED_OBJECTIVE_BALANCED` | Balanced |
 | `LEMBED_OBJECTIVE_MEMORY` | Minimize memory |
+
+## Autotune cache
+
+Results are stored under `%LOCALAPPDATA%\libembedding\autotune`
+(`$HOME/.cache/libembedding/autotune` outside Windows, and
+`./libembedding_autotune_cache` as a last resort when none of those variables is
+set). Rerankers use a separate `reranker/` subdirectory.
+
+An entry is reused only when its identity matches **in full**: model, variant,
+corpus fingerprint, objective and mode. A result measured on one corpus is
+therefore never returned for another, and an unreadable or corrupt file is
+treated as a cache miss.
+
+| Variant label | Used by |
+|---------------|---------|
+| `synthetic` | Default text tuning, on a synthetic corpus |
+| `custom` | Text or reranker tuning on a supplied corpus |
+| `default` | Default reranker tuning, on a synthetic corpus |
+
+Note that the default label is **not** the same for text (`synthetic`, in
+`autotune_bench_text.hpp`) and for reranker (`default`, via
+`default_reranker_identity()` in `autotune_bench_reranker.hpp`). No variant
+selection depends on those labels: `lembed_find_text_model_variant()` compares the
+quantization mode and the `model_name`, not `synthetic`/`custom`.
+
+The identity also includes a hardware and software fingerprint (CPU brand,
+logical and physical cores, ONNX Runtime major.minor version, libembedding
+major.minor version), so a result measured on another machine or after a version
+bump is never served again.
+
+`lembed_autotune_clear_cache(model_name)` removes every entry for a model (all
+variants); `lembed_reranker_autotune_clear_cache(model_name)` does the same for
+rerankers. Passing `NULL` empties the matching cache entirely. Entries are
+matched on the `model` field read **from inside** the file, not on the file
+name, which is a hash of the hardware fingerprint.
+
+> **Do not confuse this** with the lower-level `tune_cache.json` file and the
+> `lembed_tune_cache_*` API (`lembed_tune_cache_load`, `lembed_tune_cache_save`,
+> `lembed_tune_cache_clear`, see [Autotune cache](autotune_cache.md)), which are
+> keyed by hardware + software + model + backend fingerprint and are not driven
+> by `lembed_autotune_clear_cache`.
+
+## Related function: quantization variant resolution
+
+`lembed_find_text_model_variant(model_name, quantization)` is **not** an
+autotuning function: it belongs to the registry API
+(`include/libembedding/model_registry.h`) and does not yet have a dedicated page
+in this documentation.
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `lembed_find_text_model_variant(model_name, quantization)` | `int` | Resolve a quantization request to the registry entry that provides it. Returns the entry index, or `-1` with `lembed_last_error()` naming the requested mode and the modes available. |
+| `lembed_resolve_text_model(model)` | `int` | Resolve a model given by its HF repo **or** its canonical name to its entry. `-1` plus a diagnostic if unknown. |
+| `lembed_resolve_reranker_model(model)` | `int` | Same, for rerankers. |
+
+These two resolvers are the ones the autotune functions above use.
+
+The match is done on `model_name` (the canonical name), not `model_code`:
+passing a HuggingFace repo matches no entry.
+
+`LEMBED_QUANTIZATION_AUTO` is not a weights selection: no registry entry carries
+that mode, so the function always returns `-1` -- and **still sets a thread-local
+error**, like any unknown mode. `lembed_text_embedding_create_v2` only calls it
+for an explicitly requested mode, never for `AUTO`.
 
 ## Example
 
@@ -4023,23 +4645,42 @@ Rendered: https://dorel14.github.io/libembedding-ng/en/c_api/worker_autotune.htm
 
 This module detects optimal worker and session configuration for the llama.cpp backend.
 
+## Types
+
+| Type | Description |
+|------|-------------|
+| `lembed_worker_config_t` | Detected optimal worker configuration |
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `optimal_workers` | `int` | Recommended worker count |
+| `optimal_threads` | `int` | Recommended thread count |
+| `physical_cores` | `int` | Detected physical cores |
+| `logical_cores` | `int` | Detected logical cores |
+
 ## Functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `lembed_detect_optimal_workers(model, n_threads, n_sessions)` | `void` | Detect optimal workers |
-| `lembed_recommended_workers_for_model(model_name)` | `int` | Recommended workers for a model |
+| `lembed_detect_optimal_workers()` | `lembed_worker_config_t` | Detect the optimal worker/session configuration |
+| `lembed_recommended_workers_for_model(model_path)` | `int` | Recommended worker count for a model |
+
+> `lembed_detect_optimal_workers()` takes **no argument** and returns a struct,
+> not `void`: it inspects the machine's hardware. The variant that takes a model
+> path is `lembed_recommended_workers_for_model()`, which returns a plain `int`.
 
 ## Example
 
 ```c
 #include <libembedding/worker_autotune.h>
 
-int n_workers = lembed_recommended_workers_for_model("meta-llama/Llama-3-8B");
-printf("Recommended workers: %d\n", n_workers);
+lembed_worker_config_t cfg = lembed_detect_optimal_workers();
+printf("workers: %d, threads: %d (physical=%d, logical=%d)\n",
+       cfg.optimal_workers, cfg.optimal_threads,
+       cfg.physical_cores, cfg.logical_cores);
 
-int threads, sessions;
-lembed_detect_optimal_workers("meta-llama/Llama-3-8B", &threads, &sessions);
+// Model-specific recommendation
+int workers = lembed_recommended_workers_for_model("meta-llama/Llama-3-8B");
 ```
 
 ## See also
@@ -4064,58 +4705,75 @@ This module provides model benchmarking with Pareto scoring, constraints, and re
 | `lembed_benchmark_result_t` | Benchmark result |
 | `lembed_backend_config_t` | Backend config for benchmark |
 | `lembed_benchmark_metrics_t` | Benchmark metrics |
-| `lembed_benchmark_hardware_info_t` | Hardware information |
+| `lembed_benchmark_weights_t` | Scoring weights (quality / throughput / cost) |
+| `lembed_benchmark_constraints_t` | Hard limits |
+| `lembed_corpus_type_t` | Test corpus category |
+
+> The hardware type is not `lembed_benchmark_hardware_info_t`: it is
+> `lembed_cache_hardware_info_t`, declared in `autotune_cache.h`, alongside
+> `lembed_cache_detect_hardware()` and `lembed_cache_detect_software()`.
 
 ## Functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `lembed_benchmark_run(model, backend, corpus, config, result)` | `lembed_status_t` | Run a benchmark |
-| `lembed_benchmark_autotune(model, backend, objective, result)` | `lembed_status_t` | Benchmark with autotune |
-| `lembed_benchmark_detect_hardware(hw)` | `lembed_status_t` | Detect hardware |
+| `lembed_benchmark_run(model_path, backend, corpus_type, config, result)` | `lembed_status_t` | Run a benchmark |
+| `lembed_benchmark_compare(onnx_path, gguf_path, corpus_type, results)` | `int` | Same model on both backends (0 to 2 results) |
+| `lembed_benchmark_autotune(model_path, backend, objective, result)` | `lembed_status_t` | Benchmark with autotune |
+| `lembed_benchmark_select_model(model_dir, objective, constraints, weights, result)` | `lembed_status_t` | Hard constraints, then Pareto frontier, then scoring |
+| `lembed_benchmark_detect_sessions(model_path, max_sessions, optimal, throughput)` | `lembed_status_t` | Detect the optimal session count |
+| `lembed_benchmark_get_corpus(type, out_texts, out_count)` | `lembed_status_t` | Fetch the test corpus (static, do not free) |
+| `lembed_benchmark_default_cache_dir()` | `const char*` | Default GGUF cache directory |
+| `lembed_benchmark_profile_weights(obj)` | `lembed_benchmark_weights_t` | Normalized weights for an objective |
+| `lembed_benchmark_custom_weights(q, t, c)` | `lembed_benchmark_weights_t` | Custom weights, renormalized |
+
+> `lembed_benchmark_detect_hardware()` **does not exist**: hardware detection is
+> `lembed_cache_detect_hardware(lembed_cache_hardware_info_t*)`.
 
 ## `lembed_benchmark_metrics_t`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `throughput_docs_sec` | `double` | Throughput (docs/s) |
-| `latency_p50_ms` | `double` | Median latency (ms) |
-| `latency_p95_ms` | `double` | P95 latency (ms) |
-| `load_time_ms` | `double` | Load time (ms) |
-| `peak_memory_mb` | `double` | Peak memory (MB) |
+| `throughput_docs_sec` | `float` | Throughput (docs/s) |
+| `latency_p50_ms` | `float` | Median latency (ms) |
+| `latency_p95_ms` | `float` | P95 latency (ms) |
+| `load_time_ms` | `float` | Load time (ms) |
+| `peak_memory_mb` | `float` | Peak memory (MB) |
 | `dim` | `int` | Dimension |
 | `num_texts` | `int` | Number of texts |
 | `num_errors` | `int` | Number of errors |
 
+> The metrics are **`float`**, not `double`.
+
 ## Corpus types
 
-| Constant | Description |
-|----------|-------------|
-| `0` | Short (< 20 tokens) |
-| `1` | Medium (20-80 tokens) |
-| `2` | Long (80-200 tokens) |
-| `3` | Very long (200+ tokens) |
-| `4` | Mixed |
-| `5` | Multilingual |
-| `6` | Edge cases |
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `LEMBED_CORPUS_SHORT` | `0` | Short (< 20 tokens) |
+| `LEMBED_CORPUS_MEDIUM` | `1` | Medium (20-80 tokens) |
+| `LEMBED_CORPUS_LONG` | `2` | Long (80-200 tokens) |
+| `LEMBED_CORPUS_VERY_LONG` | `3` | Very long (200+ tokens) |
+| `LEMBED_CORPUS_MIXED` | `4` | Mixed |
+| `LEMBED_CORPUS_MULTILINGUAL` | `5` | Multilingual |
+| `LEMBED_CORPUS_EDGE_CASES` | `6` | Edge cases |
 
 ## Example
 
 ```c
 #include <libembedding/embedding_benchmark.h>
 
-lembed_benchmark_result_t result;
 lembed_backend_config_t config = {
-    .backend = "llama.cpp",
+    .backend = "onnx",     /* char[32], not a pointer */
     .num_threads = 4,
     .batch_size = 32,
     .workers = 1,
 };
 
+lembed_benchmark_result_t result;
 lembed_status_t status = lembed_benchmark_run(
-    "path/to/model.gguf",
-    "llama.cpp",
-    4,  // corpus type MIXED
+    "path/to/model.onnx",
+    "onnx",
+    LEMBED_CORPUS_MIXED,
     &config,
     &result
 );
@@ -4147,25 +4805,45 @@ This module manages the list of recommended GGUF models and their configuration.
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `lembed_list_gguf_models(out, count)` | `lembed_status_t` | List GGUF models |
-| `lembed_find_gguf_model_by_name(name)` | `int` | Find GGUF model by name |
-| `lembed_get_gguf_model_info(model_idx, out)` | `lembed_status_t` | Get GGUF model info |
-| `lembed_validate_gguf_path(path)` | `lembed_status_t` | Validate GGUF path |
-| `lembed_resolve_gguf_path(model_name, out_path)` | `lembed_status_t` | Resolve GGUF path |
+| `lembed_find_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Look up a GGUF model (NULL if unknown) |
+| `lembed_default_gguf_model()` | `const lembed_gguf_model_info_t*` | Recommended default GGUF model |
+
+> Both lookup functions return a **pointer into static data** — do not free it.
+> There is no `lembed_get_gguf_model_info()`: iterate directly over the array
+> returned by `lembed_list_gguf_models()`. `lembed_resolve_gguf_path()` is
+> declared in `downloader.h`, not here.
+
+## `lembed_gguf_model_info_t` fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `const char*` | Human-readable name (e.g. `"Snowflake-XS-Q4"`) |
+| `gguf_url` | `const char*` | Download URL for the `.gguf` |
+| `model_code` | `const char*` | Original HuggingFace code |
+| `description` | `const char*` | Short description |
+| `dim` | `int` | Embedding dimension |
+| `params_m` | `int` | Parameter count in millions |
+| `file_size_mb` | `int` | Approximate file size in MB |
+| `quality_mteb` | `float` | MTEB Retrieval score (NDCG@10), 0 if unknown |
+| `recommended_sessions` | `int` | Recommended session count |
+
+> The field is named `name`, **not** `model_name`.
 
 ## Example
 
 ```c
 #include <libembedding/gguf_registry.h>
 
-const lembed_model_info_t **models;
+const lembed_gguf_model_info_t **models;
 int count;
 lembed_status_t status = lembed_list_gguf_models(&models, &count);
 if (status == LEMBED_OK) {
     printf("GGUF models available: %d\n", count);
     for (int i = 0; i < count; i++) {
-        printf("  %s (%s)\n",
-            models[i]->model_name,
-            models[i]->model_code);
+        printf("  %s (%s, %d dim)\n",
+            models[i]->name,
+            models[i]->model_code,
+            models[i]->dim);
     }
 }
 ```
@@ -4408,7 +5086,7 @@ TextEmbedding(
 | `pooling` | `str` | `"mean"` | Stratégie de pooling pour modèles locaux : `"cls"` ou `"mean"` |
 | `auto_workers` | `bool` | `False` | `True` = auto-détection du nombre optimal de sessions/workers pour llama.cpp |
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
-| `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"` (None = défaut du modèle) |
+| `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. ⚠️ `"fp16"` n'est pas de l'INT8 : ce sont des poids `FLOAT16` servis par un graphe optimisé ORT. Sur un CPU sans arithmétique FP16 native, ils sont plus lents que FP32 tout en occupant moins de disque — utile pour la taille, pas pour le débit. Les quatre entrées `Qdrant/*-onnx-Q` (dont `bge-small-en-v1.5`) sont dans ce cas ; leur suffixe `_Q` et leur description historique « Quantized » ne Changeaient pas. |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -4419,17 +5097,26 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
 | `dim` | `int` (property) | Dimension de l'embedding |
+| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
+| `model_name` | `str` (property) | Nom de registre du modèle chargé |
 | `info()` | `ModelDesc` | Descripteur du modèle chargé |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources C sous-jacentes |
-| `list_supported_models()` | `list[ModelInfo]` | (static) Liste tous les modèles de texte supportés |
 | `__enter__()` | `self` | Support du context manager |
 | `__exit__()` | `None` | Appelle `close()` automatiquement |
-| `from_gguf(repo, filename=None, provider="llamacpp", ...)` | `TextEmbedding` | Charge un modèle GGUF depuis HuggingFace (nécessite le backend llama.cpp) |
 | `from_mode(mode="balanced", **kwargs)` | `TextEmbedding` | (classmethod) Crée un TextEmbedding depuis un mode prédéfini : `"fast"`, `"balanced"`, `"quality"` |
-| `supports_llamacpp()` | `bool` | (static) Vérifie si le backend llama.cpp est compilé |
+
+> **Pas de méthode `list_supported_models()` sur `TextEmbedding`** — elle n'existe
+> que sur `SparseTextEmbedding`, `ImageEmbedding` et `Reranker`. Pour les modèles
+> texte, utilisez la fonction de module `list_text_models()`.
+
+> **Pas de `from_gguf()` ni de `supports_llamacpp()`.** Le chargement GGUF passe
+> par le constructeur : `_is_gguf_model()` reconnaît l'extension `.gguf` et
+> bascule sur le backend llama.cpp. Pour un dépôt HuggingFace, passer
+> `"repo/filename.gguf"` ; pour un fichier local, passer le chemin.
+> `detect_backend(model_name)` indique le backend retenu.
 
 #### Exemple
 
@@ -4588,8 +5275,17 @@ Reranker(
 | `BAAI/bge-reranker-base` | BGE Reranker base (défaut) |
 | `BAAI/bge-reranker-v2-m3` | BGE Reranker v2 multilingue |
 | `jinaai/jina-reranker-v1-turbo-en` | Jina Reranker v1 turbo |
-| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 multilingue |
-| `jinaai/jina-reranker-v1-turbo-en` (quantized) | Jina Reranker v1 turbo English (INT8) |
+| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 base multilingue |
+| `jinaai/jina-reranker-v1-turbo-en-quantized` | Jina Reranker v1 turbo English (INT8) |
+
+> **`quantization=` ne change pas les poids du reranker.** Contrairement à
+> `TextEmbedding`, il ne résout pas l'entrée de registre : il ne règle que des
+> options de session ONNX Runtime. Pour obtenir l'INT8, passer le **nom** de
+> l'entrée quantifiée — `jinaai/jina-reranker-v1-turbo-en-quantized`, qui pointe
+> sur `onnx/model_quantized.onnx` du dépôt `jinaai/jina-reranker-v1-turbo-en`.
+> Contrairement aux modèles texte, les entrées reranker quantifiées ont un
+> `model_name` **distinct** de leur version FP32, ce qui est précisément pourquoi
+> aucune résolution par mode n'y est possible aujourd'hui.
 
 #### Méthodes et propriétés
 
@@ -4676,6 +5372,47 @@ class TuningResult:
     memory_mb: float
 ```
 
+### SparseTuningResult
+
+```python
+@dataclass(frozen=True)
+class SparseTuningResult:
+    top_k: int
+    min_weight: float
+    storage_format: int
+    threads: int
+    batch_size: int
+    throughput_docs_sec: float
+    latency_ms: float
+    memory_mb: float
+```
+
+### ImageTuningResult
+
+```python
+@dataclass(frozen=True)
+class ImageTuningResult:
+    threads: int
+    batch_size: int
+    throughput_docs_sec: float
+    latency_ms: float
+    memory_mb: float
+```
+
+### RerankerTuningResult
+
+```python
+@dataclass(frozen=True)
+class RerankerTuningResult:
+    threads: int
+    batch_size: int
+    max_tokens: int
+    throughput_docs_sec: float
+    latency_ms: float
+    p95_latency_ms: float
+    memory_mb: float
+```
+
 ### ModelSelectionResult
 
 Résultat de la sélection automatique de modèle.
@@ -4699,7 +5436,7 @@ class ModelSelectionResult:
 
 | Fonction | Description |
 |----------|-------------|
-| `autotune(model_name, full=False)` | Auto-tune un modèle. Retourne `TuningResult`. |
+| `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune un modèle. Retourne `TuningResult`. `texts` fournit un corpus de mesure (échantillonné à `max_sample_size`) ; `None` utilise un corpus synthétique. |
 | `autotune_unified(task, model_name, mode="quick")` | Auto-tune unifié pour tous les types de tâches. Voir [Unified Tuning](#unified-tuning). |
 | `sparse_autotune(model_name, mode="quick")` | Auto-tune l'embedding sparse. Retourne `SparseTuningResult`. |
 | `image_autotune(model_name, mode="quick")` | Auto-tune l'embedding image. Retourne `ImageTuningResult`. |
@@ -4751,13 +5488,18 @@ class UnifiedTuningResult:
 
 ### LlamaError
 
-Exception levée pour les erreurs du backend llama.cpp/GGUF :
+Sous-classe de `LembedError`, levée pour les erreurs du backend llama.cpp/GGUF.
+Comme les autres exceptions, elle expose :
+
+- `status_code` (`int`) — `LEMBED_ERROR_LLAMA`
+- `message` (`str`) — `"llama.cpp error"`
+- `detail` (`str`) — détail technique renvoyé par llama.cpp
 
 ```python
 from libembedding import LlamaError
 
 try:
-    model = TextEmbedding.from_gguf("/path/to/model.gguf")
+    model = TextEmbedding("/path/to/model.gguf")
 except LlamaError as e:
     print(f"Erreur llama.cpp: {e.detail}")
 ```
@@ -5153,7 +5895,7 @@ for m in libembedding.list_text_models():
 | `snowflake/snowflake-arctic-embed-l` | 1024 | CLS | none |
 | `snowflake/snowflake-arctic-embed-l` | 1024 | CLS | dynamic |
 
-> **Note :** Les variantes suffixées par `_Q` utilisent la quantification (static ou dynamic) pour réduire la taille du modèle et accélérer l'inférence au détriment d'une légère perte de précision.
+> **Note :** Les variantes suffixées par `_Q` utilisent la quantification (static ou dynamic) pour réduire la taille du modèle — de 2 à 4x sur les embeddings texte denses, d'après le [benchmark de quantification](performance_tuning.html#quantification--fp32-vs-int8) — au détriment d'une légère perte de précision. L'effet sur le débit dépend du modèle et du format réel des poids, et doit être mesuré, pas supposé. Deux pièges : le suffixe `_Q` et l'étiquette « quantized » désignent souvent du **FP16**, pas de l'INT8 — les poids peuvent être en `FLOAT16` (c'est le cas des quatre entrées `Qdrant/*-onnx-Q`). Sur le CPU de référence (Intel Core i7-1065G7, ONNX Runtime 1.29.0), l'INT8 dynamique s'est révélé **1,7x plus rapide** que le FP32 sur MiniLM et **2,0x** sur BGE, avec 3,9x de disque en moins et 1,8 à 2,1x de RAM en moins ; l'entrée BGE `_Q`, en FP16, s'est révélée **9,5x plus lente**. Benchmarkez votre propre modèle avant de choisir.
 
 ---
 
@@ -5357,11 +6099,31 @@ Les résultats sont mis en cache par machine + modèle :
 | Premier appel | Benchmark + sauvegarde cache |
 | Même machine + modèle | Cache hit (< 1ms) |
 | Changement de CPU/ORT/modèle | Cache miss → re-benchmark |
+| Même modèle, corpus différent | Cache miss (l'empreinte du corpus fait partie de la clef) |
+| Même corpus, objectif ou mode différent | Cache miss |
+
+Une entrée de cache est réutilisée uniquement si **toutes** ses dimensions
+d'identité correspondent : modèle, variante (`synthetic` / `custom`), empreinte
+du corpus, objectif et mode. Un fichier de cache corrompu ou tronqué est traité
+comme un miss, jamais comme un résultat. Les écritures sont atomiques
+(fichier temporaire puis renommage), donc une interruption ne laisse pas de
+résultat partiel.
+
+Mesurer sur son propre corpus :
+
+```python
+from libembedding import autotune
+
+result = autotune(
+    "Qdrant/all-MiniLM-L6-v2-onnx",
+    texts=my_documents,   # échantillonné à max_sample_size (100 par défaut)
+)
+```
 
 ```python
 from libembedding import clear_autotune_cache
 
-# Effacer le cache d'un modèle
+# Effacer le cache d'un modèle (toutes ses variantes : synthetic et custom)
 clear_autotune_cache("Qdrant/all-MiniLM-L6-v2-onnx")
 
 # Effacer tout le cache
@@ -5574,6 +6336,198 @@ model = TextEmbedding(
 | MiniLM-L6-v2 (FP32) | 305-361 | 740 MB | Oui |
 | BGE-small-en (FP32) | 143-150 | 1.1 GB | Oui |
 
+### Quantification : FP32 vs INT8
+
+Mesuré par `benchmarks/quantization/bench_quantization.py` le 2026-10-01
+(hôte `PC_Asus`, Windows 11 AMD64, provider CPU, Python 3.12.10,
+libembedding 1.8.0, commit `c2dbe95`). Corpus de 1 000 textes (50 de warmup +
+950 chronométrés), modèles pré-cachés. Chaque variante tourne dans son propre
+sous-processus : le pic RSS est donc attribuable à la configuration qui l'a
+produit. Tous les modes sont mesurés à toutes les tailles de batch, et chaque
+variante quantifiée est comparée à la référence FP32 **à batch identique** —
+comparer une variante batch 64 à une référence batch 8 mesurerait la taille de
+batch, pas la quantification :
+
+| Modèle | Variante | Poids | Débit | Pic RAM | vs FP32 (même batch) |
+|--------|----------|-------|-------|---------|---------|
+| `all-MiniLM-L6-v2` | FP32 (`none`) | 86,2 Mo | 90,5 docs/s @ batch 64 | 206 Mo | — |
+| `all-MiniLM-L6-v2` | INT8 (`dynamic`) | **21,9 Mo** (3,9x plus petit) | **151,7 docs/s** @ batch 64 | **117 Mo** | **1,7x plus rapide**, 1,8x moins de RAM |
+| `bge-small-en-v1.5` | FP32 (`none`) | 126,9 Mo | 47,4 docs/s @ batch 64 | 249 Mo | — |
+| `bge-small-en-v1.5` | INT8 (`dynamic`) | **32,2 Mo** (3,9x plus petit) | **95,5 docs/s** @ batch 64 | **120 Mo** | **2,0x plus rapide**, 2,1x moins de RAM |
+| `bge-small-en-v1.5` | **FP16** (`LEMBED_QUANTIZATION_FP16`) | 63,4 Mo (2,0x plus petit) | 5,0 docs/s @ batch 64 | 177 Mo | **9,5x plus lent**, 1,4x moins de RAM |
+
+**L'INT8 dynamique est le gagnant sur les deux modèles**, et il gagne sur tous
+les axes à la fois : 1,7x plus rapide sur MiniLM, 2,0x plus rapide sur BGE, 3,9x
+plus petit sur disque, et 1,8 à 2,1x moins de RAM résidente. Il n'y a aucun
+arbitrage ici, sauf la précision — que ce benchmark ne mesure pas.
+
+> **Un autre piège, et c'est un problème de nommage.** Les quatre entrées
+> `Qdrant/*-onnx-Q` du registre — dont `bge-small-en-v1.5` — livrent des poids
+> **FP16**, pas INT8 : la totalité de leurs 149 initialiseurs est `FLOAT16` et
+> elles portent un graphe optimisé par ORT (`Attention` +
+> `SkipLayerNormalization` + `FastGelu` fusionnés). Elles déclaraient
+> `LEMBED_QUANTIZATION_STATIC` avec une description « Quantized », donc
+> `quantization="static"` renvoyait des poids float16 — **9,5x plus lent** que
+> FP32, ce qu'un lecteur d'une version antérieure de ce tableau aurait conclu de
+> « l'INT8 ». Le FP16 est le cas pathologique sur un CPU sans arithmétique FP16
+> native : le fichier est divisé par deux, puis le calcul revient en FP32. Le
+> registre déclare maintenant ces entrées `LEMBED_QUANTIZATION_FP16`, les
+> descriptions disent FP16, et `quantization="static"` échoue proprement via
+> `ModelNotFoundError` au lieu de renvoyer silencieusement du float16.
+>
+> L'export INT8 authentique de `bge-small-en-v1.5` est
+> `onnx-community/bge-small-en-v1.5-ONNX` (`onnx/model_quantized.onnx`, 33 Mo,
+> 144 initialiseurs `INT8` + 6 `UINT8`, 72 `MatMulInteger` alimentés par 48
+> `DynamicQuantizeLinear`). Il est enregistré sous
+> `LEMBED_TEXT_BGE_SMALL_EN_V15_INT8` et c'est lui que mesure la ligne INT8
+> ci-dessus.
+>
+> Lancez `python benchmarks/verify_quantization_modes.py` pour vérifier, pour
+> chaque entrée du registre, que le mode déclaré correspond aux dtypes
+> réellement présents dans son fichier. Il remonte 0 incohérence ; avant le
+> correctif `fp16` il en remontait 4.
+
+- **La précision n'est pas mesurée ici.** Les embeddings INT8 dynamiques varient
+  légèrement avec la composition du batch (cosinus ~0,984 face à la référence
+  FP32). Validez sur votre propre corpus avant de basculer un index critique.
+- **Le pic RAM est une vraie mesure.** Chaque configuration a tourné seule, donc
+  la marque haute du jeu résident lui appartient. Il dépasse le fichier de poids
+  parce qu'ONNX Runtime mappe le fichier en mémoire et alloue sa propre arène
+  par-dessus — mais *l'écart* entre configurations est réel, et il varie dans le
+  même sens que le fichier de poids pour les deux modèles.
+- **Le gain fiable reste le disque, le cache et le téléchargement** — la vraie
+  contrainte en image de conteneur, en installation hors-ligne et en démarrage
+  à froid.
+
+#### Résultats détaillés par batch
+
+`BAAI/bge-small-en-v1.5` :
+
+| Batch | Variante | docs/s | ms/doc | Poids | Pic RAM | vs FP32 |
+|-------|----------|--------|--------|-------|---------|---------|
+| 8 | FP32 (`none`) | 48,2 | 20,75 | 126,9 Mo | 249 Mo | — |
+| 8 | INT8 (`dynamic`) | 98,0 | 10,21 | 32,2 Mo | 120 Mo | 2,0x plus rapide |
+| 8 | FP16 | 5,0 | 198,99 | 63,4 Mo | 178 Mo | 9,6x plus lent |
+| 32 | FP32 (`none`) | 50,5 | 19,82 | 126,9 Mo | 249 Mo | — |
+| 32 | INT8 (`dynamic`) | 103,5 | 9,66 | 32,2 Mo | 120 Mo | 2,0x plus rapide |
+| 32 | FP16 | 5,0 | 201,47 | 63,4 Mo | 177 Mo | 10,1x plus lent |
+| 64 | FP32 (`none`) | 47,4 | 21,10 | 126,9 Mo | 249 Mo | — |
+| 64 | INT8 (`dynamic`) | 95,5 | 10,47 | 32,2 Mo | 120 Mo | 2,0x plus rapide |
+| 64 | FP16 | 5,0 | 199,18 | 63,4 Mo | 177 Mo | 9,5x plus lent |
+| 128 | FP32 (`none`) | 47,8 | 20,91 | 126,9 Mo | 249 Mo | — |
+| 128 | INT8 (`dynamic`) | 90,5 | 11,06 | 32,2 Mo | 120 Mo | 1,9x plus rapide |
+| 128 | FP16 | 5,0 | 200,67 | 63,4 Mo | 178 Mo | 9,6x plus lent |
+
+`sentence-transformers/all-MiniLM-L6-v2` :
+
+| Batch | Variante | docs/s | ms/doc | Poids | Pic RAM | vs FP32 |
+|-------|----------|--------|--------|-------|---------|---------|
+| 8 | FP32 (`none`) | 97,1 | 10,30 | 86,2 Mo | 206 Mo | — |
+| 8 | INT8 (`dynamic`) | 172,4 | 5,80 | 21,9 Mo | 118 Mo | 1,8x plus rapide |
+| 32 | FP32 (`none`) | 96,3 | 10,38 | 86,2 Mo | 206 Mo | — |
+| 32 | INT8 (`dynamic`) | 165,0 | 6,06 | 21,9 Mo | 118 Mo | 1,7x plus rapide |
+| 64 | FP32 (`none`) | 90,5 | 11,05 | 86,2 Mo | 206 Mo | — |
+| 64 | INT8 (`dynamic`) | 151,7 | 6,59 | 21,9 Mo | 117 Mo | 1,7x plus rapide |
+| 128 | FP32 (`none`) | 99,6 | 10,04 | 86,2 Mo | 206 Mo | — |
+| 128 | INT8 (`dynamic`) | 164,0 | 6,10 | 21,9 Mo | 118 Mo | 1,6x plus rapide |
+
+#### Comment lire ces chiffres
+
+- **Le pic RAM est mesuré, pas écarté.** Chaque configuration a tourné dans son
+  propre processus, donc la marque haute du jeu résident lui appartient. Il
+  dépasse le fichier de poids parce qu'ONNX Runtime mappe le fichier en mémoire
+  et alloue sa propre arène par-dessus — 118 Mo pour un fichier de 21,9 Mo,
+  249 Mo pour un fichier de 126,9 Mo — mais *l'écart* entre configurations est
+  réel.
+- **La variabilité entre deux exécutions est de l'ordre de 10 %.** La référence
+  MiniLM FP32 batch 64 a été mesurée à 82,7, 89,0, 90,5 puis 99,6 docs/s sur la
+  même machine au cours de quatre exécutions. Traitez les faibles écarts comme du
+  bruit et les écarts d'ordre de grandeur (1,7x, 2,0x, 9,5x) comme réels ; les
+  tableaux affichent deux décimales parce que l'exécution brute le fait, pas
+  parce que le troisième chiffre est significatif.
+- **Le chemin quantifié est stable sur les batchs** (151,7 à 172,4 docs/s sur
+  MiniLM, 90,5 à 103,5 sur BGE) : la taille de batch n'est donc pas ce qui
+  pilote la comparaison. Une exécution antérieure montrait un effondrement du
+  mode `dynamic` de MiniLM à 112,1 docs/s au batch 128 ; cela ne s'est pas
+  reproduit, et c'est le type de valeur aberrante que la variabilité de ~10 %
+  explique.
+- **Tous les modes n'existent pas pour tous les modèles.** Le registre propose
+  exactement `dynamic` (vrai INT8) pour MiniLM, et `none` + `dynamic` + `fp16`
+  pour `bge-small-en-v1.5`. Aucun modèle n'a d'entrée `static` (INT8 avec
+  calibration). Les combinaisons absentes sont déclarées *non mesurées* avec les
+  modes disponibles, jamais comme un échec.
+- **`quantization=` sélectionne les poids, pas seulement les options de session.**
+  Chaque variante quantifiée est sa propre entrée de registre avec son propre
+  `model_file`, et le mode demandé est résolu *avant* la création de la session.
+  Si le modèle n'a pas d'entrée dans ce mode, la création échoue avec
+  `LEMBED_ERROR_MODEL_NOT_FOUND` (Python : `ModelNotFoundError`) en indiquant les
+  modes réellement disponibles :
+
+  ```python
+  from libembedding import TextEmbedding
+
+  # Résolu vers l'entrée de registre qui fournit le mode demandé
+  TextEmbedding("sentence-transformers/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="dynamic")   # vrai INT8
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="fp16")      # float16
+
+  # Nommer directement le dépôt est équivalent et sans ambiguïté —
+  # c'est ce que fait le benchmark
+  TextEmbedding("Xenova/all-MiniLM-L6-v2", quantization="dynamic")
+  TextEmbedding("onnx-community/bge-small-en-v1.5-ONNX", quantization="dynamic")
+  ```
+
+  Demander un mode qu'un modèle n'a pas est une erreur, pas un repli silencieux :
+
+  ```python
+  TextEmbedding("BAAI/bge-small-en-v1.5", quantization="static")
+  # ModelNotFoundError: Model 'BAAI/bge-small-en-v1.5' has no 'static'
+  # variant (available: dynamic, fp16, none)
+  ```
+
+  En C, l'enum de modèle sélectionne l'entrée, ou le champ `quantization` des
+  options v2 :
+
+  ```c
+  opts.model = LEMBED_TEXT_BGE_SMALL_EN_V15_INT8;  /* ou ..._Q pour le FP16 */
+  ```
+
+  Cette résolution n'a pas toujours existé : le mode était simplement marqué sur
+  le contexte sans changer le fichier chargé. C'est pourquoi le benchmark archivé
+  du 2026-09-27 est sans valeur — il mesurait les mêmes poids FP32 sous trois
+  étiquettes, et l'exécution du 2026-09-29 publiée avant le correctif est
+  également sans valeur. L'exécution du 2026-10-01 ci-dessus est la première qui
+  résout les entrées de registre *et* mesure un vrai fichier INT8.
+
+  Deux réserves : `quantization="auto"` ne sélectionne **aucun** poids (il charge
+  l'entrée FP32 par défaut alors que `.quantization` rapporte `"auto"`) —
+  utilisez `preferred_quantization="auto"` pour une auto-sélection mesurée. Et
+  `Reranker(quantization=...)` ne résout pas non plus une variante : passez le nom
+  de l'entrée quantifiée, `jinaai/jina-reranker-v1-turbo-en-quantized`.
+
+- **La qualité n'est pas mesurée ici.** Les embeddings INT8 dynamiques varient
+  légèrement selon la composition du batch (cos ≈ 0,984 face à la référence
+  FP32). À valider sur votre propre corpus avant de basculer un index critique ;
+  l'INT8 statique (`_Q`) est le choix par défaut le plus sûr.
+
+Rapport complet, bloc d'environnement inclus, archivé verbatim dans
+`docs/archive/benchmarks/quantization-2026-10-01/` : chaque chiffre publié
+ci-dessus s'y retrouve ligne à ligne.
+`benchmarks/quantization/results.html` n'est que le chemin de sortie du
+benchmark, écrasé à chaque exécution. Les exécutions antérieures sont archivées
+dans `quantization-2026-09-27/`, `quantization-2026-09-29/` et
+`quantization-2026-09-30/` ; toutes trois sont sans valeur — la première
+mesurait des poids FP32 sous trois étiquettes, la deuxième précède le correctif
+de sélection de variante, la troisième mesurait des fichiers FP16 en les nommant
+INT8. Une exécution incomplète est archivée dans
+`quantization-2026-09-30-partial/`.
+
+```bash
+# Chaque variante tourne dans son propre sous-processus : le pic mémoire est
+# attribuable et une configuration qui crash n'entraîne pas le benchmark.
+python benchmarks/quantization/bench_quantization.py --num-texts 1000
+```
+
 ---
 
 ## Bonnes pratiques
@@ -5757,7 +6711,11 @@ model = TextEmbedding("/path/to/model.Q4_K_M.gguf")
 embeddings = model.embed(["Hello world"])
 ```
 
-Utilisez `TextEmbedding.supports_llamacpp()` pour vérifier si le backend llama.cpp est disponible à l'exécution.
+Le routage se fait dans le constructeur : `_is_gguf_model()` reconnaît l'extension
+`.gguf` et bascule sur le backend llama.cpp. Il n'existe **pas** de méthode
+`TextEmbedding.supports_llamacpp()` côté Python ; pour savoir si le backend est
+disponible à l'exécution, utilisez `detect_backend(model_name)` ou l'appel C
+`lembed_llama_backend_available()`.
 
 ### Auto-tuning workers (llama.cpp)
 
@@ -5988,7 +6946,7 @@ Pour des performances optimales :
 1. **Réutilisez le modèle** — créez-le une fois et embeds plusieurs batchs
 2. **Ajustez `batch_size`** — augmentez jusqu'à saturation mémoire
 3. **Utilisez un provider GPU** — `cuda`, `coreml`, ou `directml`
-4. **Activez la quantification** — choisissez les modèles `_Q` pour une inférence plus rapide
+4. **Activez la quantification** — choisissez les modèles `_Q` pour diviser la taille sur disque par 2 à 4 (l'effet sur le débit dépend du modèle : mesurez-le, voir [Performance](performance_tuning.html#quantification--fp32-vs-int8))
 5. **Désactivez la progression** — `show_download_progress=False` pour les scripts
 
 ## Scheduler de batching dynamique (llama.cpp)
@@ -6653,8 +7611,23 @@ Ce module gère le téléchargement et la résolution des modèles (ONNX et GGUF
 | Fonction | Retour | Description |
 |----------|--------|-------------|
 | `lembed_ensure_text_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | S'assurer qu'un modèle texte est en cache |
-| `lembed_resolve_gguf_path(model_name, out_path)` | `lembed_status_t` | Résoudre le chemin d'un modèle GGUF |
-| `lembed_download_model(model_code, dest_dir, progress)` | `lembed_status_t` | Télécharger un modèle |
+| `lembed_ensure_sparse_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Idem pour un modèle sparse |
+| `lembed_ensure_image_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Idem pour un modèle image |
+| `lembed_ensure_reranker_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Idem pour un reranker |
+| `lembed_ensure_gguf_model(repo, filename, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Idem pour un modèle GGUF |
+| `lembed_resolve_gguf_path(name_or_path, cache_dir, offline, model_path_out)` | `lembed_status_t` | Résoudre le chemin d'un `.gguf` (chemin, URL ou nom de registre) |
+| `lembed_cleanup_model_cache(cache_dir, keep_models, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purger le cache, en gardant une liste de modèles |
+| `lembed_cleanup_model_cache_except(cache_dir, active_model_dir, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purger le cache sauf le modèle actif |
+| `lembed_free_string(s)` | `void` | Libérer une chaîne allouée par la bibliothèque |
+
+> Il n'existe **pas** de `lembed_download_model()` : le téléchargement passe
+> toujours par une fonction `lembed_ensure_*`. Le préfixe `ensure` signifie
+> « téléchargement si absent, sinon no-op ».
+>
+> `lembed_resolve_gguf_path()` est déclarée dans cet en-tête et implémentée dans
+> le bloc `LIBEMBEDDING_IMPLEMENTATION`. Elle est bien exportée par
+> `libembedding.def` (ligne 156), donc utilisable aussi bien en DLL Windows qu'en
+> compilation header-only.
 
 ## `lembed_ensure_text_model()`
 
@@ -6685,12 +7658,21 @@ Ce module permet d'interagir avec le backend llama.cpp pour les modèles GGUF.
 
 ## Fonctions
 
+L'en-tête n'expose que deux fonctions :
+
 | Fonction | Retour | Description |
 |----------|--------|-------------|
 | `lembed_llama_backend_available()` | `int` (1=yes, 0=no) | Vérifier la disponibilité |
-| `lembed_llama_version()` | `const char*` | Version de llama.cpp |
-| `lembed_llama_set_logging(enable)` | `void` | Activer/désactiver les logs |
-| `lembed_llama_get_n_gpu_layers(model_name)` | `int` | Nombre de couches GPU |
+| `lembed_llama_version()` | `const char*` | Identifiant du backend |
+
+> `lembed_llama_version()` ne renvoie pas un numéro de version : l'implémentation
+> actuelle retourne la chaîne littérale `"llama.cpp enabled"`. Ne l'utilisez pas
+> pour détecter une version.
+>
+> Il n'existe **pas** de `lembed_llama_set_logging()` ni de
+> `lembed_llama_get_n_gpu_layers()` dans cette API. Le nombre de couches GPU se
+> règle via les options du modèle (`LEMBED_BACKEND_LLAMACPP` et
+> `n_gpu_layers`), et les logs via la configuration de llama.cpp elle-même.
 
 ## Exemple
 
@@ -6726,7 +7708,7 @@ Ce module définit les codes de statut et la gestion des erreurs thread-local.
 | `0` | `LEMBED_OK` | Succès |
 | `1` | `LEMBED_ERROR_INVALID_ARGUMENT` | Argument invalide |
 | `2` | `LEMBED_ERROR_OUT_OF_MEMORY` | Mémoire insuffisante |
-| `3` | `LEMBED_ERROR_RUNTIME` | Erreur runtime (ONNX Runtime) |
+| `3` | `LEMBED_ERROR_ONNX_RUNTIME` | Erreur ONNX Runtime |
 | `4` | `LEMBED_ERROR_TOKENIZER` | Erreur de tokenizer |
 | `5` | `LEMBED_ERROR_DOWNLOAD` | Erreur de téléchargement |
 | `6` | `LEMBED_ERROR_IO` | Erreur d'entrée/sortie |
@@ -6734,13 +7716,25 @@ Ce module définit les codes de statut et la gestion des erreurs thread-local.
 | `8` | `LEMBED_ERROR_UNSUPPORTED` | Fonctionnalité non supportée |
 | `9` | `LEMBED_ERROR_BATCH_SIZE` | Taille de batch invalide |
 | `10` | `LEMBED_ERROR_LLAMA` | Erreur llama.cpp |
+| `11` | `LEMBED_ERROR_CACHE_MISS` | Cache miss |
+
+> `LEMBED_ERROR_BATCH_SIZE` est conservé dans l'enum mais **plus aucune ligne de
+> code ne le retourne** : la garde qui le produisait a été retirée, la
+> quantification dynamique accepte de nouveau le batching. Il reste dans l'API
+> pour ne pas rompre l'ordre des valeurs (l'ABI et le mapping Python
+> `_STATUS_MAP` en dépendent).
 
 ## Fonctions de gestion d'erreur
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
 | `lembed_last_error()` | `const char*` | Dernier message d'erreur (thread-local) |
-| `lembed_status_to_string(status)` | `const char*` | Nom du code d'erreur |
+| `lembed_status_message(status)` | `const char*` | Message du code d'erreur |
+| `lembed_version()` | `const char*` | Version de la bibliothèque |
+
+> La fonction porte le nom `lembed_status_message()`, **pas**
+> `lembed_status_to_string()`. Le préfixe `LEMBED_ERROR_` des constantes ne se
+> retrouve pas non plus dans les noms de fonctions.
 
 ## Exemple
 
@@ -6750,7 +7744,7 @@ Ce module définit les codes de statut et la gestion des erreurs thread-local.
 lembed_status_t status = lembed_text_embedding_create(...);
 if (status != LEMBED_OK) {
     printf("Error: %s\n", lembed_last_error());
-    printf("Code: %s\n", lembed_status_to_string(status));
+    printf("Code: %d (%s)\n", status, lembed_status_message(status));
 }
 ```
 
@@ -6833,14 +7827,51 @@ Ce module permet de sélectionner automatiquement le meilleur modèle et la meil
 
 | Type | Description |
 |------|-------------|
-| `lembed_model_selection_t` | Résultat de la sélection de modèle |
+| `lembed_model_selection_t` | Résultat de la sélection de modèle (déclaré dans `autotuner.h`) |
+| `lembed_use_case_t` | Cas d'utilisation |
+| `lembed_model_candidate_t` | Candidat modèle |
+| `lembed_hardware_info_t` | **Déprécié** — matériel détecté |
 
 ## Fonctions
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
 | `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Sélectionner un modèle automatiquement |
-| `lembed_detect_hardware(hw)` | `lembed_status_t` | Détecter le hardware |
+| `lembed_model_select(logical_cores, ram_mb, use_case, out_selected)` | `int` | Choisir un candidat à partir d'une configuration matérielle donnée |
+| `lembed_detect_hardware(out_info)` | `int` | **Déprécié** — détecter le matériel |
+
+> `lembed_detect_hardware()` retourne un **`int`**, pas un `lembed_status_t` : son
+> implémentation convertit `lembed_cache_detect_hardware()` et renvoie 0 en cas
+> d'échec. Utilisez `lembed_cache_detect_hardware(lembed_cache_hardware_info_t*)`
+> à la place — c'est ce que la documentation de l'en-tête recommande.
+
+## `lembed_use_case_t`
+
+| Constante | Description |
+|-----------|-------------|
+| `LEMBED_USE_CASE_SPEED` | Optimisé pour la vitesse |
+| `LEMBED_USE_CASE_QUALITY` | Optimisé pour la qualité |
+| `LEMBED_USE_CASE_BALANCED` | Compromis (défaut) |
+
+## `lembed_model_candidate_t`
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `model_name` | `char[256]` | Nom du modèle (ex. `"BAAI/bge-small-en-v1.5"`) |
+| `dim` | `int` | Dimension d'embedding |
+| `max_length` | `int` | Longueur maximale en tokens |
+| `pooling` | `int` | `LEMBED_POOLING_CLS` ou `LEMBED_POOLING_MEAN` |
+| `estimated_ram_mb` | `int` | RAM estimée (Mo) |
+| `estimated_throughput` | `double` | Débit estimé (docs/s) |
+
+## `lembed_hardware_info_t` (déprécié)
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `cpu_model` | `char[256]` | Modèle du CPU |
+| `physical_cores` | `int` | Cœurs physiques |
+| `logical_cores` | `int` | Cœurs logiques |
+| `ram_mb` | `int` | RAM totale (Mo) |
 
 ## `lembed_model_selection_t`
 
@@ -6859,16 +7890,19 @@ Ce module permet de sélectionner automatiquement le meilleur modèle et la meil
 
 ## Cas d'utilisation
 
-| Valeur | Description |
-|--------|-------------|
-| `"speed"` | Optimisé pour la vitesse |
-| `"quality"` | Optimisé pour la qualité |
-| `"balanced"` | Compromis (défaut) |
+`lembed_auto_select_model()` prend une **chaîne**, pas l'enum :
+
+| Chaîne | Constante équivalente | Description |
+|--------|----------------------|-------------|
+| `"speed"` | `LEMBED_USE_CASE_SPEED` | Optimisé pour la vitesse |
+| `"quality"` | `LEMBED_USE_CASE_QUALITY` | Optimisé pour la qualité |
+| `"balanced"` | `LEMBED_USE_CASE_BALANCED` | Compromis (défaut) |
 
 ## Exemple
 
 ```c
 #include <libembedding/model_selector.h>
+#include <libembedding/autotuner.h>
 
 lembed_model_selection_t result;
 lembed_status_t status = lembed_auto_select_model("balanced", &result);
@@ -6876,6 +7910,12 @@ if (status == LEMBED_OK) {
     printf("Model: %s\n", result.model_code);
     printf("Workers: %d, Threads: %d, Batch: %d\n",
         result.workers, result.threads, result.batch_size);
+}
+
+// Sélection à partir d'un matériel connu, sans sonder la machine
+lembed_model_candidate_t chosen;
+if (lembed_model_select(8, 16384, LEMBED_USE_CASE_SPEED, &chosen) > 0) {
+    printf("Choisi: %s (%d dim)\n", chosen.model_name, chosen.dim);
 }
 ```
 
@@ -6913,16 +7953,54 @@ Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
-| `lembed_autotune(model_code, mode, out)` | `lembed_status_t` | Auto-tuner un modèle texte |
-| `lembed_autotune_custom(model_code, texts, n, mode, out)` | `lembed_status_t` | Auto-tuner avec corpus custom |
-| `lembed_autotune_unified(task, model_code, mode, out)` | `lembed_status_t` | Auto-tuner unifié (tous types) |
-| `lembed_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune |
-| `lembed_reranker_autotune(model_code, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker |
-| `lembed_reranker_autotune_constrained(model_code, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
-| `lembed_reranker_auto_config(model_code, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
-| `lembed_reranker_auto_config_profile(model_code, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
-| `lembed_sparse_autotune(model_code, mode, out)` | `lembed_status_t` | Auto-tuner un modèle sparse |
-| `lembed_image_autotune(model_code, mode, out)` | `lembed_status_t` | Auto-tuner un modèle image |
+| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle texte |
+| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Auto-tuner avec corpus custom |
+| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Auto-tuner unifié (tous types) |
+| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Auto-tuner unifié avec budget de latence |
+| `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Sélectionner le meilleur modèle pour la machine |
+| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle sparse |
+| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle image |
+| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker |
+| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker sur un corpus fourni |
+| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
+| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
+| `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
+
+> **Les deux formes du nom sont acceptées.** Le registre donne à chaque modèle
+> deux chaînes différentes — le dépôt HuggingFace (`model_code`,
+> `Qdrant/all-MiniLM-L6-v2-onnx`) et le nom canonique (`model_name`,
+> `sentence-transformers/all-MiniLM-L6-v2`). Tous les points d'entrée de
+> l'autotune résolvent l'une ou l'autre via `lembed_resolve_text_model()` /
+> `lembed_resolve_reranker_model()`, et l'identité de cache est toujours la
+> forme `model_code`. Un appel avec l'une des deux trouve le même modèle et purge
+> les mêmes entrées.
+>
+> Résolution : correspondance exacte sur `model_code` d'abord, puis sur
+> `model_name`. Conséquence utile : un dépôt appartient à une seule entrée, donc
+> `Xenova/all-MiniLM-L6-v2` (le dépôt INT8) sélectionne l'entrée quantifiée,
+> tandis que le nom canonique, qui ne porte pas de mode, sélectionne la première
+> entrée le déclarant — la version FP32. Un nom inconnu renvoie `-1` avec une
+> erreur, jamais l'entrée 0.
+>
+> Ce comportement aligne le C sur ce que les bindings Python font déjà dans
+> `resolve_text_model()`, et sur ce que le benchmark reranker faisait déjà de son
+> côté. Auparavant, `lembed_autotune` exigeait le dépôt HF alors que la note
+> annonçait le nom canonique : les deux exemples se contredisaient.
+>
+> `lembed_find_text_model_variant()` (plus bas) reste volontairement stricte :
+> elle apparie sur le **nom canonique**, parce que c'est le seul moyen de
+> désigner « ce modèle, dans ce mode de quantification » sans ambiguïté.
+>
+> Les deux champs sont décrits par `lembed_model_info_t` dans
+> `include/libembedding/model_registry.h`.
+
+## Effacement du cache
+
+| Fonction | Retour | Description |
+|----------|--------|-------------|
+| `lembed_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune texte ; `NULL` = tout le cache |
+| `lembed_reranker_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune reranker ; `NULL` = tout le cache reranker |
+| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Dispatcher vers le cache de la tâche |
 
 ## Tâches unifiées
 
@@ -6941,6 +8019,71 @@ Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (
 | `LEMBED_OBJECTIVE_THROUGHPUT` | Maximiser le débit |
 | `LEMBED_OBJECTIVE_BALANCED` | Compromis |
 | `LEMBED_OBJECTIVE_MEMORY` | Minimiser la mémoire |
+
+## Cache d'autotuning
+
+Les résultats sont persistés sous `%LOCALAPPDATA%\libembedding\autotune\`
+(`$HOME/.cache/libembedding/autotune` hors Windows, et
+`./libembedding_autotune_cache` en dernier recours si aucune de ces variables
+n'est définie). Les rerankers ont un sous-répertoire `reranker/` séparé.
+
+Une entrée n'est réutilisée que si son identité correspond **intégralement** :
+modèle, variante, empreinte du corpus, objectif et mode. Un résultat obtenu sur
+un corpus n'est donc jamais renvoyé pour un autre, et un fichier illisible ou
+corrompu est traité comme un cache miss.
+
+| Libellé de variante | Utilisé par |
+|---------------------|-------------|
+| `synthetic` | Tuning texte par défaut, sur corpus synthétique |
+| `custom` | Tuning texte ou reranker sur un corpus fourni |
+| `default` | Tuning reranker par défaut, sur corpus synthétique |
+
+Attention : le libellé par défaut **n'est pas le même** pour le texte
+(`synthetic`, dans `autotune_bench_text.hpp`) et pour le reranker (`default`, via
+`default_reranker_identity()` dans `autotune_bench_reranker.hpp`). Rien dans la
+sélection de variante ne dépend de ces libellés : `lembed_find_text_model_variant()`
+compare le mode de quantification et le `model_name`, pas `synthetic`/`custom`.
+
+L'identité inclut aussi une empreinte matérielle et logicielle (marque CPU,
+cœurs logiques et physiques, version majeure/mineure d'ONNX Runtime, version
+majeure/mineure de libembedding), de sorte qu'un résultat mesuré sur une autre
+machine ou après un changement de version n'est jamais resservi.
+
+`lembed_autotune_clear_cache(model_name)` supprime toutes les entrées d'un modèle
+(toutes variantes confondues) ; `lembed_reranker_autotune_clear_cache(model_name)`
+fait de même pour les rerankers. Passer `NULL` vide le cache correspondant en
+entier. Les entrées sont appariées sur le champ `model` lu **dans** le fichier,
+et non sur le nom de fichier, qui est un hash de l'empreinte matérielle.
+
+> **À ne pas confondre** avec le cache bas niveau `tune_cache.json` et l'API
+> `lembed_tune_cache_*` (`lembed_tune_cache_load`, `lembed_tune_cache_save`,
+> `lembed_tune_cache_clear`, voir [Autotune cache](autotune_cache.md)), qui sont
+> indexés par empreinte matérielle + logiciel + modèle + backend et ne sont pas
+> pilotés par `lembed_autotune_clear_cache`.
+
+## Fonction connexe : résolution de variante de quantification
+
+`lembed_find_text_model_variant(model_name, quantization)` n'est **pas** une
+fonction d'autotuning : elle appartient à l'API registre
+(`include/libembedding/model_registry.h`), et n'a pas encore de page dédiée
+dans cette documentation.
+
+| Fonction | Retour | Description |
+|----------|--------|-------------|
+| `lembed_find_text_model_variant(model_name, quantization)` | `int` | Résout une demande de quantification vers l'entrée de registre qui la fournit. Retourne l'index, ou `-1` avec `lembed_last_error()` nommant le mode demandé et les modes disponibles. |
+| `lembed_resolve_text_model(model)` | `int` | Résout un modèle donné par son dépôt HF **ou** son nom canonique vers son entrée. `-1` + erreur si inconnu. |
+| `lembed_resolve_reranker_model(model)` | `int` | Idem pour les rerankers. |
+
+Ces deux résolveurs sont ceux qu'utilisent les fonctions d'autotune ci-dessus.
+
+La comparaison se fait sur `model_name` (nom canonique), pas sur `model_code` :
+passer un dépôt HuggingFace ne correspond à aucune entrée.
+
+`LEMBED_QUANTIZATION_AUTO` n'est pas une sélection de poids : aucune entrée du
+registre ne porte ce mode, donc la fonction retourne toujours `-1` — **et pose
+malgré tout une erreur thread-local**, comme n'importe quel mode introuvable.
+`lembed_text_embedding_create_v2` n'appelle cette fonction que pour un mode
+explicitement demandé, jamais pour `AUTO`.
 
 ## Exemple
 
@@ -6974,24 +8117,43 @@ Rendu: https://dorel14.github.io/libembedding-ng/c_api/worker_autotune.html
 
 Ce module détecte la configuration optimale de workers et sessions pour le backend llama.cpp.
 
+## Types
+
+| Type | Description |
+|------|-------------|
+| `lembed_worker_config_t` | Configuration worker optimale détectée |
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `optimal_workers` | `int` | Nombre de workers recommandé |
+| `optimal_threads` | `int` | Nombre de threads recommandé |
+| `physical_cores` | `int` | Cœurs physiques détectés |
+| `logical_cores` | `int` | Cœurs logiques détectés |
+
 ## Fonctions
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
-| `lembed_detect_optimal_workers(model, n_threads, n_sessions)` | `void` | Détecter workers optimaux |
-| `lembed_recommended_workers_for_model(model_name)` | `int` | Workers recommandés pour un modèle |
+| `lembed_detect_optimal_workers()` | `lembed_worker_config_t` | Détecter la configuration worker/session optimale |
+| `lembed_recommended_workers_for_model(model_path)` | `int` | Nombre de workers recommandé pour un modèle |
+
+> `lembed_detect_optimal_workers()` ne prend **aucun argument** et retourne une
+> structure, pas un `void` : elle inspecte le matériel de la machine. La variante
+> qui prend un chemin de modèle est `lembed_recommended_workers_for_model()`, qui
+> retourne un simple `int`.
 
 ## Exemple
 
 ```c
 #include <libembedding/worker_autotune.h>
 
-int n_workers = lembed_recommended_workers_for_model("meta-llama/Llama-3-8B");
-printf("Recommended workers: %d\n", n_workers);
+lembed_worker_config_t cfg = lembed_detect_optimal_workers();
+printf("workers: %d, threads: %d (physical=%d, logical=%d)\n",
+       cfg.optimal_workers, cfg.optimal_threads,
+       cfg.physical_cores, cfg.logical_cores);
 
-// Détection fine
-int threads, sessions;
-lembed_detect_optimal_workers("meta-llama/Llama-3-8B", &threads, &sessions);
+// Recommandation spécifique à un modèle
+int workers = lembed_recommended_workers_for_model("meta-llama/Llama-3-8B");
 ```
 
 ## Voir aussi
@@ -7016,58 +8178,75 @@ Ce module fournit le benchmark de modèles avec scoring Pareto, contraintes et r
 | `lembed_benchmark_result_t` | Résultat d'un benchmark |
 | `lembed_backend_config_t` | Configuration backend pour benchmark |
 | `lembed_benchmark_metrics_t` | Métriques de benchmark |
-| `lembed_benchmark_hardware_info_t` | Informations hardware |
+| `lembed_benchmark_weights_t` | Poids de scoring (qualité / débit / coût) |
+| `lembed_benchmark_constraints_t` | Contraintes dures (plafonds) |
+| `lembed_corpus_type_t` | Catégorie de corpus de test |
+
+> Le type de hardware n'est pas `lembed_benchmark_hardware_info_t` : il s'agit de
+> `lembed_cache_hardware_info_t`, déclaré dans `autotune_cache.h`, avec
+> `lembed_cache_detect_hardware()` et `lembed_cache_detect_software()`.
 
 ## Fonctions
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
-| `lembed_benchmark_run(model, backend, corpus, config, result)` | `lembed_status_t` | Exécuter un benchmark |
-| `lembed_benchmark_autotune(model, backend, objective, result)` | `lembed_status_t` | Benchmark avec autotune |
-| `lembed_benchmark_detect_hardware(hw)` | `lembed_status_t` | Détecter le hardware |
+| `lembed_benchmark_run(model_path, backend, corpus_type, config, result)` | `lembed_status_t` | Exécuter un benchmark |
+| `lembed_benchmark_compare(onnx_path, gguf_path, corpus_type, results)` | `int` | Même modèle sur les deux backends (0 à 2 résultats) |
+| `lembed_benchmark_autotune(model_path, backend, objective, result)` | `lembed_status_t` | Benchmark avec autotune |
+| `lembed_benchmark_select_model(model_dir, objective, constraints, weights, result)` | `lembed_status_t` | Contraintes dures puis front de Pareto puis scoring |
+| `lembed_benchmark_detect_sessions(model_path, max_sessions, optimal, throughput)` | `lembed_status_t` | Détecter le nombre de sessions optimal |
+| `lembed_benchmark_get_corpus(type, out_texts, out_count)` | `lembed_status_t` | Récupérer le corpus de test (statique, ne pas libérer) |
+| `lembed_benchmark_default_cache_dir()` | `const char*` | Répertoire de cache GGUF par défaut |
+| `lembed_benchmark_profile_weights(obj)` | `lembed_benchmark_weights_t` | Poids normalisés pour un objectif |
+| `lembed_benchmark_custom_weights(q, t, c)` | `lembed_benchmark_weights_t` | Poids personnalisés, renormalisés |
+
+> `lembed_benchmark_detect_hardware()` **n'existe pas** : la détection
+> matérielle est `lembed_cache_detect_hardware(lembed_cache_hardware_info_t*)`.
 
 ## `lembed_benchmark_metrics_t`
 
 | Champ | Type | Description |
 |-------|------|-------------|
-| `throughput_docs_sec` | `double` | Débit (docs/s) |
-| `latency_p50_ms` | `double` | Latence médiane (ms) |
-| `latency_p95_ms` | `double` | Latence P95 (ms) |
-| `load_time_ms` | `double` | Temps de chargement (ms) |
-| `peak_memory_mb` | `double` | Pic mémoire (Mo) |
+| `throughput_docs_sec` | `float` | Débit (docs/s) |
+| `latency_p50_ms` | `float` | Latence médiane (ms) |
+| `latency_p95_ms` | `float` | Latence P95 (ms) |
+| `load_time_ms` | `float` | Temps de chargement (ms) |
+| `peak_memory_mb` | `float` | Pic mémoire (Mo) |
 | `dim` | `int` | Dimension |
 | `num_texts` | `int` | Nombre de textes |
 | `num_errors` | `int` | Nombre d'erreurs |
 
+> Les métriques sont des **`float`**, pas des `double`.
+
 ## Corpus types
 
-| Constante | Description |
-|-----------|-------------|
-| `0` | Court (< 20 tokens) |
-| `1` | Moyen (20-80 tokens) |
-| `2` | Long (80-200 tokens) |
-| `3` | Très long (200+ tokens) |
-| `4` | Mélangé |
-| `5` | Multilingue |
-| `6` | Cas limites |
+| Constante | Valeur | Description |
+|-----------|--------|-------------|
+| `LEMBED_CORPUS_SHORT` | `0` | Court (< 20 tokens) |
+| `LEMBED_CORPUS_MEDIUM` | `1` | Moyen (20-80 tokens) |
+| `LEMBED_CORPUS_LONG` | `2` | Long (80-200 tokens) |
+| `LEMBED_CORPUS_VERY_LONG` | `3` | Très long (200+ tokens) |
+| `LEMBED_CORPUS_MIXED` | `4` | Mélangé |
+| `LEMBED_CORPUS_MULTILINGUAL` | `5` | Multilingue |
+| `LEMBED_CORPUS_EDGE_CASES` | `6` | Cas limites |
 
 ## Exemple
 
 ```c
 #include <libembedding/embedding_benchmark.h>
 
-lembed_benchmark_result_t result;
 lembed_backend_config_t config = {
-    .backend = "llama.cpp",
+    .backend = "onnx",     /* char[32], pas un pointeur */
     .num_threads = 4,
     .batch_size = 32,
     .workers = 1,
 };
 
+lembed_benchmark_result_t result;
 lembed_status_t status = lembed_benchmark_run(
-    "path/to/model.gguf",
-    "llama.cpp",
-    4,  // corpus type MIXED
+    "path/to/model.onnx",
+    "onnx",
+    LEMBED_CORPUS_MIXED,
     &config,
     &result
 );
@@ -7099,25 +8278,46 @@ Ce module gère la liste des modèles GGUF recommandés et leur configuration.
 | Fonction | Retour | Description |
 |----------|--------|-------------|
 | `lembed_list_gguf_models(out, count)` | `lembed_status_t` | Liste des modèles GGUF |
-| `lembed_find_gguf_model_by_name(name)` | `int` | Trouver un modèle GGUF par nom |
-| `lembed_get_gguf_model_info(model_idx, out)` | `lembed_status_t` | Infos d'un modèle GGUF |
-| `lembed_validate_gguf_path(path)` | `lembed_status_t` | Valider un chemin GGUF |
-| `lembed_resolve_gguf_path(model_name, out_path)` | `lembed_status_t` | Résoudre un chemin GGUF |
+| `lembed_find_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Chercher un modèle GGUF (NULL si inconnu) |
+| `lembed_default_gguf_model()` | `const lembed_gguf_model_info_t*` | Modèle GGUF recommandé par défaut |
+
+> Les deux fonctions de recherche retournent un **pointeur vers les données
+> statiques** — ne pas libérer. Il n'existe pas de
+> `lembed_get_gguf_model_info()` : on itère directement sur le tableau renvoyé
+> par `lembed_list_gguf_models()`. `lembed_resolve_gguf_path()` est déclarée
+> dans `downloader.h`, pas ici.
+
+## Champs de `lembed_gguf_model_info_t`
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `name` | `const char*` | Nom lisible (ex. `"Snowflake-XS-Q4"`) |
+| `gguf_url` | `const char*` | URL de téléchargement du `.gguf` |
+| `model_code` | `const char*` | Code HuggingFace d'origine |
+| `description` | `const char*` | Description courte |
+| `dim` | `int` | Dimension d'embedding |
+| `params_m` | `int` | Paramètres en millions |
+| `file_size_mb` | `int` | Taille approximative en Mo |
+| `quality_mteb` | `float` | Score MTEB Retrieval (NDCG@10), 0 si inconnu |
+| `recommended_sessions` | `int` | Nombre de sessions recommandé |
+
+> Le champ s'appelle `name`, **pas** `model_name`.
 
 ## Exemple
 
 ```c
 #include <libembedding/gguf_registry.h>
 
-const lembed_model_info_t **models;
+const lembed_gguf_model_info_t *models;
 int count;
 lembed_status_t status = lembed_list_gguf_models(&models, &count);
 if (status == LEMBED_OK) {
     printf("GGUF models available: %d\n", count);
     for (int i = 0; i < count; i++) {
-        printf("  %s (%s)\n",
-            models[i]->model_name,
-            models[i]->model_code);
+        printf("  %s (%s, %d dim)\n",
+            models[i]->name,
+            models[i]->model_code,
+            models[i]->dim);
     }
 }
 ```

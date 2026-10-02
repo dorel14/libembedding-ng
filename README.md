@@ -179,7 +179,7 @@ with minimal overhead (~13%).
 | Dependency | Required | Notes |
 |---|---|---|
 | **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
-| **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. |
+| **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. The snapshot is trimmed to what the `llama`/`ggml` targets need (`cmake/`, `ggml/`, `include/`, `src/`, `vendor/`, `LICENSE`); see `third_party/README.md`. |
 | **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). |
 | **cJSON** | Bundled | Included in `third_party/` |
 | **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |

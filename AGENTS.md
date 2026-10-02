@@ -2,7 +2,7 @@
 
 > **Fork** : [dorel14/libembedding](https://github.com/dorel14/libembedding) (fork de [pacifio/libembedding](https://github.com/pacifio/libembedding))  
 > **License** : MIT  
-> **Version courante** : 1.8.0  
+> **Version courante** : 1.8.1  
 > **Dernière mise à jour** : 2026-09-16
 
 ---
@@ -45,7 +45,8 @@ libembedding/
 ├── benchmarks/                    # Benchmarks C++ et Python
 ├── docs/                          # Documentation GitHub Pages (FR/EN)
 │   └── archive/                   # Documentation obsolète à archiver
-├── third_party/                   # Dépendances embarquées
+├── third_party/                   # Dépendances embarquées (voir third_party/README.md)
+│   ├── llama.cpp/                 # Backend GGUF — snapshot élagué (cmake/ ggml/ include/ src/ vendor/ LICENSE)
 │   ├── onnxruntime/               # ONNX Runtime (Windows)
 │   ├── stb/                       # stb_image / stb_image_resize
 │   ├── cJSON/                     # Parseur JSON
@@ -86,7 +87,7 @@ Les corrections de code doivent être faites en  mode 'edit', je ne tolère aucu
 | Dépendance | Requise | Notes |
 |---|---|---|
 | ONNX Runtime >= 1.16 | Oui | Bundlé dans les wheels et `third_party/onnxruntime/` sur Windows |
-| llama.cpp | Oui | Backend GGUF. Vendorisé dans `third_party/llama.cpp` et compilé via `add_subdirectory` (aucun téléchargement à la configure). |
+| llama.cpp | Oui | Backend GGUF. Vendorisé dans `third_party/llama.cpp` et compilé via `add_subdirectory` (aucun téléchargement à la configure). **Snapshot élagué** : seuls `CMakeLists.txt`, `LICENSE`, `AUTHORS`, `README.md`, `cmake/`, `ggml/`, `include/`, `src/`, `licenses/` et `vendor/` sont conservés (voir `third_party/README.md`). |
 | libcurl >= 7.0 | Non | Téléchargement de modèles. Désactivée avec `-DLIBEMBEDDING_NO_DOWNLOAD=ON` |
 | libcurl runtime DLL (Windows) | Non | Aucun binaire n'est versionné. Installer via `pwsh -File scripts/fetch_windows_libcurl.ps1` (curl-for-win, version déduite de `curlver.h`, SHA-256 épinglé) qui place `libcurl-x64.dll` dans `third_party/curl/bin/`. Sinon CMake échoue à la configure. |
 | cJSON | Oui | Bundlé dans `third_party/` |
@@ -111,6 +112,7 @@ cmake .. \
 - Les DLLs runtime (ONNX Runtime, libcurl, libembedding) sont copiées automatiquement à côté des exécutables via `copy_runtime_dlls()`.
 - Les chemins ONNX Runtime peuvent être surchargés via `ONNXRUNTIME_ROOT` ou les variables CMake `ONNXRuntime_INCLUDE_DIR` / `ONNXRuntime_LIBRARY`.
 - **DLL libcurl** : `third_party/curl` ne contient que les en-têtes et la lib d'import. La DLL (`libcurl-x64.dll`) s'installe avec `scripts/fetch_windows_libcurl.ps1` dans `third_party/curl/bin/` (gitignoré) ; CMake la résout (override `CURL_RUNTIME_DLL`, `third_party/curl/bin`, `CURL_LIBRARY` et son `../bin` type vcpkg, puis `python/src/libembedding/`) et échoue à la configure si elle est absente. Échappatoires : `-DLIBEMBEDDING_NO_DOWNLOAD=ON`, `-DLIBEMBEDDING_CURL_STATIC=ON`.
+- **Options llama.cpp épinglées** : le snapshot vendorisé est élagué, donc toute option amont pointant vers un dossier retiré est forcée à `OFF` dans le `CMakeLists.txt` racine (`LLAMA_BUILD_COMMON`, `LLAMA_BUILD_TOOLS`, `LLAMA_BUILD_APP`, `LLAMA_BUILD_MTMD`, `GGML_BUILD_TESTS`, `GGML_BUILD_EXAMPLES`, `GGML_OPENCL`, `GGML_WEBGPU`, `GGML_VIRTGPU`). Ne pas les passer à `ON` : le dossier correspondant n'existe plus et la configure échoue. `GGML_OPENCL` et `GGML_WEBGPU` sont les deux seuls backends dont les générateurs Python (`embed_kernel.py`, `embed_wgsl.py`) ont été conservés.
 - **Piège** : une DLL manquante produit `0xC0000135` (`STATUS_DLL_NOT_FOUND`) au démarrage ; `ctest` remonte ça comme un `Timeout` de 60 s. Exécuter le binaire directement (`exit=$LASTEXITCODE`) pour obtenir le vrai code.
 
 ---
@@ -290,6 +292,7 @@ Les agents doivent :
 | Oublier `SPDX-License-Identifier: MIT` | Requis dans tous les fichiers source du projet. |
 | Casser la compatibilité `cffi` | Les bindings Python dépendent de symboles exacts. Toute modification de l’API C doit être reflétée dans `python/src/libembedding/_cdefs.h`. |
 | Archiver un document toujours référencé | Vérifier les liens avant archivage. |
+| Remplacer `third_party/llama.cpp/` sans ré-élaguer | Le snapshot est versionné comme des fichiers ordinaires (pas de sous-module) : un bump réintroduit tout l'outillage amont. Relancer `pwsh -File scripts/prune_llama_cpp.ps1` puis la configure. |
 
 ---
 
@@ -299,6 +302,7 @@ Les agents doivent :
 - [ ] Les tests unitaires passent (`./run_tests.sh`).
 - [ ] Les fichiers python  passent  les tests  ruff sans aucuns problèmes.
 - [ ] La documentation (README, docs/) est à jour.
+- [ ] `llm.txt` / `llm_full.txt` régénérés si `README.md`, `docs/`, `examples/` ou `scripts/generate_llm_docs.py` ont changé.
 - [ ] Les commentaires de code sont présents pour les nouvelles fonctions publiques.
 - [ ] `SPDX-License-Identifier: MIT` est présent dans tous les fichiers modifiés.
 - [ ] Les versions C (`config.h`) et Python (`python/pyproject.toml`) sont synchronisées.
