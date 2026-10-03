@@ -3,9 +3,7 @@
 # pyright: reportAttributeAccessIssue=false,reportCallIssue=false
 from __future__ import annotations
 
-import contextlib
 import os
-import time
 import warnings
 
 import numpy as np  # pyright: ignore[reportMissingImports]
@@ -113,6 +111,7 @@ class TextEmbedding:
         self._dim = 0
         self._batch_size = batch_size
         self._quantization = "none"
+        self._quantization_reason = ""
 
         # Resolve preferred_quantization
         resolved_quant = quant_enum
@@ -125,6 +124,10 @@ class TextEmbedding:
                 )
                 if resolved_quant is None:
                     resolved_quant = lib.LEMBED_QUANTIZATION_NONE
+                self._quantization_reason = getattr(
+                    TextEmbedding, "_last_quantization_reason", ""
+                )
+                TextEmbedding._last_quantization_reason = ""
             else:
                 pq_enum = _QUANTIZATION_ENUM.get(preferred_quantization.lower())
                 if pq_enum is not None:
@@ -261,64 +264,56 @@ class TextEmbedding:
         offline: bool, show_download_progress: bool,
         cache_size: int, auto_workers: bool,
     ) -> int | None:
-        """Benchmark FP32/INT8-static/INT8-dynamic on a small corpus.
-        Returns the lembed_quantization_t enum value of the best mode."""
-        sample_texts = [
-            "Machine learning enables systems to learn from data.",
-            "Embeddings are dense vector representations of text.",
-            "The transformer architecture revolutionized NLP.",
-            "Natural language processing understanding text semantics.",
-            "Deep learning models learn hierarchical representations.",
-        ]
+        """Benchmark the quantization variants this model actually ships.
 
-        _QUANT_NAMES = {
-            "none": lib.LEMBED_QUANTIZATION_NONE,
-            "static": lib.LEMBED_QUANTIZATION_STATIC,
-            "dynamic": lib.LEMBED_QUANTIZATION_DYNAMIC,
-        }
-        _QUANT_KEYS = ["none", "static", "dynamic"]
+        Thin delegation to the C implementation, which is the one that matters:
+        it warms up separately from the timed run, sizes the corpus, skips
+        variants whose weights are absent instead of failing, and caches the
+        decision per (model, machine, library version).
 
-        best_name = _QUANT_KEYS[0]
-        best_tp = -1.0
+        The previous Python implementation benchmarked five texts with no warmup
+        and no cache, so it measured session construction rather than throughput,
+        re-ran on every single construction, and probed "static" -- a mode the
+        registry ships no variant for, so two of its three attempts always threw.
 
-        for qname in _QUANT_KEYS:
-            model = None
-            try:
-                model = TextEmbedding(
-                    model_name=model_name,
-                    provider=provider,
-                    threads=threads,
-                    batch_size=batch_size,
-                    offline=offline,
-                    show_download_progress=False,
-                    cache_dir=cache_dir,
-                    max_length=max_length,
-                    dim=dim,
-                    pooling=pooling,
-                    cache_size=0,
-                    quantization=qname,
-                    preferred_quantization="none",
-                )
-                start = time.perf_counter()
-                result = model.embed(sample_texts)
-                elapsed = time.perf_counter() - start
-                if elapsed > 0 and len(result) > 0:
-                    tp = len(result) / elapsed
-                    if tp > best_tp:
-                        best_tp = tp
-                        best_name = qname
-            except (LembedError, OSError, ValueError):
-                # A quantization mode that cannot be loaded or executed is
-                # simply not a candidate; keep probing the other modes.
-                continue
-            finally:
-                if model is not None:
-                    with contextlib.suppress(Exception):
-                        model.close()
-
-        if best_tp <= 0.0:
+        Returns the resolved ``lembed_quantization_t``, or None when nothing could
+        be measured, in which case the caller falls back to FP32.
+        """
+        try:
+            model_index = resolve_text_model(model_name)
+        except (LembedError, ValueError):
             return None
-        return _QUANT_NAMES[best_name]
+
+        choice = ffi.new("lembed_quantization_choice_t *")
+        try:
+            check_status(
+                lib.lembed_quantization_auto_select(
+                    model_index,
+                    int(threads),
+                    int(batch_size),
+                    # num_docs: the C side clamps this to a sane range.
+                    0,
+                    # dry_run = 0, so this call is the one that persists the
+                    # decision. create_v2 is handed the resolved mode below, so
+                    # it never re-measures; if this passed dry_run instead, the
+                    # decision would be thrown away and every construction would
+                    # benchmark again.
+                    0,
+                    choice,
+                )
+            )
+        except (LembedError, OSError):
+            return None
+
+        if choice.num_measured <= 0:
+            return None
+        # Publish the rationale for the caller; it is a class attribute because
+        # this runs from a staticmethod, and it is copied onto the instance
+        # straight below so one model never inherits another's reason.
+        TextEmbedding._last_quantization_reason = ffi.string(choice.reason).decode(
+            "utf-8", "replace"
+        )
+        return int(choice.quantization)
 
     @property
     def dim(self) -> int:
@@ -327,12 +322,22 @@ class TextEmbedding:
 
     @property
     def quantization(self) -> str:
-        """Quantization mode actually in use: "none", "static" or "dynamic".
+        """Quantization mode actually in use: "none", "static", "dynamic" or "fp16".
 
         With ``preferred_quantization="auto"`` this reports the mode that was
         selected, not the request.
         """
         return self._quantization
+
+    @property
+    def quantization_reason(self) -> str:
+        """Why ``preferred_quantization="auto"`` picked that mode.
+
+        Empty unless auto-selection ran for this construction: an explicit mode
+        has nothing to justify, and a model with no quantized sibling resolves
+        to itself without measuring anything.
+        """
+        return self._quantization_reason
 
     @property
     def batch_size(self) -> int:

@@ -502,6 +502,35 @@ lembed_status_t lembed_auto_select_model(
     const char* use_case,
     lembed_model_selection_t* result);
 
+/* â”€â”€ Quantization auto-selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+/* One measured variant. file_mb is the size of the weights file, not the
+ * resident set: peak RSS is a per-process high-water mark, so it can never be
+ * attributed to a variant measured after another one. */
+typedef struct {
+    int    quantization;
+    double docs_per_sec;
+    double latency_ms;
+    double file_mb;
+} lembed_quantization_measurement_t;
+
+typedef struct {
+    int    quantization;
+    int    variant_model;
+    int    num_measured;
+    int    from_cache;
+    char   reason[192];
+    lembed_quantization_measurement_t measured[4];
+} lembed_quantization_choice_t;
+
+lembed_status_t lembed_quantization_auto_select(
+    int            model,
+    int            num_threads,
+    int            batch_size,
+    int            num_docs,
+    int            dry_run,
+    lembed_quantization_choice_t* result);
+
 /* â”€â”€ Reranker Auto-Tuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 typedef struct {
