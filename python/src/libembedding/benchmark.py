@@ -11,7 +11,7 @@ Usage:
     result = bench.autotune("path/to/model.gguf", "llama.cpp")
     print(result)
 Auteur: David Orel
-Version: 1.9.0
+Version: 1.10.1
 
 """
 

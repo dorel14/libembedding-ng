@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libembedding-ng"
-version = "1.9.0"
+version = "1.10.1"
 description = "Fast ONNX-based text, image, and sparse embeddings for Python. Dynamic INT8 ONNX models are ~4x smaller, ~2x lighter in memory and ~1.7-2.0x faster than FP32 on CPU."
 readme = "README.md"
 license = "MIT"
