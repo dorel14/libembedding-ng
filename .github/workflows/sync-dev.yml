@@ -12,15 +12,20 @@ name: Sync dev
 # categoriquement de resoudre un conflit de contenu reel : dans ce cas le job
 # echoue en listant les fichiers plutot que d'ecraser le travail de `main`.
 #
-# NOTE: `release`, `schedule` et `workflow_dispatch` ne sont recus que si ce
-# fichier est present sur la branche par defaut. Le workflow ne devient donc
-# actif qu'apres fusion du PR dans `main`.
+# NOTE: `release: published` ne peut PAS servir de declencheur ici. Le job
+# `version` de release.yml cree la release avec `secrets.GITHUB_TOKEN`, et un
+# evenement emis par GITHUB_TOKEN ne declenche aucun autre workflow -- c'est la
+# protection anti-recursion de GitHub, et release.yml le signale deja dans ses
+# propres commentaires pour les push de tags. Le declencheur fiable est donc la
+# fin du workflow Release, dont le job `version` publie la release. Le cron
+# couvre le cas ou le workflow Release echoue apres avoir publie.
 
 on:
-  release:
-    types: [published]
-  # Filet de securite: le declencheur `release` peut etre manque (release
-  # creee manuellement, tag hors workflow). Un passage par jour suffit.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+    branches: [main]
+  # Filet de securite: rattrapage quotidien.
   schedule:
     - cron: "23 5 * * *"
   workflow_dispatch:
@@ -40,6 +45,13 @@ concurrency:
 jobs:
   sync:
     name: Fusionner main dans dev
+    # Le workflow Release echoue apres avoir publie (build de wheel, PyPI) est
+    # un cas reel : la version est alors sur main et dev n'est pas a jour. La
+    # condition porte donc sur l'echec du run lui-meme, pas sur celle du job
+    # `version` -- et le cron rattrape de toute facon le cas.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout dev
