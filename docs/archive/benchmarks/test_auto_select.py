@@ -2,12 +2,14 @@
 Test auto model selection from Python
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import auto_select_model, TextEmbeddingPool
 import time
+
+from libembedding import TextEmbeddingPool, auto_select_model
 
 print("=== Auto Model Selection Test ===\n")
 

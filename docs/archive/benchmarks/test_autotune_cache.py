@@ -2,12 +2,14 @@
 Test autotune with cache - uses cache automatically
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import TextEmbedding, TextEmbeddingPool
 import time
+
+from libembedding import TextEmbedding, TextEmbeddingPool
 
 print("=== Autotune with Cache Test ===\n")
 
