@@ -3,7 +3,7 @@
  * Native similarity functions: cosine, dot product, euclidean distance
  *
  * Auteur: David Orel
- * Version: 1.9.0
+ * Version: 1.10.0
  *
  * SPDX-License-Identifier: MIT
  */
