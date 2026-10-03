@@ -1194,10 +1194,70 @@ benchmark does not measure.
   run published before the fix is void too. The 2026-10-02 run above is the first
   one that both resolves registry entries and measures a genuine INT8 file.
 
-  Two caveats: `quantization="auto"` selects **no** weights (it loads the FP32
-  default while `.quantization` reports `"auto"`) — use
-  `preferred_quantization="auto"` for a measured auto-selection. And
-  `Reranker(quantization=...)` does not resolve a variant either: pass the name of
+  - **`preferred_quantization="auto"` measures and picks for you.** The variants the
+  registry actually ships are benchmarked once per (model, machine, library
+  version), the winner is cached, and later loads read the cache:
+
+  ```python
+  from libembedding import TextEmbedding
+
+  m = TextEmbedding("BAAI/bge-small-en-v1.5", preferred_quantization="auto")
+  m.quantization         # 'dynamic'
+  m.quantization_reason  # '1.69x the fp32 variant (15 -> 26 docs/s)'
+  ```
+
+  Measured on an i7-1065G7:
+
+  | Variant | docs/s | Weights | |
+  |---|---|---|---|
+  | FP32 | 15.1 | 126.9 MB | baseline |
+  | **INT8 dynamic** | **25.6** (1.7x) | **32.2 MB** (3.9x smaller) | **selected** |
+  | FP16 | 2.5 (6x slower) | 63.4 MB | rejected |
+
+  The rule, in order:
+
+  1. no measurable FP32 baseline → FP32;
+  2. a variant must beat FP32 by **more than 5 %** — under that, the difference is
+     inside the noise of a short benchmark and a weights swap is not worth it;
+  3. **dynamic INT8 is preferred**: another variant must beat it by **more than
+     15 %** to take over, because it is the safer of the quantized options quality
+     wise. FP16, at 6x slower on a CPU without native FP16 arithmetic, never comes
+     close.
+
+  Two implementation points worth knowing:
+
+  - **The cache key is the hardware fingerprint.** It is baked into the file name
+    (CPU, ONNX Runtime version, library version) and the entry identity is
+    re-checked on read, so a decision measured on another machine is never served.
+    The `quantization=` field of the entry is the *result*, not part of the key.
+  - **Cost: ~3.5 s on the very first load of a model, then free.** The variants
+    are not comparable in price — FP16 was 6x slower than INT8 on the same machine
+    and would have dominated the whole selection — so measurement runs in two
+    phases: a probe bounded to 4 documents *and* 250 ms per variant that drops the
+    clear losers, then a full measurement of the survivors only. The warmup is a
+    2-document slice, not the whole corpus.
+
+  The decision rule is a pure function separated from the measurement, so it is
+  covered by unit tests that run in milliseconds without a model
+  (`tests/test_quantization_auto.cpp`).
+
+  In C, `LEMBED_QUANTIZATION_AUTO` in the v2 options resolves the same way, and
+  `lembed_quantization_auto_select()` exposes the measurement directly:
+
+  ```c
+  lembed_quantization_choice_t choice;
+  if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                      /*threads*/ 0, /*batch*/ 32,
+                                      /*num_docs*/ 0, /*dry_run*/ 0,
+                                      &choice) == LEMBED_OK) {
+      /* choice.quantization, choice.reason, choice.measured[] */
+  }
+  ```
+
+- **`quantization="auto"` is still a no-op for weights**, and stays that way on
+  purpose: it loads the FP32 default and `.quantization` reports `"auto"`. Use
+  `preferred_quantization="auto"` for a measured decision. Also note
+  `Reranker(quantization=...)` does not resolve a variant: pass the name of
   the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
 
 - **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with

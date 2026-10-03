@@ -1205,10 +1205,70 @@ benchmark does not measure.
   run published before the fix is void too. The 2026-10-02 run above is the first
   one that both resolves registry entries and measures a genuine INT8 file.
 
-  Two caveats: `quantization="auto"` selects **no** weights (it loads the FP32
-  default while `.quantization` reports `"auto"`) — use
-  `preferred_quantization="auto"` for a measured auto-selection. And
-  `Reranker(quantization=...)` does not resolve a variant either: pass the name of
+  - **`preferred_quantization="auto"` measures and picks for you.** The variants the
+  registry actually ships are benchmarked once per (model, machine, library
+  version), the winner is cached, and later loads read the cache:
+
+  ```python
+  from libembedding import TextEmbedding
+
+  m = TextEmbedding("BAAI/bge-small-en-v1.5", preferred_quantization="auto")
+  m.quantization         # 'dynamic'
+  m.quantization_reason  # '1.69x the fp32 variant (15 -> 26 docs/s)'
+  ```
+
+  Measured on an i7-1065G7:
+
+  | Variant | docs/s | Weights | |
+  |---|---|---|---|
+  | FP32 | 15.1 | 126.9 MB | baseline |
+  | **INT8 dynamic** | **25.6** (1.7x) | **32.2 MB** (3.9x smaller) | **selected** |
+  | FP16 | 2.5 (6x slower) | 63.4 MB | rejected |
+
+  The rule, in order:
+
+  1. no measurable FP32 baseline → FP32;
+  2. a variant must beat FP32 by **more than 5 %** — under that, the difference is
+     inside the noise of a short benchmark and a weights swap is not worth it;
+  3. **dynamic INT8 is preferred**: another variant must beat it by **more than
+     15 %** to take over, because it is the safer of the quantized options quality
+     wise. FP16, at 6x slower on a CPU without native FP16 arithmetic, never comes
+     close.
+
+  Two implementation points worth knowing:
+
+  - **The cache key is the hardware fingerprint.** It is baked into the file name
+    (CPU, ONNX Runtime version, library version) and the entry identity is
+    re-checked on read, so a decision measured on another machine is never served.
+    The `quantization=` field of the entry is the *result*, not part of the key.
+  - **Cost: ~3.5 s on the very first load of a model, then free.** The variants
+    are not comparable in price — FP16 was 6x slower than INT8 on the same machine
+    and would have dominated the whole selection — so measurement runs in two
+    phases: a probe bounded to 4 documents *and* 250 ms per variant that drops the
+    clear losers, then a full measurement of the survivors only. The warmup is a
+    2-document slice, not the whole corpus.
+
+  The decision rule is a pure function separated from the measurement, so it is
+  covered by unit tests that run in milliseconds without a model
+  (`tests/test_quantization_auto.cpp`).
+
+  In C, `LEMBED_QUANTIZATION_AUTO` in the v2 options resolves the same way, and
+  `lembed_quantization_auto_select()` exposes the measurement directly:
+
+  ```c
+  lembed_quantization_choice_t choice;
+  if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                      /*threads*/ 0, /*batch*/ 32,
+                                      /*num_docs*/ 0, /*dry_run*/ 0,
+                                      &choice) == LEMBED_OK) {
+      /* choice.quantization, choice.reason, choice.measured[] */
+  }
+  ```
+
+- **`quantization="auto"` is still a no-op for weights**, and stays that way on
+  purpose: it loads the FP32 default and `.quantization` reports `"auto"`. Use
+  `preferred_quantization="auto"` for a measured decision. Also note
+  `Reranker(quantization=...)` does not resolve a variant: pass the name of
   the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
 
 - **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
@@ -1611,6 +1671,7 @@ TextEmbedding(
 | `auto_workers` | `bool` | `False` | `True` = auto-detect optimal sessions/workers for llama.cpp backend |
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
 | `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
+| `preferred_quantization` | `str \| None` | `None` | `"auto"` = **measured selection**: the variants the registry actually ships for this model are benchmarked once per (model, machine, library version), the winner is cached, and later loads read the cache. Rule: no measurable FP32 baseline → FP32; a variant must beat FP32 by **more than 5 %**; and **dynamic INT8 is preferred** — another variant must beat it by **more than 15 %**. Cost: ~3.5 s on the very first load of a model, then free. See [Quantization](#quantization--fp32-vs-int8) for the measurements. |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -1621,7 +1682,8 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
 | `dim` | `int` (property) | Embedding dimension |
-| `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
+| `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
+| `quantization_reason` | `str` (property) | Why `preferred_quantization="auto"` picked that mode, e.g. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Empty when nothing was measured (explicit mode, or a model with no quantized sibling). |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name or local path |
 | `model_name` | `str` (property) | Registry name of the loaded model |
@@ -4495,6 +4557,104 @@ This module provides comprehensive auto-tuning to find optimal configuration (wo
 | `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Constrained autotune |
 | `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Latency-budget autoconfig |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Profile-based autoconfig |
+| `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Pick the fastest quantization variant for this machine |
+
+## Automatic quantization selection
+
+`lembed_quantization_auto_select()` answers a question the caller cannot answer
+alone: **on this machine, which weights file is fastest for this model?** Quantized
+variants are separate registry entries with their own `model_file`, so choosing a
+mode means choosing a file.
+
+Only the variants **actually shipped** are considered: a model with no `static`
+sibling is never compared against a phantom one. Variants whose weights are absent
+are **skipped**, never downloaded just to be measured.
+
+### Decision rule
+
+1. no measurable FP32 baseline -> FP32;
+2. a variant must beat FP32 by **more than 5 %** -- below that the difference sits
+   inside the noise of a short benchmark and a weights swap is not worth it;
+3. **biased toward dynamic INT8**: another variant must beat it by **more than
+   15 %** to take over, because it is the safer of the quantized options quality
+   wise.
+
+### Cache
+
+The cache key **is** the hardware fingerprint: it is baked into the file name (CPU,
+ONNX Runtime version, library version) and the entry identity is re-checked on
+read, so a decision measured on another machine or version can never be served.
+Dedicated `quantization/` location, so a quantization decision can never overwrite
+a threads/batch tuning entry.
+
+Cost: **~3.5 s on the very first load** of a model, then **free**.
+
+### Two-phase measurement
+
+The variants are not comparable in price: FP16 measured **6x slower** than dynamic
+INT8 on the same machine and would have dominated the whole selection without
+teaching anything a few hundred milliseconds would not have.
+
+| Phase | What it does | Bounds |
+|---|---|---|
+| 1 -- probe | Rejects clear losers. **4 documents max, 250 ms max** per variant. | Bounded at ~750 ms for three variants, whatever their relative speed |
+| 2 -- measure | Full corpus, separate warmup, baseline and survivors only. | 16 documents, 2-document warmup |
+
+The **time** budget is the important half: a document-count-only probe still pays
+full price on a pathological variant, which is exactly the case worth avoiding.
+
+The probe is a **rejector, not a ranker**: its first document is untimed (the
+first embed pays kernel selection and buffer allocation), and it only eliminates a
+variant that is more than 3x slower than the best seen so far.
+
+### Measured (bge-small-en-v1.5, i7-1065G7)
+
+| Variant | docs/s | Weights |
+|---|---|---|
+| FP32 | 15.1 | 126.9 MB |
+| **Dynamic INT8** | **25.6** (1.7x) | **32.2 MB** (3.9x smaller) |
+| FP16 | 2.5 (6x slower) | 63.4 MB |
+
+> **Measurement note.** The size reported is the on-disk size of the weights, not
+> resident memory: peak RSS is a per-process high-water mark, so it can never go
+> down and cannot be attributed to a variant measured after another one. Counting
+> only the graph file would be worse still -- an ONNX model past the protobuf size
+> limit is a small graph plus a weights sidecar, and bge-small's INT8
+> `model_quantized.onnx` is 413 KB next to 33 MB of weights. The sidecar is
+> therefore counted, otherwise INT8 would report **smaller** than FP32.
+
+### Example
+
+```c
+#include <libembedding/autotuner.h>
+
+lembed_quantization_choice_t choice;
+if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                    /*num_threads*/ 0,
+                                    /*batch_size*/  32,
+                                    /*num_docs*/    0,   /* 0 = default */
+                                    /*dry_run*/     0,
+                                    &choice) == LEMBED_OK) {
+    printf("quantization = %s\n", choice.reason);
+    printf("from_cache   = %d\n", choice.from_cache);
+}
+
+/* Or let create_v2 resolve it: LEMBED_QUANTIZATION_AUTO in the v2 options runs
+ * the exact same selection and persists the decision. */
+lembed_text_options_v2_t opts = lembed_text_options_v2_default();
+opts.base.model = LEMBED_TEXT_BGE_SMALL_EN_V15;
+opts.quantization = LEMBED_QUANTIZATION_AUTO;
+lembed_text_embedding_t* ctx = NULL;
+lembed_text_embedding_create_v2(&opts, &ctx);
+```
+
+`lembed_quantization_choice_t` is declared in `types.h` rather than
+`autotuner.h`: the creation path has to resolve `AUTO` without pulling in the
+autotune machinery.
+
+The decision rule is a **pure** function, separated from the measurement, which
+makes it testable in milliseconds without a model or network
+(`tests/test_quantization_auto.cpp`).
 
 > **Both forms of the name are accepted.** The registry gives every model two
 > different strings -- the HuggingFace repo (`model_code`,
@@ -5087,6 +5247,7 @@ TextEmbedding(
 | `auto_workers` | `bool` | `False` | `True` = auto-détection du nombre optimal de sessions/workers pour llama.cpp |
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
 | `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. ⚠️ `"fp16"` n'est pas de l'INT8 : ce sont des poids `FLOAT16` servis par un graphe optimisé ORT. Sur un CPU sans arithmétique FP16 native, ils sont plus lents que FP32 tout en occupant moins de disque — utile pour la taille, pas pour le débit. Les quatre entrées `Qdrant/*-onnx-Q` (dont `bge-small-en-v1.5`) sont dans ce cas ; leur suffixe `_Q` et leur description historique « Quantized » ne Changeaient pas. |
+| `preferred_quantization` | `str \| None` | `None` | `"auto"` = **sélection mesurée** : les variantes réellement livrées par le registre pour ce modèle sont benchmarkées une fois par (modèle, machine, version de la lib), le gagnant est mis en cache, et les chargements suivants lisent le cache. Règle : sans baseline FP32 mesurable → FP32 ; une variante doit battre FP32 de **plus de 5 %** ; et **l'INT8 dynamique est préféré** — une autre variante doit le battre de **plus de 15 %**. Coût : ~3,5 s au tout premier chargement d'un modèle, puis gratuit. Voir [Quantification](#quantification--fp32-vs-int8) pour les mesures. |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -5097,7 +5258,8 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
 | `dim` | `int` (property) | Dimension de l'embedding |
-| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
+| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
+| `quantization_reason` | `str` (property) | Justification du choix quand `preferred_quantization="auto"` a tourné, ex. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Vide si aucun mode n'a été mesuré (mode explicite, ou modèle sans variante quantifiée). |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `model_name` | `str` (property) | Nom de registre du modèle chargé |
@@ -7965,6 +8127,107 @@ Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (
 | `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
 | `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
+| `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Choisir la variante de quantification la plus rapide sur cette machine |
+
+## Sélection automatique de la quantification
+
+`lembed_quantization_auto_select()` répond à une question que l'appelant ne peut pas
+poser seul : **sur cette machine, quel fichier de poids est le plus rapide pour ce
+modèle ?** Les variantes quantifiées sont des entrées de registre distinctes avec
+leur propre `model_file`, donc choisir un mode, c'est choisir un fichier.
+
+Seules les variantes **réellement livrées** sont considérées : un modèle sans
+variante `static` n'est jamais comparé à une variante `static` fantôme. Les
+variantes dont les poids sont absents sont **sautées**, jamais téléchargées pour
+être mesurées.
+
+### Règle de décision
+
+1. sans baseline FP32 mesurable → FP32 ;
+2. une variante doit battre FP32 de **plus de 5 %** — en dessous, l'écart est dans
+   le bruit d'un benchmark court et un échange de poids ne se justifie pas ;
+3. **biais vers l'INT8 dynamique** : une autre variante doit le battre de **plus de
+   15 %** pour le remplacer, car c'est l'option quantifiée la plus sûre côté
+   qualité.
+
+### Cache
+
+La clé de cache **est** l'empreinte matérielle : elle est inscrite dans le nom du
+fichier (CPU, version ONNX Runtime, version de libembedding) et l'identité de
+l'entrée est re-vérifiée à la lecture. Une décision mesurée sur une autre machine
+ou une autre version ne peut donc jamais être servie. Emplacement dédié
+`quantization/`, pour qu'une décision de quantification n'écrase jamais un réglage
+threads/batch.
+
+Coût : **~3,5 s au tout premier chargement** d'un modèle, puis **gratuit**.
+
+### Deux phases de mesure
+
+Les variantes n'ont pas le même prix : sur la même machine, FP16 s'est mesuré
+**6x plus lent** que l'INT8 dynamique, et aurait donc dominé toute la sélection
+sans rien apprendre que quelques centaines de millisecondes n'auraient pas appris.
+
+| Phase | Ce qu'elle fait | Bornes |
+|---|---|---|
+| 1 — sonde | Rejette les variantes manifestement perdantes. **4 documents max, 250 ms max** par variante. | Bornée à ~750 ms pour 3 variantes, quelle que soit leur vitesse relative |
+| 2 — mesure | Corpus complet, warmup séparé, uniquement sur la baseline et les survivantes. | 16 documents, warmup de 2 |
+
+Le budget **en temps** est la moitié importante : une sonde limitée en nombre de
+documents paie encore plein pot sur une variante pathologique, ce qui est
+précisément le cas qu'on veut éviter.
+
+La sonde est un **rejeteur, pas un classement** : son premier document est hors
+chronomètre (le premier `embed` paie la sélection de kernels et l'allocation), et
+elle n'élimine que si la variante est plus de 3x plus lente que la meilleure vue.
+
+### Mesures réelles (bge-small-en-v1.5, i7-1065G7)
+
+| Variante | docs/s | Poids |
+|---|---|---|
+| FP32 | 15.1 | 126.9 MB |
+| **INT8 dynamique** | **25.6** (1.7x) | **32.2 MB** (3.9x plus petit) |
+| FP16 | 2.5 (6x plus lent) | 63.4 MB |
+
+> **Note de mesure.** La taille rapportée est celle **des poids sur disque**, pas
+> le RSS résident : le pic RSS est un high-water mark **par process**, il ne peut
+> donc jamais décroître et ne peut pas être attribué à une variante mesurée après
+> une autre. Compter le graphe seul serait pire : un modèle ONNX au-delà de la
+> limite protobuf est un petit fichier graphe + un sidecar de poids, et le
+> `model_quantized.onnx` INT8 de bge-small fait 413 Ko pour 33 Mo de poids. Le
+> sidecar est donc compté, sinon l'INT8 ressortirait **plus petit** que le FP32.
+
+### Exemple
+
+```c
+#include <libembedding/autotuner.h>
+
+lembed_quantization_choice_t choice;
+if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                    /*num_threads*/ 0,
+                                    /*batch_size*/  32,
+                                    /*num_docs*/    0,   /* 0 = défaut */
+                                    /*dry_run*/     0,
+                                    &choice) == LEMBED_OK) {
+    printf("quantization = %s\n", choice.reason);   /* ex. "1.69x the fp32 variant ..." */
+    printf("from_cache   = %d\n", choice.from_cache);
+
+    /* Ou laisser create_v2 résoudre : LEMBED_QUANTIZATION_AUTO dans les options
+     * v2 déclenche exactement la même sélection, et persiste la décision. */
+    lembed_text_options_v2_t opts = lembed_text_options_v2_default();
+    opts.base.model = LEMBED_TEXT_BGE_SMALL_EN_V15;
+    opts.quantization = LEMBED_QUANTIZATION_AUTO;
+    lembed_text_embedding_t* ctx = NULL;
+    lembed_text_embedding_create_v2(&opts, &ctx);
+}
+```
+
+`lembed_quantization_choice_t` est déclaré dans `types.h` et non dans
+`autotuner.h` : le chemin de création doit résoudre `AUTO` sans charger la
+machinerie d'autotune.
+
+La règle de décision est une fonction **pure**, séparée de la mesure, ce qui la rend
+testable en quelques millisecondes sans modèle ni réseau
+(`tests/test_quantization_auto.cpp`).
 
 > **Les deux formes du nom sont acceptées.** Le registre donne à chaque modèle
 > deux chaînes différentes — le dépôt HuggingFace (`model_code`,

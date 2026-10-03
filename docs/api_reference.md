@@ -49,6 +49,7 @@ TextEmbedding(
 | `auto_workers` | `bool` | `False` | `True` = auto-détection du nombre optimal de sessions/workers pour llama.cpp |
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
 | `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. ⚠️ `"fp16"` n'est pas de l'INT8 : ce sont des poids `FLOAT16` servis par un graphe optimisé ORT. Sur un CPU sans arithmétique FP16 native, ils sont plus lents que FP32 tout en occupant moins de disque — utile pour la taille, pas pour le débit. Les quatre entrées `Qdrant/*-onnx-Q` (dont `bge-small-en-v1.5`) sont dans ce cas ; leur suffixe `_Q` et leur description historique « Quantized » ne Changeaient pas. |
+| `preferred_quantization` | `str \| None` | `None` | `"auto"` = **sélection mesurée** : les variantes réellement livrées par le registre pour ce modèle sont benchmarkées une fois par (modèle, machine, version de la lib), le gagnant est mis en cache, et les chargements suivants lisent le cache. Règle : sans baseline FP32 mesurable → FP32 ; une variante doit battre FP32 de **plus de 5 %** ; et **l'INT8 dynamique est préféré** — une autre variante doit le battre de **plus de 15 %**. Coût : ~3,5 s au tout premier chargement d'un modèle, puis gratuit. Voir [Quantification](#quantification--fp32-vs-int8) pour les mesures. |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -59,7 +60,8 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
 | `dim` | `int` (property) | Dimension de l'embedding |
-| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
+| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
+| `quantization_reason` | `str` (property) | Justification du choix quand `preferred_quantization="auto"` a tourné, ex. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Vide si aucun mode n'a été mesuré (mode explicite, ou modèle sans variante quantifiée). |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `model_name` | `str` (property) | Nom de registre du modèle chargé |
