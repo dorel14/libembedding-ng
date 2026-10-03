@@ -53,6 +53,45 @@ def bge_small():
 
     return _factory
 
+
+def skip_unless_cached(repo_code: str) -> None:
+    """Skip the calling test unless *repo_code* is already in the local cache.
+
+    The autotuner builds its benchmark sessions with ``offline = 1``
+    (``detail/autotune_bench_text.hpp``): it measures a model, it never fetches
+    one. A fresh CI runner therefore has nothing to tune, and the tuner answers
+    ``Model file not in cache (offline mode)`` -- which is a missing
+    precondition rather than a regression.
+
+    The check goes through the library instead of re-deriving the on-disk cache
+    layout, so it follows the registry mapping too (the tuner is handed
+    ``BAAI/bge-small-en-v1.5`` but the weights live under ``Xenova/``).
+    """
+    from libembedding._binding import ffi, lib
+    from libembedding.models import resolve_text_model
+
+    index = resolve_text_model(repo_code)
+    model_dir = ffi.new("char **")
+    status = lib.lembed_ensure_text_model(index, ffi.NULL, 0, 1, model_dir)
+    if model_dir[0] != ffi.NULL:
+        lib.lembed_free_string(model_dir[0])
+    if status != lib.LEMBED_OK:
+        pytest.skip(
+            f"{repo_code} is not in the local cache and the autotuner "
+            "does not download (offline benchmarking)"
+        )
+
+
+@pytest.fixture
+def require_cached_model():
+    """Expose :func:`skip_unless_cached` to test modules as a fixture."""
+
+    def _require(repo_code: str) -> None:
+        skip_unless_cached(repo_code)
+
+    return _require
+
+
 # Locate the built shared library and ensure its directory is on PATH
 # so Windows can resolve the runtime DLLs (onnxruntime, libcurl, MSVC runtime).
 # The import is deliberately placed here: it needs sys.path to be patched first.

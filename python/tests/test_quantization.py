@@ -26,6 +26,20 @@ BGE_SMALL = "BAAI/bge-small-en-v1.5"
 MINILM_L6 = "sentence-transformers/all-MiniLM-L6-v2"
 PROBE_TEXT = ["machine learning is a subset of artificial intelligence"]
 
+# Instantiating a registry entry downloads its weights, and the quantized half of
+# the registry is not homogeneous: gte-large, bge-large, mxbai-embed-large and
+# arctic-embed-l are each 1.3-1.7 GB. Walking every entry turned one test into a
+# ~10 GB download that CI cannot finish reliably -- it failed on the runner with
+# "Failed to download: Alibaba-NLP/gte-large-en-v1.5". The round-trip is checked
+# over a cheap subset instead, still covering each quantization mode the registry
+# declares. `declared` below fails loudly if one of these stops being quantized,
+# so the subset cannot rot into a vacuous pass.
+CHEAP_QUANTIZED = (
+    "Xenova/all-MiniLM-L6-v2",  # dynamic
+    "Xenova/all-MiniLM-L12-v2",  # dynamic
+    "Qdrant/bge-small-en-v1.5-onnx-Q",  # fp16
+)
+
 
 def _variants(base_name):
     return [m for m in list_text_models() if m.model_name == base_name]
@@ -70,18 +84,22 @@ class TestQuantizationSelection:
     """quantization= must select the weights, not just session options."""
 
     def test_registry_tags_round_trip(self):
-        for info in list_text_models():
-            if info.quantization == "none":
-                continue
+        declared = {m.model_code: m.quantization for m in list_text_models()}
+        for code in CHEAP_QUANTIZED:
+            quantization = declared.get(code)
+            assert quantization not in (None, "none"), (
+                f"{code} is no longer a quantized registry entry; "
+                f"CHEAP_QUANTIZED needs updating (declared={quantization!r})"
+            )
             model = TextEmbedding(
-                info.model_code,
-                quantization=info.quantization,
+                code,
+                quantization=quantization,
                 provider="cpu",
                 batch_size=4,
                 show_download_progress=False,
             )
             try:
-                assert model.quantization == info.quantization
+                assert model.quantization == quantization
             finally:
                 model.close()
 
