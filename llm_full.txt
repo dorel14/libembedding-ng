@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.8.1
+Version: 1.9.0
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 

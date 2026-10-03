@@ -11,7 +11,7 @@ weights instead of failing:
   a quantized model is a different file rather than a session option.
 
 Auteur: David Orel
-Version: 1.8.0
+Version: 1.9.0
 
 SPDX-License-Identifier: MIT
 """

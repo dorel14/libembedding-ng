@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 cmake_policy(SET CMP0144 NEW)
-set(LIBEMBEDDING_VERSION "1.8.1")
+set(LIBEMBEDDING_VERSION "1.9.0")
 project(libembedding
     VERSION ${LIBEMBEDDING_VERSION}
     DESCRIPTION "C/C++ embedding library using ONNX Runtime (header-only INTERFACE on Linux/macOS, shared library/DLL on Windows)"

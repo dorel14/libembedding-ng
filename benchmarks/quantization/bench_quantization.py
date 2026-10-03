@@ -35,7 +35,7 @@ quiet about a mismatch: if two configurations ran on different runtimes or
 providers, the report says so instead of publishing numbers nobody can compare.
 
 Auteur: David Orel
-Version: 1.8.0
+Version: 1.9.0
 
 SPDX-License-Identifier: MIT
 """

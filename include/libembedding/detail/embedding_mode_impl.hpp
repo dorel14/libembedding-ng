@@ -3,7 +3,7 @@
  * Embedding mode implementation
  *
  * Auteur: David Orel
- * Version: 1.8.1
+ * Version: 1.9.0
  *
  * SPDX-License-Identifier: MIT
  */

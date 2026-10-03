@@ -12,7 +12,7 @@
  * No model downloads required.
  *
  * Auteur: David Orel
- * Version: 1.6.0
+ * Version: 1.9.0
  *
  * SPDX-License-Identifier: MIT
  */

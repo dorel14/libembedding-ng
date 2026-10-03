@@ -41,7 +41,7 @@ Only cached models are inspected (no network). Entries whose file is absent are
 reported as SKIPPED, so a fresh checkout reports coverage rather than failing.
 
 Auteur: David Orel
-Version: 1.8.0
+Version: 1.9.0
 
 SPDX-License-Identifier: MIT
 """
