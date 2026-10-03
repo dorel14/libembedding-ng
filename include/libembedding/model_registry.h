@@ -3,7 +3,7 @@
  * model_registry.h - Model registry query API
  *
  * Auteur: David Orel
- * Version: 1.10.0
+ * Version: 1.10.1
  *
  * SPDX-License-Identifier: MIT
  */
