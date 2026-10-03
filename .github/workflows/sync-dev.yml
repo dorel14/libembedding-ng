@@ -1,0 +1,93 @@
+name: Sync dev
+
+# Maintient `dev` aligne sur `main` aussitot apres une publication.
+#
+# Contexte: une publication semantic-release ecrit la version dans ~72 fichiers
+# (les trois sources machines, puis les ~70 en-tetes via scripts/sync_version.py).
+# Si `dev` tamponne aussi une version, la fusion ulterieure declare un conflit
+# sur chacun de ces 72 fichiers alors que leur resolution est triviale : le
+# contenu vient du developpement, la version vient de la release.
+#
+# Ce workflow fait la fusion et resout ces conflits-la tout seul, mais refuse
+# categoriquement de resoudre un conflit de contenu reel : dans ce cas le job
+# echoue en listant les fichiers plutot que d'ecraser le travail de `main`.
+#
+# NOTE: `release`, `schedule` et `workflow_dispatch` ne sont recus que si ce
+# fichier est present sur la branche par defaut. Le workflow ne devient donc
+# actif qu'apres fusion du PR dans `main`.
+
+on:
+  release:
+    types: [published]
+  # Filet de securite: le declencheur `release` peut etre manque (release
+  # creee manuellement, tag hors workflow). Un passage par jour suffit.
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref a fusionner dans dev"
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-dev
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fusionner main dans dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fusionner et resoudre les conflits de tampon
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${{ github.event.inputs.ref || 'main' }}"
+          python scripts/sync_branch.py --ref "origin/${{ github.event.inputs.ref || 'main' }}"
+
+      # Le job echoue ci-dessus si la fusion est refusee : rien n'est pousse.
+      # Ces verifications relaient les memes controles que ci.yml, pour ne pas
+      # pousser un arbre que personne ne validerait (aucun workflow ne se
+      # declenche sur un push direct vers `dev`).
+      - name: Verifications rapides
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::arbre de travail sale apres la fusion"
+            git status --porcelain
+            exit 1
+          fi
+          python scripts/sync_version.py --check
+          if grep -rlP '^\xEF\xBB\xBF' . --include='*.py' --include='*.h' --include='*.hpp' \
+               --include='*.c' --include='*.cpp' --include='CMakeLists.txt' \
+               --exclude-dir=third_party --exclude-dir=.git; then
+            echo "::error::BOM UTF-8 detecte"
+            exit 1
+          fi
+          if grep -rlP '\r$' . --include='*.py' --include='*.h' --include='*.hpp' \
+               --include='*.c' --include='*.cpp' --include='CMakeLists.txt' \
+               --exclude-dir=third_party --exclude-dir=.git; then
+            echo "::error::CRLF detecte"
+            exit 1
+          fi
+          pip install ruff >/dev/null
+          ruff check python/src
+
+      - name: Pousser vers dev
+        run: |
+          git push origin HEAD:dev
+          echo "dev est a jour avec ${{ github.event.inputs.ref || 'main' }}"
