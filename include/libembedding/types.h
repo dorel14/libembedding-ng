@@ -78,6 +78,33 @@ typedef enum {
 } lembed_quantization_t;
 
 /* =========================================================================
+ * Quantization auto-selection result
+ *
+ * Declared here rather than in autotuner.h because the model creation path
+ * resolves LEMBED_QUANTIZATION_AUTO and therefore needs the type without
+ * dragging the tuning machinery in.
+ * ========================================================================= */
+
+/* One measured variant. file_mb is the size of the weights file, not the
+ * resident set: peak RSS is a per-process high-water mark, so it can never be
+ * attributed to a variant measured after another one. */
+typedef struct {
+    int    quantization;      /* lembed_quantization_t */
+    double docs_per_sec;
+    double latency_ms;
+    double file_mb;
+} lembed_quantization_measurement_t;
+
+typedef struct {
+    int    quantization;      /* winner, as a lembed_quantization_t */
+    int    variant_model;     /* registry index of the entry to load */
+    int    num_measured;      /* variants in measured[] */
+    int    from_cache;        /* 1 = served from cache, 0 = benchmarked now */
+    char   reason[192];
+    lembed_quantization_measurement_t measured[4];
+} lembed_quantization_choice_t;
+
+/* =========================================================================
  * Text Embedding Models (~40 models, matching fastembed-rs)
  * ========================================================================= */
 

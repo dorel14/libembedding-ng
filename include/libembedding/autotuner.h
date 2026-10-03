@@ -79,6 +79,38 @@ lembed_status_t lembed_auto_select_model(
     lembed_model_selection_t* result);
 
 /* =========================================================================
+ * Quantization Auto-Selection
+ *
+ * Picks the quantization variant that is actually fastest on this machine,
+ * instead of asking the caller to choose between FP32, static INT8, dynamic INT8
+ * and FP16 without knowing which one wins.
+ *
+ * Only the variants the registry really ships are considered: a model with no
+ * STATIC sibling is never compared against one. FP32 is the baseline, and it is
+ * kept unless another variant is measurably faster.
+ *
+ * lembed_quantization_choice_t is declared in types.h.
+ * ========================================================================= */
+
+/* Choose the best quantization variant for a text model.
+ *
+ * On the first call for a given (model, machine, library version) the available
+ * variants are benchmarked and the decision is cached; later calls only read the
+ * cache. Variants whose weights are absent are skipped, never downloaded.
+ *
+ * num_docs: corpus size for the benchmark (clamped to [8, 256]).
+ * dry_run:  1 = measure and report without writing the cache.
+ *
+ * Returns LEMBED_OK on success. */
+lembed_status_t lembed_quantization_auto_select(
+    lembed_text_model_t model,
+    int num_threads,
+    int batch_size,
+    int num_docs,
+    int dry_run,
+    lembed_quantization_choice_t* result);
+
+/* =========================================================================
  * Reranker Auto-Tuner
  * ========================================================================= */
 
@@ -264,6 +296,12 @@ lembed_status_t lembed_image_autotune(
 #endif
 
 #endif /* LIBEMBEDDING_AUTOTUNER_H */
+
+/* ---- Implementation ---- */
+#if defined(LIBEMBEDDING_IMPLEMENTATION) && !defined(LIBEMBEDDING_QUANTIZATION_AUTO_ENTRY)
+#define LIBEMBEDDING_QUANTIZATION_AUTO_ENTRY
+#include "detail/quantization_auto_entry.hpp"
+#endif
 
 
 

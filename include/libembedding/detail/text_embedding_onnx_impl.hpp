@@ -25,6 +25,22 @@
 #include "embedding_cache_impl.hpp"
 
 #ifdef __cplusplus
+/* This file is included from inside an extern "C" region (text_embedding_impl.hpp
+ * opens one before including the backends). autotune_cache.hpp declares C++
+ * overloads, which extern "C" forbids, so the quantization helper is pulled in
+ * under C++ linkage: close the enclosing extern "C", include, then reopen it so
+ * the rest of this file keeps its original linkage. The C function it defines
+ * re-opens extern "C" itself. */
+} /* extern "C" */
+extern "C++" {
+#endif
+#include "quantization_auto_entry.hpp"
+#ifdef __cplusplus
+}
+extern "C" {
+#endif
+
+#ifdef __cplusplus
 extern "C" {
 #endif
 #include <cstdlib>
@@ -138,6 +154,37 @@ lembed_status_t lembed_text_embedding_create_v2(
             if (variant < 0) return LEMBED_ERROR_MODEL_NOT_FOUND;
             base.model = (lembed_text_model_t)variant;
             resolved = requested;
+        }
+    } else {
+        /* AUTO: benchmark the variants the registry actually ships, once per
+         * (model, machine, library version), then reuse the decision. A model
+         * with no sibling variants resolves to itself without any measurement:
+         * there is nothing to choose between. */
+        lembed_model_info_t info;
+        if (lembed_get_text_model_info(base.model, &info) == LEMBED_OK) {
+            int has_variant = 0;
+            static const int kProbe[] = {
+                LEMBED_QUANTIZATION_STATIC, LEMBED_QUANTIZATION_DYNAMIC,
+                LEMBED_QUANTIZATION_FP16,
+            };
+            for (size_t k = 0; k < sizeof(kProbe) / sizeof(kProbe[0]); k++) {
+                if (lembed_find_text_model_variant(info.model_name, kProbe[k]) >= 0) {
+                    has_variant = 1;
+                    break;
+                }
+            }
+            if (has_variant) {
+                lembed_quantization_choice_t choice;
+                if (lembed_quantization_auto_select(base.model, base.num_threads,
+                                                    base.batch_size, 0, 0,
+                                                    &choice) == LEMBED_OK &&
+                    choice.variant_model >= 0) {
+                    base.model = (lembed_text_model_t)choice.variant_model;
+                    resolved = choice.quantization;
+                }
+                /* On failure we keep the requested entry: AUTO is an
+                 * optimisation, not a reason to refuse to load. */
+            }
         }
     }
 

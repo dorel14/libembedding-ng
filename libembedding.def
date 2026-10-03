@@ -121,6 +121,7 @@ lembed_resolve_sparse_model
     lembed_autotune_custom
     lembed_autotune_clear_cache
     lembed_auto_select_model
+    lembed_quantization_auto_select
 
     ; ---- Reranker auto-tuner ----
     lembed_reranker_auto_config_profile

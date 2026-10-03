@@ -47,15 +47,22 @@ add_executable(test_cpp_wrappers test_cpp_wrappers.cpp)
 target_link_libraries(test_cpp_wrappers PRIVATE libembedding)
 add_test(NAME test_cpp_wrappers COMMAND test_cpp_wrappers)
 
+# Decision rule for automatic quantization selection (no network).
+# Tests the rule against synthetic tables, so it runs in milliseconds and does
+# not depend on which quantized weights happen to be in the local cache.
+add_executable(test_quantization_auto test_quantization_auto.cpp)
+target_link_libraries(test_quantization_auto PRIVATE libembedding)
+add_test(NAME test_quantization_auto COMMAND test_quantization_auto)
+
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
