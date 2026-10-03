@@ -39,15 +39,23 @@ add_executable(test_struct_sizes test_struct_sizes.cpp)
 target_link_libraries(test_struct_sizes PRIVATE libembedding)
 add_test(NAME test_struct_sizes COMMAND test_struct_sizes)
 
+# Compile-and-resolve checks for the public C++ wrappers (no network).
+# The C++ wrapper layer had no coverage at all, which is how a circular include,
+# two missing include guards and a read through an opaque handle all survived:
+# nothing ever included cpp/embedding.hpp, so ctest stayed green.
+add_executable(test_cpp_wrappers test_cpp_wrappers.cpp)
+target_link_libraries(test_cpp_wrappers PRIVATE libembedding)
+add_test(NAME test_cpp_wrappers COMMAND test_cpp_wrappers)
+
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()

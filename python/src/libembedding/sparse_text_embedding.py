@@ -44,7 +44,7 @@ class SparseTextEmbedding:
 
     def __init__(
         self,
-        model_name: str = "prithvida/SPLADE_PP_en_v1",
+model_name: str = "prithivida/Splade_PP_en_v1",
         *,
         provider: str = "cpu",
         device_id: int = 0,
@@ -287,7 +287,7 @@ def sparse_autotune(
 
 
 def sparse_best_config(
-    model_name: str = "prithivida/SPLADE_PP_en_v1",
+    model_name: str = "prithivida/Splade_PP_en_v1",
     texts: list[str] | None = None,
 ) -> SparseTuningResult:
     """Find optimal sparse configuration by benchmarking variants.
@@ -300,7 +300,7 @@ def sparse_best_config(
         SparseTuningResult with optimal top_k, min_weight, storage_format.
 
     Example:
-        >>> result = sparse_best_config("prithivida/SPLADE_PP_en_v1")
+        >>> result = sparse_best_config("prithivida/Splade_PP_en_v1")
         >>> print(f"Optimal: top_k={result.top_k}, storage={result.storage_format}")
     """
     if texts is None:

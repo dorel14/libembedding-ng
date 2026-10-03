@@ -23,7 +23,9 @@
 namespace lembed {
 
 struct SparseEmbeddingOptions {
-    std::string                  model_path = "prithvida/SPLADE_PP_en_v1";
+    /* Canonical registry name, or a local path/directory. Used as the default
+     * when the model argument is omitted, mirroring SparseTextEmbedding(). */
+    std::string                  model_path = "prithivida/Splade_PP_en_v1";
     int                          threads = 0;
     int                          batch_size = LEMBED_DEFAULT_BATCH_SIZE;
     bool                         offline = false;
@@ -41,7 +43,12 @@ struct SparseVector {
 
 class SparseEmbeddingModel {
 public:
-    SparseEmbeddingModel(const std::string& model, const SparseEmbeddingOptions& opts = {}) {
+    SparseEmbeddingModel(const std::string& model = {},
+                         const SparseEmbeddingOptions& opts = {}) {
+        /* An empty model falls back to opts.model_path, so the field is not dead
+         * and SparseEmbeddingModel{} behaves like SparseTextEmbedding(). */
+        const std::string& name = model.empty() ? opts.model_path : model;
+
         lembed_sparse_options_t c_opts = lembed_sparse_options_default();
 
         c_opts.provider = parse_provider(opts.provider);
@@ -56,15 +63,15 @@ public:
             c_opts.cache_dir = cache_dir_buf_.c_str();
         }
 
-        int idx = lembed_find_sparse_model_by_code(model.c_str());
+int idx = lembed_resolve_sparse_model(name.c_str());
         if (idx >= 0) {
             c_opts.model = (lembed_sparse_model_t)idx;
             detail::check_status(lembed_sparse_text_embedding_create(&c_opts, &ctx_));
-        } else if (std::filesystem::exists(model)) {
+        } else if (std::filesystem::exists(name)) {
             detail::check_status(lembed_sparse_text_embedding_create_from_path(
-                model.c_str(), &c_opts, &ctx_));
+                name.c_str(), &c_opts, &ctx_));
         } else {
-            throw std::invalid_argument("Unknown model or path: " + model);
+            throw std::invalid_argument("Unknown model or path: " + name);
         }
     }
 
@@ -96,9 +103,11 @@ public:
         c_texts.reserve(texts.size());
         for (const auto& t : texts) c_texts.push_back(t.c_str());
 
-        lembed_sparse_embeddings_t result = {0};
+lembed_sparse_embeddings_t result = {0};
+        /* sparse_opts = nullptr means "use the context defaults", which is what the
+         * Python binding passes when the caller overrides nothing. */
         detail::check_status(lembed_sparse_text_embedding_embed(
-            ctx_, c_texts.data(), (int)texts.size(), batch_size, &result));
+            ctx_, c_texts.data(), (int)texts.size(), batch_size, nullptr, &result));
 
         std::vector<SparseVector> embeddings;
         try {

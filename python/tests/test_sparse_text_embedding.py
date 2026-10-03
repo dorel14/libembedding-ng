@@ -36,6 +36,46 @@ def test_sparse_list_supported_models():
         assert m.max_tokens > 0
 
 
+def test_sparse_defaults_match_registry_canonical_name():
+    """Every default model name must be a registry entry, spelled exactly.
+
+    The defaults used to be "prithvida/SPLADE_PP_en_v1" -- a misspelt org and a
+    different case. They still resolved, but only because _matches_model falls
+    back to comparing the last path segment ("Splade_PP_en_v1"), which hid the
+    typo. Tighten the matcher, or add an entry with the same basename from
+    another org, and the default would break.
+
+    Comparing against the registry listing rather than a hardcoded string is the
+    point: if the registry ever renames the entry, this test is what tells us the
+    defaults are now wrong.
+    """
+    import inspect
+
+    from libembedding import SparseTextEmbedding, sparse_best_config
+    from libembedding.models import list_sparse_models, resolve_sparse_model
+
+    registry = list_sparse_models()
+    canonical = registry[0].model_name
+
+    defaults = {
+        "SparseTextEmbedding.__init__": inspect.signature(
+            SparseTextEmbedding.__init__
+        ).parameters["model_name"].default,
+        "sparse_best_config": inspect.signature(sparse_best_config).parameters[
+            "model_name"
+        ].default,
+    }
+
+    for where, value in defaults.items():
+        assert value == canonical, (
+            f"{where} defaults to {value!r} but the registry canonical name is "
+            f"{canonical!r}"
+        )
+        # Must resolve through the documented path, not just via the
+        # last-segment fallback that hid the typo.
+        assert resolve_sparse_model(value) == 0
+
+
 def test_sparse_embed_basic(sparse_model):
     model = sparse_model()
     result = model.embed(["Hello world", "How are you?"])

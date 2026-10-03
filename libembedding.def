@@ -94,6 +94,7 @@ lembed_execution_provider_name
     lembed_find_text_model_variant
 lembed_resolve_text_model
 lembed_resolve_reranker_model
+lembed_resolve_sparse_model
 
     ; ---- Downloader ----
     lembed_ensure_text_model

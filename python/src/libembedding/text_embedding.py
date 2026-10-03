@@ -137,17 +137,23 @@ class TextEmbedding:
 
         if _is_gguf_model(model_name):
             # GGUF model: use llama.cpp backend
-            if "/" in model_name:
+            # Try the local file first, like Reranker does. Order matters: the
+            # downloader hands out mixed-separator absolute paths on Windows
+            # ("C:\Users\<user>/.cache/libembedding/.../model.gguf"), and splitting
+            # such a path on the first "/" yields repo "C:\Users\<user>" plus a
+            # *relative* filename. os.path.isfile() then misses the file that is
+            # sitting right there, and we take the download branch and fail.
+            local_path = os.path.normpath(model_name)
+            if os.path.isfile(local_path):
+                repo = ""
+                filename = local_path
+            elif "/" in model_name:
+                # "<repo>/<filename>" shorthand
                 parts = model_name.split("/", 1)
                 repo = parts[0]
                 filename = parts[1]
             else:
-                # Try local path
-                if os.path.isfile(model_name):
-                    repo = ""
-                    filename = model_name
-                else:
-                    raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
+                raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
 
             opts = ffi.new("lembed_text_options_t *")
             opts.provider = _PROVIDER_MAP.get(provider, 0)

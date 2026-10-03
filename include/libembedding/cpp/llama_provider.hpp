@@ -8,6 +8,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#ifndef LIBEMBEDDING_CPP_LLAMA_PROVIDER_HPP
+#define LIBEMBEDDING_CPP_LLAMA_PROVIDER_HPP
+
 #include <libembedding/cpp/provider.hpp>
 #include <libembedding/llamacpp_backend.h>
 #include <libembedding/text_embedding.h>
@@ -119,3 +122,5 @@ private:
 };
 
 } /* namespace lembed */
+
+#endif /* LIBEMBEDDING_CPP_LLAMA_PROVIDER_HPP */

@@ -185,7 +185,7 @@ private:
             c_opts.dim = opts.dim;
             c_opts.pooling = opts.pooling;
 
-            int idx = lembed_find_text_model_by_code(opts.model_path.c_str());
+            int idx = lembed_resolve_text_model(opts.model_path.c_str());
             if (idx >= 0) {
                 c_opts.model = (lembed_text_model_t)idx;
                 lembed_status_t s = lembed_text_embedding_create(&c_opts, &ctx);
@@ -200,8 +200,11 @@ private:
                 }
             }
 
-            dim = lembed_text_embedding_dim(ctx);
-            batch_size = ctx->batch_size;
+dim = lembed_text_embedding_dim(ctx);
+            /* ctx is opaque: batch_size cannot be read from it. c_opts.batch_size is
+             * what was asked for, and 0 means "library default", which is what the
+             * member initialiser already holds. */
+            if (c_opts.batch_size > 0) batch_size = c_opts.batch_size;
         }
 
         ~Worker() {

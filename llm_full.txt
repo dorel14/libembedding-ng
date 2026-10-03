@@ -1669,7 +1669,7 @@ Generates **sparse** embeddings (sparse vectors with token indices and weights).
 
 ```python
 SparseTextEmbedding(
-    model_name="prithvida/SPLADE_PP_en_v1",
+    model_name="prithivida/Splade_PP_en_v1",
     provider="cpu",
     device_id=0,
     cache_dir=None,
@@ -1691,7 +1691,7 @@ SparseTextEmbedding(
 
 | HuggingFace name | Description |
 |------------------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | SPLADE++ (default) |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ (default) |
 | `BAAI/bge-m3` | Multilingual BGE-M3 |
 
 #### Methods and properties
@@ -2480,7 +2480,7 @@ for (int i = 0; i < count; i++) {
 
 | HuggingFace name | Dim | Max tokens | Description |
 |------------------|-----|-----------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | variable | 512 | SPLADE++ v1 (default) |
+| `prithivida/Splade_PP_en_v1` | variable | 512 | SPLADE++ v1 (default) |
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ languages |
 
 > **Note:** Sparse embeddings have no fixed dimension. The returned dimension equals the number of active tokens in the vocabulary.
@@ -5145,7 +5145,7 @@ Génère des embeddings **sparse** (vecteurs creux avec indices de tokens et poi
 
 ```python
 SparseTextEmbedding(
-    model_name="prithvida/SPLADE_PP_en_v1",
+    model_name="prithivida/Splade_PP_en_v1",
     provider="cpu",
     device_id=0,
     cache_dir=None,
@@ -5167,7 +5167,7 @@ SparseTextEmbedding(
 
 | Nom HuggingFace | Description |
 |-----------------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | SPLADE++ (défaut) |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ (défaut) |
 | `BAAI/bge-m3` | BGE-M3 multilingue |
 
 #### Méthodes et propriétés
@@ -5931,7 +5931,7 @@ Les modèles GGUF sont chargés par chemin de fichier (pas par enum). Ils utilis
 
 | Nom HuggingFace | Dim | Tokens max | Description |
 |-----------------|-----|-----------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | variable | 512 | SPLADE++ v1 (défaut) |
+| `prithivida/Splade_PP_en_v1` | variable | 512 | SPLADE++ v1 (défaut) |
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ langues |
 
 > **Note :** Les embeddings sparse n'ont pas de dimension fixe. La dimension retournée correspond au nombre de tokens actifs dans le vocabulaire.

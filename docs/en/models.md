@@ -174,7 +174,7 @@ for (int i = 0; i < count; i++) {
 
 | HuggingFace name | Dim | Max tokens | Description |
 |------------------|-----|-----------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | variable | 512 | SPLADE++ v1 (default) |
+| `prithivida/Splade_PP_en_v1` | variable | 512 | SPLADE++ v1 (default) |
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ languages |
 
 > **Note:** Sparse embeddings have no fixed dimension. The returned dimension equals the number of active tokens in the vocabulary.

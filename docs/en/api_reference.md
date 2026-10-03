@@ -106,7 +106,7 @@ Generates **sparse** embeddings (sparse vectors with token indices and weights).
 
 ```python
 SparseTextEmbedding(
-    model_name="prithvida/SPLADE_PP_en_v1",
+    model_name="prithivida/Splade_PP_en_v1",
     provider="cpu",
     device_id=0,
     cache_dir=None,
@@ -128,7 +128,7 @@ SparseTextEmbedding(
 
 | HuggingFace name | Description |
 |------------------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | SPLADE++ (default) |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ (default) |
 | `BAAI/bge-m3` | Multilingual BGE-M3 |
 
 #### Methods and properties

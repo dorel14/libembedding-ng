@@ -107,7 +107,7 @@ Génère des embeddings **sparse** (vecteurs creux avec indices de tokens et poi
 
 ```python
 SparseTextEmbedding(
-    model_name="prithvida/SPLADE_PP_en_v1",
+    model_name="prithivida/Splade_PP_en_v1",
     provider="cpu",
     device_id=0,
     cache_dir=None,
@@ -129,7 +129,7 @@ SparseTextEmbedding(
 
 | Nom HuggingFace | Description |
 |-----------------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | SPLADE++ (défaut) |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ (défaut) |
 | `BAAI/bge-m3` | BGE-M3 multilingue |
 
 #### Méthodes et propriétés
