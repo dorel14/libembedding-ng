@@ -6,15 +6,15 @@ Creates synthetic images with controlled properties (colors, patterns)
 to define ground truth similarity, then measures retrieval quality.
 """
 import argparse
-import sys
+import math
 import os
 import struct
+import sys
 import zlib
-import math
-import random
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -200,8 +200,8 @@ def main():
     # Create test dataset
     images, metadata = create_test_dataset()
     print(f"Test dataset: {len(images)} images")
-    print(f"Colors: {len(set(m['color'] for m in metadata))}")
-    print(f"Patterns: {len(set(m['pattern'] for m in metadata))}")
+    print(f"Colors: {len({m['color'] for m in metadata})}")
+    print(f"Patterns: {len({m['pattern'] for m in metadata})}")
     print()
 
     models = [

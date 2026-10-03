@@ -3,20 +3,21 @@ Real image multimodal benchmark: Text→Image retrieval.
 Uses CLIP text encoder + vision encoder with real images.
 """
 import argparse
-import sys
-import os
-import math
 import glob
+import math
+import os
+import sys
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
 cffi.FFI.cdef = _patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))
-from libembedding import TextEmbedding, ImageEmbedding
+from libembedding import ImageEmbedding, TextEmbedding
 
 
 def cosine_similarity(a, b):
@@ -164,18 +165,14 @@ def main():
                 emb = vision_encoder.embed_bytes([img_bytes], batch_size=1)
                 image_embs.append(emb[0])
                 valid_paths.append(path)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
                 print(f"  Failed to embed {os.path.basename(path)}: {e}")
 
         print(f"Successfully embedded {len(image_embs)} images")
         print()
 
         # Text->Image retrieval
-        print(f"--- Text->Image Retrieval ---")
-        all_recalls = []
-        all_ndcgs = []
-        all_mrrs = []
-        all_maps = []
+        print("--- Text->Image Retrieval ---")
 
         for query in queries:
             # Encode text query
@@ -203,7 +200,7 @@ def main():
         print()
 
         # Image->Image retrieval (consistency check)
-        print(f"--- Image->Image Retrieval (self-consistency) ---")
+        print("--- Image->Image Retrieval (self-consistency) ---")
         recalls = []
         ndcgs = []
 

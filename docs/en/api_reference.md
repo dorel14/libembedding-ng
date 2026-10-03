@@ -47,7 +47,7 @@ TextEmbedding(
 | `pooling` | `str` | `"mean"` | Pooling strategy for local models: `"cls"` or `"mean"` |
 | `auto_workers` | `bool` | `False` | `True` = auto-detect optimal sessions/workers for llama.cpp backend |
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
-| `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"` (None = model default) |
+| `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -58,17 +58,26 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
 | `dim` | `int` (property) | Embedding dimension |
+| `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name or local path |
+| `model_name` | `str` (property) | Registry name of the loaded model |
 | `info()` | `ModelDesc` | Loaded model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
-| `close()` | `None` | Release underlying C resources |
-| `list_supported_models()` | `list[ModelInfo]` | (static) List all supported text models |
+| `close()` | `None` | Release resources |
 | `__enter__()` | `self` | Context manager support |
 | `__exit__()` | `None` | Calls `close()` automatically |
-| `from_gguf(repo, filename=None, provider="llamacpp", ...)` | `TextEmbedding` | Load a GGUF model from HuggingFace (requires llama.cpp backend) |
-| `from_mode(mode="balanced", **kwargs)` | `TextEmbedding` | (classmethod) Create TextEmbedding from preset mode: `"fast"`, `"balanced"`, `"quality"` |
-| `supports_llamacpp()` | `bool` | (static) Check if llama.cpp backend is compiled in |
+| `from_mode(mode="balanced", **kwargs)` | `TextEmbedding` | (classmethod) Create a TextEmbedding from a preset mode: `"fast"`, `"balanced"`, `"quality"` |
+
+> **No `list_supported_models()` on `TextEmbedding`** — it only exists on
+> `SparseTextEmbedding`, `ImageEmbedding` and `Reranker`. For text models use the
+> module-level `list_text_models()`.
+
+> **No `from_gguf()` and no `supports_llamacpp()`.** GGUF loading goes through
+> the constructor: `_is_gguf_model()` recognises the `.gguf` extension and
+> switches to the llama.cpp backend. For a HuggingFace repo pass
+> `"repo/filename.gguf"`; for a local file pass the path.
+> `detect_backend(model_name)` reports the backend that was selected.
 
 #### Example
 
@@ -228,8 +237,17 @@ Reranker(
 | `BAAI/bge-reranker-base` | BGE Reranker base (default) |
 | `BAAI/bge-reranker-v2-m3` | Multilingual BGE Reranker v2 |
 | `jinaai/jina-reranker-v1-turbo-en` | Jina Reranker v1 turbo |
-  | `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 multilingual |
- | `jinaai/jina-reranker-v1-turbo-en` (quantized) | Jina Reranker v1 turbo English (INT8) |
+| `jinaai/jina-reranker-v2-base-multilingual` | Jina Reranker v2 base multilingual |
+| `jinaai/jina-reranker-v1-turbo-en-quantized` | Jina Reranker v1 turbo English (INT8) |
+
+> **`quantization=` does not change the reranker weights.** Unlike
+> `TextEmbedding`, it does not resolve a registry entry: it only sets ONNX
+> Runtime session options. To get INT8, pass the **name** of the quantized entry
+> — `jinaai/jina-reranker-v1-turbo-en-quantized`, which points at
+> `onnx/model_quantized.onnx` of the `jinaai/jina-reranker-v1-turbo-en` repo.
+> Unlike text models, a quantized reranker entry has a `model_name` **distinct**
+> from its FP32 version, which is precisely why no per-mode resolution exists
+> there today.
 
 #### Methods and properties
 
@@ -376,7 +394,7 @@ cache.clear()
 
 | Function | Description |
 |----------|-------------|
-| `autotune(model_name, full=False)` | Auto-tune a model. Returns `TuningResult`. |
+| `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune a model. Returns `TuningResult`. `texts` supplies a measurement corpus (sampled down to `max_sample_size`); `None` uses a synthetic corpus. |
 | `autotune_unified(task, model_name, mode="quick")` | Unified auto-tune for any task type. See [Unified Tuning](#unified-tuning). |
 | `sparse_autotune(model_name, mode="quick")` | Auto-tune sparse embedding. Returns `SparseTuningResult`. |
 | `image_autotune(model_name, mode="quick")` | Auto-tune image embedding. Returns `ImageTuningResult`. |

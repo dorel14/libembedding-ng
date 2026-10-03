@@ -37,6 +37,8 @@ class SparseTextEmbedding:
         show_download_progress: Show download progress bar.
         top_terms: Max number of terms to keep per document (0 = all).
         min_weight: Minimum weight threshold for pruning (0.0 = no pruning).
+        storage_format: Output format - "dict" (default, sorted by weight desc),
+            "index_order" (sorted by index asc).
         num_threads: Deprecated; use ``threads``.
     """
 
@@ -54,6 +56,7 @@ class SparseTextEmbedding:
         show_download_progress: bool = True,
         top_terms: int = 0,
         min_weight: float = 0.0,
+        storage_format: str = "dict",
         num_threads: int | None = None,
     ):
         if num_threads is not None:
@@ -63,6 +66,16 @@ class SparseTextEmbedding:
                 stacklevel=2,
             )
             threads = num_threads
+
+        _STORAGE_FORMAT_MAP = {
+            "dict": lib.LEMBED_SPARSE_FORMAT_DICT,
+            "index_order": lib.LEMBED_SPARSE_FORMAT_INDEX_ORDER,
+        }
+        storage_fmt = _STORAGE_FORMAT_MAP.get(storage_format.lower())
+        if storage_fmt is None:
+            raise ValueError(
+                f"Unknown storage_format '{storage_format}'. Use: {list(_STORAGE_FORMAT_MAP.keys())}"
+            )
 
         opts = lib.lembed_sparse_options_default()
         opts.provider = _PROVIDER_MAP[provider.lower()]
@@ -78,6 +91,7 @@ class SparseTextEmbedding:
         opts.show_download_progress = int(show_download_progress)
         opts.top_k = top_terms
         opts.min_weight = min_weight
+        opts.storage_format = storage_fmt
 
         ctx_ptr = ffi.new("lembed_sparse_embedding_ctx_t **")
 
@@ -112,9 +126,23 @@ class SparseTextEmbedding:
         return self._batch_size
 
     def embed(
-        self, texts: list[str], *, batch_size: int | None = None
+        self,
+        texts: list[str],
+        *,
+        batch_size: int | None = None,
+        top_terms: int | None = None,
+        min_weight: float | None = None,
+        storage_format: str | None = None,
     ) -> list[SparseEmbedding]:
         """Embed texts into sparse vectors.
+
+        Args:
+            texts: List of strings to embed.
+            batch_size: Batch size override (None = use default).
+            top_terms: Override max terms per document (None = use constructor value).
+            min_weight: Override minimum weight threshold (None = use constructor value).
+            storage_format: Override output format - "dict" or "index_order"
+                (None = use constructor value).
 
         Returns:
             List of SparseEmbedding with indices (int32) and values (float32).
@@ -129,10 +157,37 @@ class SparseTextEmbedding:
         c_strs = [ffi.new("char[]", e) for e in encoded]
         c_texts = ffi.new("char*[]", c_strs)
 
+        # Prepare sparse options for per-call overrides
+        sparse_opts = ffi.NULL
+        sparse_opts_ptr = ffi.NULL
+        if top_terms is not None or min_weight is not None or storage_format is not None:
+            sparse_opts_ptr = ffi.new("lembed_sparse_options_t *")
+            sparse_opts = sparse_opts_ptr[0]
+            # Copy current context options as base
+            sparse_opts.top_k = self._sparse_opts.top_k
+            sparse_opts.min_weight = self._sparse_opts.min_weight
+            sparse_opts.storage_format = self._sparse_opts.storage_format
+            # Apply overrides
+            if top_terms is not None:
+                sparse_opts.top_k = top_terms
+            if min_weight is not None:
+                sparse_opts.min_weight = min_weight
+            if storage_format is not None:
+                _STORAGE_FORMAT_MAP = {
+                    "dict": lib.LEMBED_SPARSE_FORMAT_DICT,
+                    "index_order": lib.LEMBED_SPARSE_FORMAT_INDEX_ORDER,
+                }
+                fmt = _STORAGE_FORMAT_MAP.get(storage_format.lower())
+                if fmt is None:
+                    raise ValueError(
+                        f"Unknown storage_format '{storage_format}'. Use: {list(_STORAGE_FORMAT_MAP.keys())}"
+                    )
+                sparse_opts.storage_format = fmt
+
         result = ffi.new("lembed_sparse_embeddings_t *")
         check_status(
             lib.lembed_sparse_text_embedding_embed(
-                self._ctx, c_texts, n, bs, ffi.NULL, result
+                self._ctx, c_texts, n, bs, sparse_opts_ptr, result
             )
         )
 

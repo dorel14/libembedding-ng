@@ -1,6 +1,13 @@
 /*
  * test_llama_embedding.cpp - Standalone test for llama.cpp backend
  * Compiles directly against llama.cpp without full libembedding build.
+ *
+ * The C API is declared by the public headers below. This file used to repeat
+ * those declarations locally so it could build without the library, but the
+ * includes were still there: every type in the local block (lembed_embeddings_t,
+ * lembed_status_t, lembed_text_options_t, LEMBED_OK) collided with the real
+ * one and the target failed to compile. It never produced an executable, so
+ * ctest reported it as "Not Run" while the other tests passed.
  */
 
 #include <cstdio>
@@ -10,48 +17,10 @@
 #include <vector>
 #include <string>
 
-// Include the real C API headers
+// The real C API headers: single source of truth for every type and prototype.
 #include <libembedding/text_embedding.h>
+#include <libembedding/error.h>
 #include <libembedding/llamacpp_backend.h>
-
-// Minimal C API for testing
-extern "C" {
-    typedef struct lembed_text_embedding lembed_text_embedding_t;
-    typedef struct { int dim; int num_embeddings; float* data; } lembed_embeddings_t;
-    typedef enum { LEMBED_OK = 0 } lembed_status_t;
-    typedef struct {
-        int model;
-        int provider;
-        int device_id;
-        const char* cache_dir;
-        int max_length;
-        int num_threads;
-        int show_download_progress;
-        int batch_size;
-        int offline;
-        int pooling;
-        int dim;
-        int llama_n_ctx;
-        int llama_n_gpu_layers;
-        int llama_n_batch;
-        int llama_verbose;
-        int backend;
-        int batch_strategy;
-    } lembed_text_options_t;
-
-    lembed_text_options_t lembed_text_options_default(void);
-    lembed_status_t lembed_text_embedding_create_from_gguf_path(
-        const char* gguf_path, const lembed_text_options_t* options,
-        lembed_text_embedding_t** out);
-    lembed_status_t lembed_text_embedding_embed(
-        lembed_text_embedding_t* ctx, const char* const* texts,
-        int num_texts, int batch_size, lembed_embeddings_t* result);
-    int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx);
-    void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
-    void lembed_embeddings_free(lembed_embeddings_t* result);
-    int lembed_llama_backend_available(void);
-    const char* lembed_last_error(void);
-}
 
 #define ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -264,9 +233,21 @@ static void test_stress(const char* gguf_path) {
     fprintf(stderr, "  Stress: %d passed, %d failed\n\n", passes, failures);
 }
 
+/* The GGUF fixture is not vendored. Resolve it from argv, then the environment,
+ * then a relative default, so the test is not tied to one machine's home
+ * directory. */
+static bool file_readable(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
 int main(int argc, char** argv) {
-    const char* gguf_path = "C:\\Users\\david\\.cache\\libembedding\\gguf\\all-MiniLM-L6-v2-Q4_K_M.gguf";
-    if (argc > 1) gguf_path = argv[1];
+    const char* env_path = getenv("LEMBED_TEST_GGUF");
+    const char* gguf_path = (argc > 1) ? argv[1]
+                       : (env_path && env_path[0]) ? env_path
+                       : "./models/all-MiniLM-L6-v2-Q4_K_M.gguf";
 
     fprintf(stderr, "=== llama.cpp Backend Tests ===\n");
     fprintf(stderr, "Model: %s\n\n", gguf_path);
@@ -274,6 +255,15 @@ int main(int argc, char** argv) {
     if (!lembed_llama_backend_available()) {
         fprintf(stderr, "ERROR: llama.cpp backend not compiled in\n");
         return 1;
+    }
+
+    /* These are integration tests: they need a real GGUF model. Skip cleanly
+     * when it is absent so ctest does not report a failure for a missing
+     * fixture. */
+    if (!file_readable(gguf_path)) {
+        fprintf(stderr, "SKIP: GGUF model not found: %s\n", gguf_path);
+        fprintf(stderr, "Pass a path as argv[1] or set LEMBED_TEST_GGUF to run them.\n");
+        return 0;
     }
 
     test_basic(gguf_path);

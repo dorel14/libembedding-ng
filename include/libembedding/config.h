@@ -55,6 +55,21 @@
 extern "C" {
 #endif
 const char* lembed_version(void);
+
+/* ONNX Runtime version the library is linked against, e.g. "1.22.0".
+ *
+ * Benchmarks and bug reports must record this. Quantized throughput depends on
+ * the runtime as much as on the weights: the QDQ fusion that turns
+ * DequantizeLinear + MatMulInteger into QLinearMatMul is a runtime feature, so
+ * two runs of the same model on different ORT versions are not comparable.
+ * Returns a static string; never NULL. Implemented where onnxruntime_c_api.h is
+ * available, which is why the declaration lives here but not the definition. */
+const char* lembed_onnxruntime_version(void);
+
+/* Name of an execution provider, e.g. "CPU". Returns "unknown" for a value that
+ * is not a lembed_execution_provider_t. Benchmarks record it so a result cannot
+ * be read as a CPU number when a GPU provider served it. */
+const char* lembed_execution_provider_name(int provider);
 #ifdef __cplusplus
 }
 #endif
@@ -69,6 +84,18 @@ extern "C" {
 
 const char* lembed_version(void) {
     return LIBEMBEDDING_VERSION_STRING;
+}
+
+const char* lembed_execution_provider_name(int provider) {
+    switch (provider) {
+        case 0: return "CPU";              /* LEMBED_PROVIDER_CPU */
+        case 1: return "CUDA";             /* LEMBED_PROVIDER_CUDA */
+        case 2: return "CoreML";           /* LEMBED_PROVIDER_COREML */
+        case 3: return "DirectML";         /* LEMBED_PROVIDER_DIRECTML */
+        case 4: return "TensorRT";         /* LEMBED_PROVIDER_TENSORRT */
+        case 5: return "llama.cpp";        /* LEMBED_PROVIDER_LLAMACPP */
+        default: return "unknown";
+    }
 }
 
 #ifdef __cplusplus

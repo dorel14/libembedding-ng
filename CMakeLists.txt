@@ -156,6 +156,12 @@ endif()
 # llama.cpp (always enabled, bundled in third_party/)
 # Must be declared BEFORE the main library target so that ggml/llama targets
 # are available when the install(EXPORT) is generated.
+#
+# The bundled snapshot is trimmed: only CMakeLists.txt, LICENSE, AUTHORS,
+# README.md, cmake/, ggml/, include/, src/, licenses/ and vendor/ are kept
+# (see third_party/README.md and scripts/prune_llama_cpp.ps1). Every option
+# below that points at a removed directory is pinned OFF so a stray -D cannot
+# make the configure step fail on a missing add_subdirectory() target.
 # =========================================================================
 set(LLAMA_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp")
 
@@ -168,6 +174,17 @@ set(LLAMA_SHARED OFF CACHE BOOL "" FORCE)
 set(LLAMA_CUDA OFF CACHE BOOL "" FORCE)
 set(LLAMA_VULKAN OFF CACHE BOOL "" FORCE)
 set(LLAMA_METAL OFF CACHE BOOL "" FORCE)
+
+# Directories removed from the snapshot: keep their entry points OFF.
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)  # common/      (server, CLI utils)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)   # tools/       (server, mtmd CLI)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)     # app/         (unified binary)
+set(LLAMA_BUILD_MTMD OFF CACHE BOOL "" FORCE)    # tools/mtmd/  (multimodal CLI)
+set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)    # ggml/tests/
+set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # ggml/examples/
+set(GGML_OPENCL OFF CACHE BOOL "" FORCE)         # ggml-opencl/ (kernels/embed_kernel.py)
+set(GGML_WEBGPU OFF CACHE BOOL "" FORCE)         # ggml-webgpu/ (wgsl-shaders/embed_wgsl.py)
+set(GGML_VIRTGPU OFF CACHE BOOL "" FORCE)        # ggml-virtgpu/
 
 add_subdirectory(${LLAMA_CPP_DIR} ${CMAKE_BINARY_DIR}/llama.cpp-build EXCLUDE_FROM_ALL)
 

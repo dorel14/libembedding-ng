@@ -119,7 +119,7 @@ for m in libembedding.list_text_models():
 | `snowflake/snowflake-arctic-embed-l` | 1024 | CLS | none |
 | `snowflake/snowflake-arctic-embed-l` | 1024 | CLS | dynamic |
 
-> **Note:** Variants suffixed with `_Q` use quantization (static or dynamic) to reduce model size and speed up inference at the cost of slight accuracy loss.
+> **Note:** Variants suffixed with `_Q` use quantization (static or dynamic) to reduce model size — 2 to 4x on dense text embeddings, per the [quantization benchmark](performance_tuning.html#quantization-fp32-vs-int8) — at the cost of slight accuracy loss. The throughput effect depends on the model and on the weights' actual format, and must be measured, not assumed. Two traps: the `_Q` suffix and the "quantized" label often mean **FP16**, not INT8 — initializers can be `FLOAT16`, which is the case for all four `Qdrant/*-onnx-Q` entries. On the reference CPU (Intel Core i7-1065G7, ONNX Runtime 1.29.0), dynamic INT8 came out **1.7x faster** than FP32 on MiniLM and **2.0x** on BGE, with 3.9x less disk and 1.8-2.1x less peak RAM; the BGE `_Q` entry, being FP16, came out **9.5x slower**. Benchmark your own model before choosing.
 
 ---
 

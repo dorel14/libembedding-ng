@@ -2,13 +2,11 @@
 Reranking batching benchmark - measures batch_size sensitivity.
 """
 import argparse
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from bench_common import (
-    generate_documents, benchmark_rerank, get_rss_mb
-)
+from bench_common import benchmark_rerank, generate_documents
 from libembedding import Reranker
 
 

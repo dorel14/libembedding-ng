@@ -7,6 +7,11 @@ name: Version Sync Check
 on:
   pull_request:
     branches: [main]
+  push:
+    # `dev` est verifie aussi : c'est la branche que scripts/sync_branch.py
+    # met a jour apres chaque publication, et la seule a valider avant d'y
+    # pousser. Sans ce push, `dev` ne serait verifie qu'au PR vers `main`.
+    branches: [main, dev]
   workflow_call:
 
 jobs:

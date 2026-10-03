@@ -4,13 +4,11 @@ Note: libembedding doesn't have a session pool for rerankers yet.
 This benchmark tests thread scaling with a single session.
 """
 import argparse
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from bench_common import (
-    generate_documents, benchmark_rerank, get_rss_mb
-)
+from bench_common import benchmark_rerank, generate_documents, get_rss_mb
 from libembedding import Reranker
 
 
@@ -75,11 +73,13 @@ def main():
                 'rss_mb': rss,
             })
             reranker.close()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"{config:>10} | {threads:>8} | SKIP: {e}")
+            # Closing a context that failed to build must not mask the
+            # error already reported just above.
             try:
                 reranker.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - deliberate cleanup
                 pass
     print()
 

@@ -121,10 +121,32 @@ lembed_status_t lembed_text_embedding_create_v2(
         lembed_text_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    lembed_status_t s = lembed_text_embedding_create(&options->base, out);
+    /* A requested quantization mode selects a different set of weights, not a
+     * different session configuration: each quantized sibling is its own
+     * registry entry with its own model_file. It has to be resolved *before*
+     * the model is created, otherwise the request silently loads the default
+     * file and the override reaches only the ctx field, never the session. */
+    lembed_text_options_t base = options->base;
+    int requested = (int)options->quantization;
+    int resolved = requested;
+
+    if (options->quantization != LEMBED_QUANTIZATION_AUTO) {
+        lembed_model_info_t info;
+        if (lembed_get_text_model_info(base.model, &info) == LEMBED_OK &&
+            (int)info.quantization != requested) {
+            int variant = lembed_find_text_model_variant(info.model_name, requested);
+            if (variant < 0) return LEMBED_ERROR_MODEL_NOT_FOUND;
+            base.model = (lembed_text_model_t)variant;
+            resolved = requested;
+        }
+    }
+
+    lembed_status_t s = lembed_text_embedding_create(&base, out);
     if (s != LEMBED_OK || !*out) return s;
 
-    (*out)->quantization = (lembed_quantization_t)options->quantization;
+    /* Registry entry and request now agree; keep them in sync so ctx never
+     * reports a mode the loaded file does not implement. */
+    (*out)->quantization = (lembed_quantization_t)resolved;
     return LEMBED_OK;
 }
 

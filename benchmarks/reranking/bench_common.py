@@ -1,14 +1,13 @@
 """
 Reranking benchmark utilities - shared helpers for all reranking benchmarks.
 """
-import time
-import sys
 import os
 import platform
+import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))
 
-from libembedding import Reranker
 
 
 def get_rss_mb():

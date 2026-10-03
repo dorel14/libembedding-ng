@@ -3,8 +3,8 @@ Reranking model comparison benchmark - compares MiniLM vs BGE vs Jina rerankers.
 Tests if the bottleneck is the model itself or the code.
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))
@@ -55,7 +55,7 @@ def get_process_memory_mb():
         try:
             p = psutil.Process()
             return p.memory_info().rss / (1024 * 1024)
-        except Exception:
+        except Exception:  # noqa: BLE001 - probe failure means "unmeasured"
             return None
     return None
 
@@ -68,7 +68,7 @@ def collect_stats(reranker):
             'batches_run': s.batches_run,
             'avg_latency_ms': s.avg_latency_ms,
         }
-    except Exception:
+    except Exception:  # noqa: BLE001 - stats are best-effort
         return None
 
 
@@ -183,7 +183,7 @@ def main():
             })
             reranker.close()
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"{model_name:<45} | {'---':>8} | {'---':>8} | {'SKIP':>10}")
             print(f"  Reason: {e}")
             results.append({

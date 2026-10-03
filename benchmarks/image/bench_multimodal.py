@@ -11,15 +11,15 @@ Once the text encoder is exposed, this benchmark should be extended to:
 - Image→Text: query image → find matching captions
 """
 import argparse
-import sys
+import math
 import os
 import struct
+import sys
 import zlib
-import math
-import random
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -193,8 +193,8 @@ def main():
     # Create dataset
     images, metadata = create_multimodal_dataset()
     print(f"Dataset: {len(images)} images")
-    print(f"Colors: {len(set(m['color'] for m in metadata))}")
-    print(f"Patterns: {len(set(m['pattern'] for m in metadata))}")
+    print(f"Colors: {len({m['color'] for m in metadata})}")
+    print(f"Patterns: {len({m['pattern'] for m in metadata})}")
     print()
 
     models = [
@@ -255,7 +255,7 @@ def main():
     print("## Results (for markdown)")
     print()
     print(f"| Model | Recall@{args.k} | NDCG@{args.k} | MRR | mAP |")
-    print(f"|-------|---------|---------|-----|-----|")
+    print("|-------|---------|---------|-----|-----|")
 
 
 if __name__ == '__main__':

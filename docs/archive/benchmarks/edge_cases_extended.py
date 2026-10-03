@@ -3,13 +3,14 @@ Extended edge cases test for libembedding.
 Tests boundary conditions and error handling.
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import TextEmbedding, TextEmbeddingPool
 import numpy as np
+from libembedding import TextEmbedding, TextEmbeddingPool
+
 
 def test_edge_cases():
     """Test various edge cases."""
@@ -44,7 +45,7 @@ def test_edge_cases():
         ("Flag emoji", "🇫🇷🇩🇪🇯🇵🇺🇸"),
         ("CJK mixed", "Hello 世界 안녕 こんにちは"),
         ("Right-to-left", "Hello مرحبا world"),
-        ("Zero-width space", "Hello​world"),
+        ("Zero-width space", "Hello\u200bworld"),
         ("Combining chars", "é̈̃"),
 
         # Long texts
@@ -85,7 +86,7 @@ def test_edge_cases():
             else:
                 print(f"  {name:<30} FAIL (n={result.shape[0]})")
                 failed += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - report and continue
             print(f"  {name:<30} ERROR ({type(e).__name__}: {e})")
             failed += 1
 
@@ -149,7 +150,7 @@ def test_pool_edge_cases():
 
         import time
         t0 = time.perf_counter()
-        result = pool.embed(texts)
+        pool.embed(texts)
         t1 = time.perf_counter()
 
         elapsed = t1 - t0
@@ -162,7 +163,7 @@ def test_pool_edge_cases():
 
 
 def main():
-    passed, failed = test_edge_cases()
+    test_edge_cases()
     test_large_batch()
     test_pool_edge_cases()
 

@@ -3,8 +3,8 @@ Reranking document length benchmark - measures sensitivity to token length.
 The cross-encoder cost is very sensitive to sequence length.
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python', 'src'))

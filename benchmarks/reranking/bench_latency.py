@@ -2,13 +2,11 @@
 Reranking latency benchmark - measures absolute cost for different corpus sizes.
 """
 import argparse
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from bench_common import (
-    generate_documents, benchmark_rerank, get_rss_mb, median, p95
-)
+from bench_common import benchmark_rerank, generate_documents, get_rss_mb
 from libembedding import Reranker
 
 

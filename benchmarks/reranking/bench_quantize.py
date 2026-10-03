@@ -3,12 +3,13 @@ Quantization benchmark: Jina-v1-turbo FP32 vs INT8.
 Measures latency, throughput, RAM, and score correlation.
 """
 import argparse
-import sys
 import os
+import sys
 import time
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -49,7 +50,7 @@ def benchmark_model(model_name, docs, query, threads, batch_size, warmup, iterat
     pid = os.getpid()
     result = subprocess.run(
         ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'WorkingSetSize'],
-        capture_output=True, text=True, timeout=5)
+        capture_output=True, text=True, timeout=5, check=False)
     rss_before = 0
     for line in result.stdout.strip().split('\n'):
         line = line.strip()
@@ -71,7 +72,7 @@ def benchmark_model(model_name, docs, query, threads, batch_size, warmup, iterat
     # Measure RSS after load
     result = subprocess.run(
         ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'WorkingSetSize'],
-        capture_output=True, text=True, timeout=5)
+        capture_output=True, text=True, timeout=5, check=False)
     rss_after_load = 0
     for line in result.stdout.strip().split('\n'):
         line = line.strip()

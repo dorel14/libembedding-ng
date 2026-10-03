@@ -4,11 +4,11 @@ Measures: loading time, inference time, memory, avg non-zero terms, output size.
 """
 from __future__ import annotations
 
+import argparse
+import os
+import sys
 import time
 import tracemalloc
-import argparse
-import sys
-import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../python/src"))
 
@@ -108,7 +108,7 @@ def main():
         try:
             result = benchmark_model(model_name, texts, args.runs)
             all_results.append(result)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"ERROR benchmarking {model_name}: {e}")
 
     # Summary table

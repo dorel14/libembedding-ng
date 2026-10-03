@@ -3,10 +3,10 @@ Test autotune with large corpus (2M lines simulation)
 Demonstrates stratified sampling for efficient benchmarking.
 """
 
-import sys
 import os
-import time
 import random
+import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
@@ -114,8 +114,8 @@ pool.close()
 print()
 print("=== Summary ===")
 print(f"  Corpus: {n_lines:,} texts")
-print(f"  Sample for autotune: 100 texts (0.005% of corpus)")
-print(f"  Autotune time: ~10-15s")
+print("  Sample for autotune: 100 texts (0.005% of corpus)")
+print("  Autotune time: ~10-15s")
 print(f"  Throughput: {docs_per_sec:.0f} docs/s")
 print(f"  Time to embed full corpus: {n_lines / docs_per_sec / 60:.1f} minutes")
 

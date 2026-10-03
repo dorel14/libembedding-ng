@@ -32,7 +32,50 @@ lembed_status_t lembed_list_reranker_models(const lembed_model_info_t** out, int
 /* Lookup model enum from HuggingFace model code string, returns -1 if not found */
 int lembed_find_text_model_by_code(const char* model_code);
 int lembed_find_sparse_model_by_code(const char* model_code);
+int lembed_find_image_model_by_code(const char* model_code);
 int lembed_find_reranker_model_by_code(const char* model_code);
+
+/* Resolve a quantization request to the registry entry that provides it.
+ *
+ * The match is on model_name (the canonical registry name), not model_code: a
+ * HuggingFace repo matches no entry. Each quantized sibling is its own registry
+ * entry with its own model_file, so this selects a different set of weights,
+ * not a different session configuration.
+ *
+ * Returns the entry index, or -1 when this model has no entry in the requested
+ * mode. On -1 the thread-local error names the mode asked for and the modes the
+ * model actually has.
+ *
+ * AUTO is not a weights selection: no registry entry carries that mode, so it
+ * always returns -1 -- and it still sets the thread-local error, like any mode
+ * that cannot be resolved. Callers that accept AUTO must therefore check for it
+ * before calling: lembed_text_embedding_create_v2() resolves an explicit mode
+ * only, and never calls this with AUTO. */
+int lembed_find_text_model_variant(const char* model_name, int quantization);
+
+/* Resolve a user-supplied model string to a registry entry, accepting either
+ * form of the name: the HuggingFace repo (model_code) or the canonical
+ * registry name (model_name).
+ *
+ * Every entry point that takes a model as a string should go through this.
+ * The two names are genuinely different strings for the same model --
+ * "Qdrant/all-MiniLM-L6-v2-onnx" and "sentence-transformers/all-MiniLM-L6-v2"
+ * are one model -- and a caller holding one of them has no reason to know that
+ * the other is the one some function expects. Requiring the caller to remember
+ * which of the two a given function takes is a trap, not a type system: it is
+ * invisible at compile time and fails at runtime with MODEL_NOT_FOUND.
+ *
+ * This mirrors what the Python bindings already do in resolve_text_model(), and
+ * what the reranker benchmark already did on its own (bench_reranker_config
+ * matched model_name or model_code). The C API now behaves the same way
+ * everywhere.
+ *
+ * Resolution order: exact model_code, then exact model_name. Returns the entry
+ * index, or -1 with the thread-local error set. On success the caller should
+ * prefer info.model_code as the canonical string, so a cache keyed on it can be
+ * found again by a caller that passed the other form. */
+int lembed_resolve_text_model(const char* model);
+int lembed_resolve_reranker_model(const char* model);
 
 #ifdef __cplusplus
 }
@@ -43,7 +86,11 @@ int lembed_find_reranker_model_by_code(const char* model_code);
 #ifndef LIBEMBEDDING_MODEL_REGISTRY_IMPL
 #define LIBEMBEDDING_MODEL_REGISTRY_IMPL
 
+#include <stdio.h>
 #include <string.h>
+
+/* Provides lembed::detail::set_error() used for registry diagnostics. */
+#include "error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,24 +127,24 @@ static const lembed_model_info_t lembed__text_models[] = {
       768, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_BGE_BASE_EN_V15_Q */
     { "BAAI/bge-base-en-v1.5", "Qdrant/bge-base-en-v1.5-onnx-Q",
-      "model_optimized.onnx", "Quantized v1.5 base English model",
-      768, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_STATIC },
+      "model_optimized.onnx", "FP16 v1.5 base English model (ORT-optimized graph)",
+      768, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_FP16 },
     /* LEMBED_TEXT_BGE_LARGE_EN_V15 */
     { "BAAI/bge-large-en-v1.5", "Xenova/bge-large-en-v1.5",
       "onnx/model.onnx", "v1.5 release of the large English model",
       1024, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_BGE_LARGE_EN_V15_Q */
     { "BAAI/bge-large-en-v1.5", "Qdrant/bge-large-en-v1.5-onnx-Q",
-      "model_optimized.onnx", "Quantized v1.5 large English model",
-      1024, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_STATIC },
+      "model_optimized.onnx", "FP16 v1.5 large English model (ORT-optimized graph)",
+      1024, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_FP16 },
     /* LEMBED_TEXT_BGE_SMALL_EN_V15 (default) */
     { "BAAI/bge-small-en-v1.5", "Xenova/bge-small-en-v1.5",
       "onnx/model.onnx", "v1.5 release of the fast and default English model",
       384, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_BGE_SMALL_EN_V15_Q */
     { "BAAI/bge-small-en-v1.5", "Qdrant/bge-small-en-v1.5-onnx-Q",
-      "model_optimized.onnx", "Quantized v1.5 fast and default English model",
-      384, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_STATIC },
+      "model_optimized.onnx", "FP16 v1.5 fast and default English model (ORT-optimized graph)",
+      384, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_FP16 },
     /* LEMBED_TEXT_NOMIC_EMBED_TEXT_V1 */
     { "nomic-ai/nomic-embed-text-v1", "nomic-ai/nomic-embed-text-v1",
       "onnx/model.onnx", "8192 context length English model",
@@ -118,8 +165,8 @@ static const lembed_model_info_t lembed__text_models[] = {
     /* LEMBED_TEXT_PARAPHRASE_ML_MINILM_L12_V2_Q */
     { "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "Qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q",
-      "model_optimized.onnx", "Quantized multi-lingual model",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_STATIC },
+      "model_optimized.onnx", "FP16 multi-lingual model (ORT-optimized graph)",
+      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_FP16 },
     /* LEMBED_TEXT_PARAPHRASE_ML_MPNET_BASE_V2 */
     { "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
       "Xenova/paraphrase-multilingual-mpnet-base-v2",
@@ -233,6 +280,19 @@ static const lembed_model_info_t lembed__text_models[] = {
     { "snowflake/snowflake-arctic-embed-l", "snowflake/snowflake-arctic-embed-l",
       "onnx/model_quantized.onnx", "Quantized Snowflake Arctic embed, large",
       1024, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_DYNAMIC },
+    /* A genuine INT8 export of BAAI/bge-small-en-v1.5, added so INT8 throughput
+     * can be measured on BGE at all. The BGE_SMALL_EN_V15_Q entry above is FP16
+     * and says nothing about INT8. This one is 33 MB against 127 MB FP32 (a
+     * quarter, i.e. real int8 weights: 144 INT8 + 6 UINT8 initializers) and its
+     * graph is the dynamic-quantization pattern -- 72 MatMulInteger fed by 48
+     * DynamicQuantizeLinear -- hence the `dynamic` tag, not `static`.
+     *
+     * Must stay last: this table is indexed by the enum, and the enum value is
+     * appended rather than inserted so the public values keep their numbers. */
+    /* LEMBED_TEXT_BGE_SMALL_EN_V15_INT8 */
+    { "BAAI/bge-small-en-v1.5", "onnx-community/bge-small-en-v1.5-ONNX",
+      "onnx/model_quantized.onnx", "INT8 v1.5 fast and default English model (dynamic quantization)",
+      384, 512, LEMBED_POOLING_CLS, LEMBED_QUANTIZATION_DYNAMIC },
 };
 
 /* =========================================================================
@@ -329,6 +389,10 @@ static const lembed__additional_files_entry_t lembed__additional_files[] = {
     { LEMBED_TEXT_BGE_M3,            LEMBED__MODEL_TYPE_TEXT,     { "onnx/model.onnx_data", "onnx/Constant_7_attr__value", NULL } },
     { LEMBED_TEXT_MULTILINGUAL_E5_LARGE, LEMBED__MODEL_TYPE_TEXT, { "model.onnx_data", NULL } },
     { LEMBED_TEXT_EMBEDDING_GEMMA_300M,  LEMBED__MODEL_TYPE_TEXT, { "onnx/model.onnx_data", NULL } },
+    /* External data sits next to the graph: 414 KB of graph plus 33 MB of INT8
+     * weights. Without this entry the downloader fetches only the graph and the
+     * session fails to load the model. */
+    { LEMBED_TEXT_BGE_SMALL_EN_V15_INT8, LEMBED__MODEL_TYPE_TEXT, { "onnx/model_quantized.onnx_data", NULL } },
     { LEMBED_SPARSE_BGE_M3,         LEMBED__MODEL_TYPE_SPARSE,   { "onnx/model.onnx_data", "onnx/Constant_7_attr__value", NULL } },
     { LEMBED_RERANKER_BGE_V2_M3,    LEMBED__MODEL_TYPE_RERANKER, { "model.onnx.data", NULL } },
 };
@@ -402,6 +466,97 @@ int lembed_find_text_model_by_code(const char* model_code) {
         if (strcmp(lembed__text_models[i].model_code, model_code) == 0) return i;
     }
     return -1;
+}
+
+/* Name of a quantization mode, for diagnostics. */
+const char* lembed__quantization_name(int quantization) {
+    switch (quantization) {
+        case LEMBED_QUANTIZATION_STATIC: return "static";
+        case LEMBED_QUANTIZATION_DYNAMIC: return "dynamic";
+        case LEMBED_QUANTIZATION_AUTO: return "auto";
+        case LEMBED_QUANTIZATION_FP16: return "fp16";
+        default: return "none";
+    }
+}
+
+/* Resolve a quantization request to the registry entry that provides it.
+ *
+ * A quantized model is a different file, not a different session
+ * configuration: the registry lists every quantized sibling as its own entry
+ * with its own model_code. Selecting weights therefore means selecting a
+ * registry entry, which is what this does.
+ *
+ * Returns the entry index, or -1. On -1 the thread-local error names the
+ * requested mode and the modes this model actually has, because "unknown
+ * quantization" would send the caller looking in the wrong place.
+ */
+int lembed_find_text_model_variant(const char* model_name, int quantization) {
+    if (!model_name) return -1;
+    for (int i = 0; i < LEMBED_TEXT_MODEL_COUNT; i++) {
+        if (strcmp(lembed__text_models[i].model_name, model_name) == 0 &&
+            (int)lembed__text_models[i].quantization == quantization) {
+            return i;
+        }
+    }
+
+    char available[128] = {0};
+    for (int i = 0; i < LEMBED_TEXT_MODEL_COUNT; i++) {
+        if (strcmp(lembed__text_models[i].model_name, model_name) != 0) continue;
+        const char* name = lembed__quantization_name((int)lembed__text_models[i].quantization);
+        size_t used = strlen(available);
+        if (used + strlen(name) + 3 >= sizeof(available)) break;
+        if (used) {
+            available[used++] = ',';
+            available[used++] = ' ';
+        }
+        memcpy(available + used, name, strlen(name));
+        available[used + strlen(name)] = '\0';
+    }
+
+    char message[320];
+    snprintf(message, sizeof(message),
+             "Model '%s' has no '%s' variant (available: %s)",
+             model_name, lembed__quantization_name(quantization),
+             available[0] ? available : "none");
+    lembed::detail::set_error(message);
+    return -1;
+}
+
+/* Shared by the text and reranker resolvers: exact match on model_code, then
+ * exact match on model_name. */
+static int lembed__resolve_by_code_or_name(const lembed_model_info_t* models,
+                                           int count,
+                                           const char* model,
+                                           const char* kind) {
+    if (!model) return -1;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(models[i].model_code, model) == 0) return i;
+    }
+    for (int i = 0; i < count; i++) {
+        if (strcmp(models[i].model_name, model) == 0) return i;
+    }
+
+    char message[320];
+    snprintf(message, sizeof(message),
+             "Unknown %s model '%s' (expected a HuggingFace repo such as "
+             "'Qdrant/all-MiniLM-L6-v2-onnx', or a registry name); "
+             "call lembed_list_%s_models() to enumerate",
+             kind, model,
+             (strcmp(kind, "reranker") == 0) ? "reranker" : "text");
+    lembed::detail::set_error(message);
+    return -1;
+}
+
+int lembed_resolve_text_model(const char* model) {
+    return lembed__resolve_by_code_or_name(lembed__text_models,
+                                           LEMBED_TEXT_MODEL_COUNT,
+                                           model, "text");
+}
+
+int lembed_resolve_reranker_model(const char* model) {
+    return lembed__resolve_by_code_or_name(lembed__reranker_models,
+                                           LEMBED_RERANKER_MODEL_COUNT,
+                                           model, "reranker");
 }
 
 int lembed_find_sparse_model_by_code(const char* model_code) {

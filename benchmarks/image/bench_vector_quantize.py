@@ -9,15 +9,16 @@ This is distinct from model quantization:
 Most vector DBs store float32 vectors. Quantizing to int8 can reduce index size by 4x.
 """
 import argparse
-import sys
-import os
 import math
+import os
 import struct
+import sys
 import zlib
-import numpy as np
 
 # Patch cffi
 import cffi
+import numpy as np
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -172,7 +173,7 @@ def main():
     print()
 
     # Measure retrieval quality
-    print(f"--- Retrieval Quality (float32 vs int8) ---")
+    print("--- Retrieval Quality (float32 vs int8) ---")
     float32_recalls = []
     int8_recalls = []
     float32_ndcgs = []
@@ -237,7 +238,7 @@ def main():
     print("=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    print(f"Vector quantization: float32 -> int8")
+    print("Vector quantization: float32 -> int8")
     print(f"Size reduction: {float32_size / int8_size:.1f}x")
     print(f"Recall impact: {avg_i8_recall / avg_f32_recall:.2f}x" if avg_f32_recall > 0 else "N/A")
     print(f"NDCG impact: {avg_i8_ndcg / avg_f32_ndcg:.2f}x" if avg_f32_ndcg > 0 else "N/A")
@@ -247,8 +248,8 @@ def main():
     # Markdown
     print("## Results (for markdown)")
     print()
-    print(f"| Metric | float32 | INT8 | Ratio |")
-    print(f"|--------|---------|------|-------|")
+    print("| Metric | float32 | INT8 | Ratio |")
+    print("|--------|---------|------|-------|")
     print(f"| Size | {float32_size / 1024:.1f} KB | {int8_size / 1024:.1f} KB | {float32_size / int8_size:.1f}x |")
     print(f"| Recall@{args.k} | {avg_f32_recall:.4f} | {avg_i8_recall:.4f} | {avg_i8_recall / avg_f32_recall:.2f}x |" if avg_f32_recall > 0 else "")
     print(f"| NDCG@{args.k} | {avg_f32_ndcg:.4f} | {avg_i8_ndcg:.4f} | {avg_i8_ndcg / avg_f32_ndcg:.2f}x |" if avg_f32_ndcg > 0 else "")

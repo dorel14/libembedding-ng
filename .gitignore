@@ -38,7 +38,7 @@ Makefile
 __pycache__/
 
 # Model cache
-*.gguf
+models/*.gguf
 libembedding_cache/
 .fastembed_cache/
 .*_cache/
@@ -46,6 +46,12 @@ libembedding_cache/
 # Benchmark artifacts
 benchmarks/bench_fastembed_rs/target/
 benchmarks/results/
+
+# Live benchmark output: overwritten by every run. The durable copy is archived
+# under docs/archive/benchmarks/<date>/ before the next run overwrites it.
+benchmarks/quantization/results.json
+benchmarks/quantization/results.html
+benchmarks/quantization/__pycache__/
 
 # Jekyll documentation build
 docs/_site/

@@ -3,14 +3,15 @@ Image batch benchmark: test batch sizes 1→32 for each model.
 Finds optimal batch size for throughput vs latency tradeoff.
 """
 import argparse
-import sys
 import os
-import time
 import struct
+import sys
+import time
 import zlib
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)

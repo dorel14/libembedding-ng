@@ -1,0 +1,132 @@
+{
+  "environment": {
+    "timestamp": "2026-09-30T17:54:26+00:00",
+    "host": "PC_Asus",
+    "platform": "Windows 11 (AMD64)",
+    "python": "3.12.10",
+    "libembedding_dist": "1.4.0",
+    "libembedding_source": "1.8.0",
+    "git": "6ef3b99"
+  },
+  "warmup_texts": 15,
+  "timed_texts": 285,
+  "skipped": [
+    {
+      "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+      "quantization": "static",
+      "reason": "no static variant in the registry (available: dynamic, none)"
+    },
+    {
+      "model_name": "BAAI/bge-small-en-v1.5",
+      "quantization": "dynamic",
+      "reason": "no dynamic variant in the registry (available: none, static)"
+    }
+  ],
+  "results": [
+    {
+      "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+      "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
+      "quantization": "none",
+      "batch_size": 8,
+      "texts_per_second": 85.18367468236484,
+      "latency_ms_per_doc": 11.73933859661287,
+      "weights_mb": 86.20036125183105,
+      "process_peak_mb": 205.06640625,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": true
+    },
+    {
+      "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+      "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
+      "quantization": "none",
+      "batch_size": 32,
+      "texts_per_second": 92.82836699230475,
+      "latency_ms_per_doc": 10.772569123001999,
+      "weights_mb": 86.20036125183105,
+      "process_peak_mb": 205.58984375,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": true
+    },
+    {
+      "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+      "model_code": "Xenova/all-MiniLM-L6-v2",
+      "quantization": "dynamic",
+      "batch_size": 0,
+      "texts_per_second": 168.9378333074197,
+      "latency_ms_per_doc": 5.919337192991454,
+      "weights_mb": 21.908159255981445,
+      "process_peak_mb": 117.23828125,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": false
+    },
+    {
+      "model_name": "BAAI/bge-small-en-v1.5",
+      "model_code": "Xenova/bge-small-en-v1.5",
+      "quantization": "none",
+      "batch_size": 8,
+      "texts_per_second": 55.132164177015035,
+      "latency_ms_per_doc": 18.13823228105576,
+      "weights_mb": 126.92784309387207,
+      "process_peak_mb": 248.296875,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": true
+    },
+    {
+      "model_name": "BAAI/bge-small-en-v1.5",
+      "model_code": "Xenova/bge-small-en-v1.5",
+      "quantization": "none",
+      "batch_size": 32,
+      "texts_per_second": 55.29988897027985,
+      "latency_ms_per_doc": 18.083218947101972,
+      "weights_mb": 126.92784309387207,
+      "process_peak_mb": 248.296875,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": true
+    },
+    {
+      "model_name": "BAAI/bge-small-en-v1.5",
+      "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
+      "quantization": "static",
+      "batch_size": 8,
+      "texts_per_second": 4.8901477131960585,
+      "latency_ms_per_doc": 204.4928003506931,
+      "weights_mb": 63.38608169555664,
+      "process_peak_mb": 175.37890625,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": true
+    },
+    {
+      "model_name": "BAAI/bge-small-en-v1.5",
+      "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
+      "quantization": "static",
+      "batch_size": 32,
+      "texts_per_second": 4.835196509017104,
+      "latency_ms_per_doc": 206.81682701729108,
+      "weights_mb": 63.38608169555664,
+      "process_peak_mb": 177.25,
+      "dim": 384,
+      "num_docs": 285,
+      "success": true,
+      "error": "",
+      "batched": true
+    }
+  ]
+}

@@ -76,19 +76,16 @@ if(LIBEMBEDDING_INTEGRATION_TESTS)
     target_link_libraries(test_reranker PRIVATE libembedding)
     add_test(NAME test_reranker COMMAND test_reranker)
 
-    # llama.cpp backend tests (standalone - compiles implementation directly)
+    # llama.cpp backend tests.
+    # Links libembedding like every other test here. It used to be built as a
+    # standalone target with LIBEMBEDDING_IMPLEMENTATION defined and only
+    # llama+ggml linked, but defining the macro in a test translation unit now
+    # drags in the whole implementation (tokenizer needs cJSON, downloader needs
+    # libcurl), and the file also duplicated declarations the public headers
+    # already provided. The result was a target that never linked, so ctest
+    # reported "Not Run" and the suite looked green at 11/12.
     add_executable(test_llama_embedding test_llama_embedding.cpp)
-    target_include_directories(test_llama_embedding PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/third_party
-        ${CMAKE_SOURCE_DIR}/third_party/cJSON
-        ${llama.cpp_SOURCE_DIR}/include
-        ${llama.cpp_SOURCE_DIR}/ggml/include
-    )
-    target_compile_definitions(test_llama_embedding PRIVATE
-        LIBEMBEDDING_IMPLEMENTATION
-    )
-    target_link_libraries(test_llama_embedding PRIVATE llama ggml)
+    target_link_libraries(test_llama_embedding PRIVATE libembedding)
     add_test(NAME test_llama_embedding COMMAND test_llama_embedding)
 
     if(NOT LIBEMBEDDING_NO_IMAGE)

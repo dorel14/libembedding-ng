@@ -13,6 +13,8 @@ from .autotune import (
     auto_select_model,
     autotune,
     autotune_unified,
+    cleanup_model_cache,
+    cleanup_model_cache_except,
     clear_autotune_cache,
 )
 from .backend import detect_backend
@@ -99,6 +101,12 @@ LEMBED_PROFILE_INTERACTIVE = lib.LEMBED_PROFILE_INTERACTIVE
 LEMBED_PROFILE_BALANCED = lib.LEMBED_PROFILE_BALANCED
 LEMBED_PROFILE_QUALITY = lib.LEMBED_PROFILE_QUALITY
 
+# Sparse embedding storage formats
+LEMBED_SPARSE_FORMAT_DICT = lib.LEMBED_SPARSE_FORMAT_DICT
+LEMBED_SPARSE_FORMAT_INDEX_ORDER = lib.LEMBED_SPARSE_FORMAT_INDEX_ORDER
+LEMBED_SPARSE_FORMAT_CSR = lib.LEMBED_SPARSE_FORMAT_CSR
+LEMBED_SPARSE_FORMAT_NUMPY = lib.LEMBED_SPARSE_FORMAT_NUMPY
+
 __all__ = [
     "LEMBED_AUTOTUNE_FULL",
     "LEMBED_AUTOTUNE_QUICK",
@@ -109,6 +117,10 @@ __all__ = [
     "LEMBED_PROFILE_BALANCED",
     "LEMBED_PROFILE_INTERACTIVE",
     "LEMBED_PROFILE_QUALITY",
+    "LEMBED_SPARSE_FORMAT_CSR",
+    "LEMBED_SPARSE_FORMAT_DICT",
+    "LEMBED_SPARSE_FORMAT_INDEX_ORDER",
+    "LEMBED_SPARSE_FORMAT_NUMPY",
     "LEMBED_TASK_EMBEDDING",
     "LEMBED_TASK_IMAGE",
     "LEMBED_TASK_RERANKING",
@@ -144,6 +156,8 @@ __all__ = [
     "autotune_unified",
     "cache_config_default",
     "cache_path",
+    "cleanup_model_cache",
+    "cleanup_model_cache_except",
     "clear_autotune_cache",
     "clear_cache",
     "clear_reranker_autotune_cache",

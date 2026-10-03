@@ -2,12 +2,14 @@
 Test autotune with custom corpus (user's actual texts)
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import TextEmbedding, TextEmbeddingPool, clear_autotune_cache
 import time
+
+from libembedding import TextEmbedding, TextEmbeddingPool, clear_autotune_cache
 
 print("=== Autotune with Custom Corpus ===\n")
 

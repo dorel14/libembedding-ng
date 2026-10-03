@@ -1,6 +1,6 @@
 # libembedding-ng
 
-> Version 1.8.0 — C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
+> Version 1.9.0 — C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
 
 **Local-first embedding and reranking engine for C/C++ and Python.**
 

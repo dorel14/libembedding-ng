@@ -10,13 +10,14 @@ Models tested:
 - nomic-ai/nomic-embed-vision-v1.5 (Nomic, 768-dim)
 """
 import argparse
-import sys
 import os
-import time
 import subprocess
+import sys
+import time
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -32,13 +33,15 @@ def get_rss_mb():
         pid = os.getpid()
         result = subprocess.run(
             ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'WorkingSetSize'],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5, check=False)
         for line in result.stdout.strip().split('\n'):
             line = line.strip()
             if line.isdigit():
                 return int(line) / (1024 * 1024)
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # wmic is absent from recent Windows builds. Report the failure rather
+        # than returning a silent 0 MB, which reads as a real measurement.
+        print(f"warning: RSS probe failed ({exc}); reporting 0 MB", file=sys.stderr)
     return 0
 
 
@@ -80,7 +83,7 @@ def benchmark_image_model(model_name, images, threads, batch_size, warmup=2, ite
     for _ in range(warmup):
         try:
             model.embed_bytes(images, batch_size=batch_size)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"  Warmup error: {e}")
             # If embed_bytes fails (invalid image data), just measure load time
             model.close()
@@ -168,7 +171,7 @@ def main():
                 print(f"  P50: {r['p50']:.1f} ms ({r['ms_image']:.1f} ms/image)")
                 print(f"  P95: {r['p95']:.1f} ms")
                 print(f"  Throughput: {r['images_per_sec']:.1f} images/s")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"  FAILED: {e}")
             results.append({
                 'model': m.model_name,

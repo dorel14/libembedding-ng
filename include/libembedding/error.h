@@ -33,8 +33,16 @@ typedef enum {
     LEMBED_ERROR_TOKENIZER,
     LEMBED_ERROR_DOWNLOAD,
     LEMBED_ERROR_IO,
-    LEMBED_ERROR_MODEL_NOT_FOUND,
+LEMBED_ERROR_MODEL_NOT_FOUND,
     LEMBED_ERROR_UNSUPPORTED,
+    /* Reserved: never returned by the current implementation. Dynamic
+     * quantization used to force batch_size = num_texts and reject a smaller
+     * explicit batch; that guard was removed, and nothing raised this code
+     * since. It is kept so the values after it do not shift -- removing an
+     * entry from a public enum is an ABI break, and a C consumer compiled
+     * against the old header would silently compare against the wrong code.
+     * Do not reintroduce a return path on it: report the argument as
+     * LEMBED_ERROR_INVALID_ARGUMENT instead. */
     LEMBED_ERROR_BATCH_SIZE,
     LEMBED_ERROR_LLAMA,
     LEMBED_ERROR_CACHE_MISS,

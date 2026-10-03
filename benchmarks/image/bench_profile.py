@@ -3,14 +3,15 @@ Image embedding profiling - measures each step separately.
 Identifies whether preprocessing or ONNX inference is the bottleneck.
 """
 import argparse
-import sys
 import os
-import time
 import struct
+import sys
+import time
 import zlib
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -24,7 +25,6 @@ def create_test_jpeg(width=224, height=224):
     """Create a minimal valid JPEG image for benchmarking."""
     # Minimal JPEG: SOI + APP0 + DQT + SOF0 + DHT + SOS + data + EOI
     # For simplicity, create a small valid JPEG
-    import io
 
     # Use a simpler approach: create raw RGB and use stb to encode
     # Actually, let's create a minimal valid JPEG manually
@@ -88,7 +88,7 @@ def profile_pipeline(model_name, n_images=8, iterations=10):
     times_full = []
     for _ in range(iterations):
         t0 = time.perf_counter()
-        embeddings = model.embed_bytes(images, batch_size=0)
+        model.embed_bytes(images, batch_size=0)
         t1 = time.perf_counter()
         times_full.append((t1 - t0) * 1000)
 
@@ -213,7 +213,7 @@ def main():
         try:
             r = profile_pipeline(model_name, args.images, args.iterations)
             results.append(r)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"FAILED: {e}")
         print()
 

@@ -62,6 +62,19 @@ typedef enum {
     LEMBED_QUANTIZATION_STATIC,
     LEMBED_QUANTIZATION_DYNAMIC,
     LEMBED_QUANTIZATION_AUTO,
+    /* Weights stored as float16. Not quantization in the INT8 sense: there is no
+     * QDQ pattern to fuse and no integer kernel to reach. It halves the file and
+     * the resident set, and on a CPU without native FP16 arithmetic it converts
+     * back to FP32 to compute, so it trades throughput for size.
+     *
+     * Added because several registry entries shipped FP16 weights behind a `_Q`
+     * suffix and a "Quantized" description while declaring STATIC. Selecting
+     * `quantization="static"` then returned float16 weights, which is not what
+     * the caller asked for and is slower than plain FP32 on most CPUs.
+     *
+     * Appended last on purpose: the values above are part of the public ABI and
+     * must keep their numbers. */
+    LEMBED_QUANTIZATION_FP16,
 } lembed_quantization_t;
 
 /* =========================================================================
@@ -113,14 +126,26 @@ typedef enum {
     LEMBED_TEXT_SNOWFLAKE_ARCTIC_EMBED_M_LONG_Q,
     LEMBED_TEXT_SNOWFLAKE_ARCTIC_EMBED_L,
     LEMBED_TEXT_SNOWFLAKE_ARCTIC_EMBED_L_Q,
+    /* A real dynamic-INT8 export of BAAI/bge-small-en-v1.5, added because the
+     * existing BGE_SMALL_EN_V15_Q entry ships FP16 weights and therefore says
+     * nothing about INT8 throughput. See LEMBED_TEXT_BGE_SMALL_EN_V15_Q.
+     * Appended last: the values above are part of the public ABI. */
+    LEMBED_TEXT_BGE_SMALL_EN_V15_INT8,
     LEMBED_TEXT_MODEL_COUNT,
 } lembed_text_model_t;
 
 #define LEMBED_TEXT_MODEL_DEFAULT LEMBED_TEXT_BGE_SMALL_EN_V15
 
 /* =========================================================================
- * Sparse Embedding Models
+ * Sparse Storage Format
  * ========================================================================= */
+
+typedef enum {
+    LEMBED_SPARSE_FORMAT_DICT = 0,      /* Dictionary: indices + values arrays, sorted by weight desc (default) */
+    LEMBED_SPARSE_FORMAT_INDEX_ORDER = 1, /* Dictionary: indices + values arrays, sorted by index asc */
+    LEMBED_SPARSE_FORMAT_CSR = 2,       /* Compressed Sparse Row: indptr + indices + values (requires API extension) */
+    LEMBED_SPARSE_FORMAT_NUMPY = 3,     /* NumPy compatible: COO format for Python interop (requires API extension) */
+} lembed_sparse_format_t;
 
 typedef enum {
     LEMBED_SPARSE_SPLADE_PP_V1 = 0,     /* default */

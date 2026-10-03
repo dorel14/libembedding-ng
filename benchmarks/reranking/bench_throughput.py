@@ -2,13 +2,11 @@
 Reranking throughput benchmark - compares different reranker models.
 """
 import argparse
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from bench_common import (
-    generate_documents, benchmark_rerank, get_rss_mb
-)
+from bench_common import benchmark_rerank, generate_documents, get_rss_mb
 from libembedding import Reranker
 
 
@@ -51,7 +49,6 @@ def main():
                     show_download_progress=False,
                 )
                 load_time = (__import__('time').perf_counter() - t0) * 1000
-                rss_before = get_rss_mb()
 
                 stats = benchmark_rerank(reranker, query, docs, args.batch_size,
                                          warmup=args.warmup, iterations=args.iterations)
@@ -74,11 +71,13 @@ def main():
                     'load_ms': load_time,
                 })
                 reranker.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
                 print(f"  threads={threads}: SKIP ({e})")
+                # Closing a context that failed to build must not mask the
+                # error already reported just above.
                 try:
                     reranker.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 - deliberate cleanup
                     pass
         print()
 

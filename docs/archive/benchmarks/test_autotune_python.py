@@ -2,19 +2,21 @@
 Test autotune from Python
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import autotune, TextEmbeddingPool
 import time
+
+from libembedding import TextEmbeddingPool, autotune
 
 print("=== Python Autotune Test ===\n")
 
 print("Running autotune (QUICK mode)...")
 result = autotune("Qdrant/all-MiniLM-L6-v2-onnx")
 
-print(f"\nOptimal configuration:")
+print("\nOptimal configuration:")
 print(f"  workers:    {result.workers}")
 print(f"  threads:    {result.threads}")
 print(f"  batch_size: {result.batch_size}")
@@ -22,7 +24,7 @@ print(f"  throughput: {result.throughput_docs_sec:.0f} docs/s")
 print(f"  latency:    {result.latency_ms:.1f} ms/text")
 
 # Test with the optimal config
-print(f"\nTesting with optimal config...")
+print("\nTesting with optimal config...")
 pool = TextEmbeddingPool(
     "Qdrant/all-MiniLM-L6-v2-onnx",
     workers=result.workers,

@@ -89,7 +89,11 @@ model = TextEmbedding("/path/to/model.Q4_K_M.gguf")
 embeddings = model.embed(["Hello world"])
 ```
 
-Use `TextEmbedding.supports_llamacpp()` to check if the llama.cpp backend is available at runtime.
+Routing happens inside the constructor: `_is_gguf_model()` recognises the `.gguf`
+extension and switches to the llama.cpp backend. There is **no**
+`TextEmbedding.supports_llamacpp()` in the Python API; to check whether the
+backend is available at runtime, use `detect_backend(model_name)` or the C call
+`lembed_llama_backend_available()`.
 
 ### Auto-tuning workers (llama.cpp)
 
@@ -320,7 +324,7 @@ For optimal performance:
 1. **Reuse the model** — create it once and embed multiple batches
 2. **Tune `batch_size`** — increase until memory saturation
 3. **Use a GPU provider** — `cuda`, `coreml`, or `directml`
-4. **Enable quantization** — choose `_Q` models for faster inference
+4. **Enable quantization** — choose `_Q` models to cut on-disk size by 2-4x (throughput effect is model-dependent: benchmark it, see [Performance](performance_tuning.html#quantization-fp32-vs-int8))
 5. **Disable progress** — `show_download_progress=False` for scripts
 
 ## Dynamic batching scheduler (llama.cpp)

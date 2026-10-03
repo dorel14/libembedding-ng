@@ -4,7 +4,10 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    # `dev` est verifie aussi : sans cela, aucun workflow ne se declenche sur un
+    # push direct vers `dev`, et une derive d'encodage n'apparaitrait qu'au
+    # moment du PR vers `main`, une fois la branche deja divergente.
+    branches: [main, dev]
   workflow_call:
 
 jobs:

@@ -4,9 +4,9 @@ Compares dict[int, float] vs CSR vs numpy sparse formats.
 """
 from __future__ import annotations
 
-import time
-import sys
 import os
+import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../python/src"))
 
@@ -96,7 +96,7 @@ def main():
         try:
             result = benchmark_format(name, func, vectors)
             results.append(result)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
             print(f"ERROR benchmarking {name}: {e}")
 
     # Summary

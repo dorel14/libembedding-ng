@@ -2,14 +2,14 @@
 Profile Python overhead vs C++ overhead
 """
 
-import time
-import sys
 import os
+import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
 
-from libembedding import TextEmbedding
 import numpy as np
+from libembedding import TextEmbedding
 
 # Small corpus for profiling
 CORPUS = [
@@ -63,7 +63,7 @@ def profile_python_overhead(model, n_iter=100):
     times_full = []
     for _ in range(n_iter):
         t0 = time.perf_counter()
-        result = model.embed(CORPUS)
+        model.embed(CORPUS)
         t1 = time.perf_counter()
         times_full.append(t1 - t0)
 

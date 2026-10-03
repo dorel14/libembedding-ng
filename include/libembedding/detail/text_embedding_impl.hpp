@@ -145,15 +145,6 @@ lembed_status_t lembed_text_embedding_embed(
     if (!ctx || !texts || num_texts <= 0 || !result)
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    if (ctx->quantization == LEMBED_QUANTIZATION_DYNAMIC) {
-        if (batch_size > 0 && batch_size < num_texts) {
-            lembed::detail::set_error(
-                "Dynamic quantization cannot be used with batching smaller than total texts");
-            return LEMBED_ERROR_BATCH_SIZE;
-        }
-        batch_size = num_texts;
-    }
-
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
     try {

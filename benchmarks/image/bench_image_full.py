@@ -3,14 +3,15 @@ Full image embedding benchmark with batch size sweep.
 Tests all 5 models across different batch sizes to find optimal throughput.
 """
 import argparse
-import sys
 import os
-import time
 import struct
+import sys
+import time
 import zlib
 
 # Patch cffi
 import cffi
+
 _orig = cffi.FFI.cdef
 def _patch(self, cs, override=False, **kw):
     return _orig(self, cs, override=True, **kw)
@@ -26,13 +27,15 @@ def get_rss_mb():
         pid = os.getpid()
         result = subprocess.run(
             ['wmic', 'process', 'where', f'ProcessId={pid}', 'get', 'WorkingSetSize'],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5, check=False)
         for line in result.stdout.strip().split('\n'):
             line = line.strip()
             if line.isdigit():
                 return int(line) / (1024 * 1024)
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        # wmic is absent from recent Windows builds. Report the failure rather
+        # than returning a silent 0 MB, which reads as a real measurement.
+        print(f"warning: RSS probe failed ({exc}); reporting 0 MB", file=sys.stderr)
     return 0
 
 
@@ -164,7 +167,7 @@ def main():
                 all_results.append(r)
 
                 print(f"{bs:>8} | {r['load_ms']:>7.0f} | {r['rss_load']:>9.0f} | {r['rss_inference']:>9.0f} | {r['p50']:>9.1f} | {r['p95']:>9.1f} | {r['ms_image']:>9.1f} | {r['images_per_sec']:>9.1f}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - cffi/ORT raise many types
                 print(f"{bs:>8} | ERROR: {e}")
         print()
 
