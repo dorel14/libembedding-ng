@@ -218,10 +218,17 @@ Trois enseignements, tous exploitables :
 
 ---
 
-## 6. Nouvelle structure : P1.5 en spike de faisabilité
+## 6. Structure : P1.5 en phases
+
+> ⚠️ **Section caduque, conservée pour la traçabilité.** Le découpage ci-dessous
+> (a = valider llama.cpp, b = évaluer CrispEmbed) a été remplacé le 2026-10-03
+> après la lecture d'architecture de CrispEmbed : **llama.cpp n'est plus une
+> piste**, et CrispEmbed n'est pas une dépendance. Le découpage en vigueur est
+> **P1.5a → P1.5b → P1.5c → P1.5d → P1.5e**, décrit au § 9 et dans
+> `roadmap-2.md`.
 
 P1.5 n'est pas supprimé. Il est découpé, et **aucun backend n'est exposé dans
-l'API publique avant que le spike ait conclu.**
+l'API publique avant que les phases ait conclu.**
 
 ### P1.5a — Valider `BertForMaskedLM` dans llama.cpp
 
@@ -253,7 +260,7 @@ Points à auditer avant toute adoption :
 | Intégrable en `third_party/` ou en DLL séparée ? | Détermine le coût de build. |
 | Format `.sprs` séparé obligatoire ? | Si oui, le routage par extension `.gguf` seul ne suffit plus. |
 | maintenance / activité du dépôt | 66 étoiles, dernière push 2026-10-03. À surveiller. |
-| Fiabilité mesurée par nous | Les 0.9971 sont du convertisseur, pas de nous. |
+| Fiabilité mesurée par nous ? | Les 0.9971 sont du convertisseur, pas de nous. |
 
 Le point « licence » est le point le plus easy à valider : CrispEmbed est **MIT**,
 contrairement à `splade-v3` qui est CC-BY-NC-SA-4.0. C'est ce qui rend la piste
@@ -264,8 +271,8 @@ d'attendre.
 
 ### P1.5c — Backend sparse GGUF
 
-À n'ouvrir **qu'après** P1.5a ou P1.5b ayant conclu qu'un runtime est
-disponible. Le nommage doit alors refléter le runtime, pas supposer llama.cpp :
+À n'ouvrir **qu'après P1.5a ou P1.5b ayant conclu qu'un runtime est
+disponible**. Le nommage doit alors refléter le runtime, pas supposer llama.cpp :
 
 ```
 sparse_text_embedding_onnx_impl.hpp   <- existant
@@ -380,7 +387,181 @@ périmètre de ce document.
 
 ---
 
-## 9. Reproduction
+## 9. Architecture de référence : lecture de CrispEmbed
+
+CrispEmbed (`CrispStrobe/CrispEmbed`, C++, MIT, ~66 étoiles, poussé le
+2026-10-03) est aujourd'hui l'implémentation open source la plus avancée de
+sparse/ColBERT en GGUF. Lecture du dépôt effectuée le 2026-10-03 (tree SHA
+`28d5a61c`). **Objectif : en tirer des choix de conception, pas en devenir une
+dépendance.**
+
+### 9.1 Quatre affirmations de la roadmap initiale, corrigées
+
+| Affirmation | Verdict | Source |
+|---|---|---|
+| Les GGUF sparse exigent un fichier `.sprs` séparé | ❌ **inexistant** — 0 chemin sur 2054 blobs, 0 occurrence dans le source, 0 sur HF | `git/trees?recursive=1` |
+| Le dispatch se fait via des clés GGUF `has_sparse` / `has_colbert` | ⚠️ **mal documenté** — ce sont des `bool` du struct runtime, déduits de la **présence des tenseurs** ; rien n'est écrit dans le fichier | `src/crispembed.cpp:854-887` |
+| IQ4_XS atteint 0.9971 de fidélité | ⚠️ chiffre de la fiche HF `cstr`, **introuvable dans CrispEmbed** ; le dépôt mesure 0.963074 (CPU) / 0.965709 (CUDA) sur `fireredpunc` | `PERFORMANCE.md:288-289` |
+| llama.cpp est le runtime sparse | ❌ CrispEmbed ne dépend **ni de llama.cpp ni d'onnxruntime** — uniquement de son **fork** de ggml | `.gitmodules` |
+
+Le point « `.sprs` » mérite d'être noté : c'est un mécanisme réel, mais il
+appartient à **llama.cpp**, pas à CrispEmbed. `models/add-st-dense-to-gguf.py:6-16`
+documente que les exports SPM de llama.cpp (`gemma-embedding`) omettent la tête
+Dense post-pooling, et que « sans le fichier
+`--sentence-transformers-dense-modules` l'embedding est le mean-pool du backbone,
+**orthogonal à la vraie sortie du modèle** (cos ≈ 0) ». L'erreur est totale, pas
+une dérive — c'est un problème de **convertisseur**, pas de runtime.
+
+### 9.2 Ce qui est directement transposable
+
+**a) Le dispatch par présence de tenseur.** C'est l'idée la plus réutilisable, et
+elle est élégante : pas d'enum, pas de métadonnée, pas de convention de nom de
+fichier — la capacité est inférée des tenseurs présents.
+
+```cpp
+// src/crispembed.cpp:877-887
+m.mlm_transform_w     = get("mlm_transform.weight");
+m.has_mlm_head       = m.mlm_transform_w != nullptr;
+m.has_sparse         = m.sparse_linear_w != nullptr || m.has_mlm_head;
+m.has_colbert        = m.colbert_linear_w != nullptr;
+m.is_reranker        = m.classifier_dense_w && m.classifier_out_w;
+```
+
+Pour libembedding, l'équivalent est déjà implicite : `lembed_resolve_sparse_model`
++ la présence de `mlm_*`. C'est une **convention à documenter**, pas une table à
+maintenir.
+
+**b) Les clés d'hparams dérivées de l'architecture** (`src/core/hparam_keys.h`) :
+lire `general.architecture` et dériver le préfixe `<arch>.<field>`, avec une
+résolution *qui signale si la clé a réellement été trouvée*. Le commentaire du
+dépôt énonce exactement le piège qu'il faut éviter :
+
+> « une architecture dont les noms de tenseurs se résolvent, **un mauvais défaut
+> produit silencieusement un embedding poubelle avec un code de sortie 0**. »
+
+C'est la leçon à retenir pour `libembedding` : **un défaut silencieux est pire
+qu'un échec**. Voir P1.5b.
+
+**c) La formule SPLADE**, avec le masquage d'attention (§9.3).
+
+**d) La piste ColBERT** : sortie plate `[n_tokens, dim]` F32, chaque vecteur de
+token normalisé en L2, score MaxSim exporté. `bert.colbert_dim` (défaut 128)
+dans les métadonnées. C'est le prolongement naturel si le sparse GGUF aboutit.
+
+### 9.3 SPLADE : la formule, et les deux pièges à ne pas copier
+
+```cpp
+// src/crispembed.cpp:3109-3116
+for (int v = 0; v < V; v++) {
+    float logit = mlm_b[v];
+    for (int j = 0; j < H; j++) logit += emb_w[v * H + j] * h[j];
+    if (logit > 0.0f) {                              // ReLU
+        float sv = logf(1.0f + logit);               // log(1 + ReLU(x))
+        if (sv > max_logits[v]) max_logits[v] = sv; // max-pool sur les tokens
+    }
+}
+```
+
+Le transformer MLM est `GELU(W·h + b)` avec un **GELU tanh approché codé en
+dur** (`:3093`), puis LayerNorm (`:3097-3106`), puis projection vocabulary —
+le poids du décodeur est **tied à `token_embd.weight`**.
+
+**Piège 1 — filtre de jetons spéciaux codé en dur :**
+
+```cpp
+// src/crispembed.cpp:3122-3127
+if (max_logits[v] > 0.0f && v != 0 && v != 101 && v != 102) {   // [PAD] [CLS] [SEP] BERT
+```
+
+Le chargeur **lit** les bons ids (`tokenizer.ggml.cls_token_id`,
+`separator_token_id`, `pad_token_id`) mais ce filtre les ignore. Sur un vocabulaire
+XLM-R (250k), les spéciaux sont `<s>`=0, `</s>`=2, `<pad>`=1 : **1 et 2 fuient
+dans le vecteur sparse**. À ne pas copier — utiliser les ids des métadonnées.
+
+**Piège 2 — coût de la projection vocabulary.** La boucle `O(T·H·V)` en scalaire
+CPU est correcte uniquement parce que `H·V` est petit pour un SPLADE de classe
+MiniLM. Sur un MLM head XLM-R (`V` = 250k), c'est inacceptable. libembedding doit
+passer par un **matmul ggml**, pas une boucle scalaire.
+
+**Deux chemins sparse distincts** — à ne pas confondre :
+
+| Chemin | Condition | Formule |
+|---|---|---|
+| SPLADE (MLM head) | `has_mlm_head` | max-pool puis `log(1+x)` |
+| BGE-M3, `out_dim == 1` | un scalaire par token | scatter sur `input_ids`, max par id, **poids brut, sans `log(1+x)`** |
+| BGE-M3, `out_dim == V` | projection vocab complète | max-pool puis `log(1+x)` |
+
+**Aucun top-k, aucun seuil** en sortie : la taille n'est bornée que par `V`. Pour
+XLM-R, jusqu'à ~250k entrées par document. Le `top_k` / `min_weight` déjà livré
+par P0.1 côté ONNX est donc **indispensable** côté GGUF, pas optionnel.
+
+### 9.4 Quantification : la leçon sur les lectures CPU
+
+CrispEmbed ne déquantifie jamais dans le graphe — ggml s'en charge. Le danger est
+ailleurs, et le dépôt le documente trois fois :
+
+```cpp
+// src/crispembed.cpp:3068-3071
+// mlm_transform_w and token_embd are 2-D weight matrices that the quantizer may
+// store as Q8_0/F16/Q4_K, so read them via to_f32 (dequant-safe) — a raw
+// n*sizeof(float) get would overrun ggml_nbytes and abort.
+```
+
+**À retenir pour libembedding** : toute tête qui doit descendre en scalaire CPU
+(MLM, reranker, ColBERT) exige une lecture **déquant-sûre**. Une lecture
+`n * sizeof(float)` brute sur un tenseur Q8_0 déborde `ggml_nbytes` et **abort le
+processus**. Notre `detail/` n'a pas encore d'équivalent de `core_cpu::to_f32()`.
+
+Deux autres points :
+
+- le pré-merge QKV n'est appliqué qu'aux tenseurs **F32** (`:913`), donc un modèle
+  Q8_0 perd silencieusement cette optimisation — à savoir avant de modéliser les
+  perfs ;
+- la fidélité est validée **hors ligne** (CI + `PERFORMANCE.md`), jamais au
+  runtime. `PERFORMANCE.md:304-308` avertit que la cos_min de `q4_k` dépend du
+  matériel (0.957795 chez eux, 0.935078 sur un VPS, **octet pour octet le même
+  fichier**) : ne jamais citer un chiffre Q4_K comme une propriété de l'artefact.
+
+### 9.5 Structure et coût de l'intégration
+
+| Fichier | Lignes |
+|---|---|
+| `src/crispembed.cpp` | 6230 |
+| `src/crispembed.h` (ABI C publique) | 1149 |
+| `src/core/gguf_loader.cpp` | 732 |
+| `examples/cli/main.cpp` | 2693 |
+
+Dépendances : **fork `CrispStrobe/ggml` @ `sync/upstream-v0.17`**, pas
+`ggml-org/ggml`. C'est le principal frein au vendor : le dépôt documente un
+workaround de régression ggml v0.10.0 (Metal « residency sets », désactivés par
+défaut via un kill-switch ggml). Brancher du ggml amont non patché n'est pas
+sûr.
+
+**C'est l'argument décisif pour un runtime maison** : libembedding vendorise déjà
+`third_party/llama.cpp` **avec son ggml**, snapshot pinné et élagué selon une
+politique de version explicite (AGENTS.md § 10). Un runtime sparse maison s'appuie
+sur **notre** ggml déjà présent, avec une seule politique de mise à jour. Adopter
+le fork CrispEmbed nous ferait hériter d'une seconde chaîne ggml.
+
+Le dépôt fait ~230 Mo, ~60 moteurs sans rapport avec l'embedding (OCR, SR, NER,
+KIE, LID…), un `CMakeLists.txt` de 52 Ko et ~470 Ko de tables Unicode générées.
+Il faudrait en extraire ~10 % — ce qui confirme « source d'idées » plutôt que
+« dépendance ».
+
+### 9.6 Ce que nous ne copions pas
+
+Trois défauts relevés dans le source, à corriger chez nous dès le départ :
+
+1. filtre des spéciaux codé en dur `{0, 101, 102}` (§9.3, piège 1) ;
+2. `n_vocab` par défaut à 30522 avec le mode strict **désactivé** par défaut
+   (`CRISPEMBED_STRICT_HPARAMS=0`) — un défaut silencieusement faux sur une autre
+   architecture ;
+3. chemin sparse `out_dim == 1` sans `log(1+x)` : à documenter explicitement
+   plutôt qu'à copier sans le savoir.
+
+---
+
+## 10. Reproduction
 
 Le contrôle des en-têtes GGUF ne demande aucun outil du projet :
 
@@ -402,4 +583,12 @@ Côté source llama.cpp :
 ```bash
 rg -i "mlm_head|has_mlm_head|build_mlm|output_head" third_party/llama.cpp   # 0 résultat
 rg -n "res->t_logits" third_party/llama.cpp/src/models/bert.cpp            # 0 résultat
+```
+
+CrispEmbed (lecture du dépôt) :
+
+```bash
+gh api repos/CrispStrobe/CrispEmbed/git/trees/main?recursive=1 \
+  --jq '.tree[].path' | rg -i 'sprs'          # 0 résultat
+gh api repos/CrispStrobe/CrispEmbed/contents/.gitmodules --jq .content | base64 -d
 ```

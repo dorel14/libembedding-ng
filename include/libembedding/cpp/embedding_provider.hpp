@@ -53,5 +53,3 @@ inline std::unique_ptr<EmbeddingProvider> create_embedding_provider(
 } /* namespace lembed */
 
 #endif /* LIBEMBEDDING_CPP_EMBEDDING_PROVIDER_HPP */
-
-

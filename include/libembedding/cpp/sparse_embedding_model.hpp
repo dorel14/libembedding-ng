@@ -63,7 +63,7 @@ public:
             c_opts.cache_dir = cache_dir_buf_.c_str();
         }
 
-int idx = lembed_resolve_sparse_model(name.c_str());
+        int idx = lembed_resolve_sparse_model(name.c_str());
         if (idx >= 0) {
             c_opts.model = (lembed_sparse_model_t)idx;
             detail::check_status(lembed_sparse_text_embedding_create(&c_opts, &ctx_));
@@ -103,7 +103,7 @@ int idx = lembed_resolve_sparse_model(name.c_str());
         c_texts.reserve(texts.size());
         for (const auto& t : texts) c_texts.push_back(t.c_str());
 
-lembed_sparse_embeddings_t result = {0};
+        lembed_sparse_embeddings_t result = {0};
         /* sparse_opts = nullptr means "use the context defaults", which is what the
          * Python binding passes when the caller overrides nothing. */
         detail::check_status(lembed_sparse_text_embedding_embed(
@@ -168,7 +168,3 @@ private:
 } /* namespace lembed */
 
 #endif /* LIBEMBEDDING_CPP_SPARSE_EMBEDDING_MODEL_HPP */
-
-
-
-

@@ -200,7 +200,7 @@ private:
                 }
             }
 
-dim = lembed_text_embedding_dim(ctx);
+            dim = lembed_text_embedding_dim(ctx);
             /* ctx is opaque: batch_size cannot be read from it. c_opts.batch_size is
              * what was asked for, and 0 means "library default", which is what the
              * member initialiser already holds. */
@@ -250,7 +250,3 @@ dim = lembed_text_embedding_dim(ctx);
 } /* namespace lembed */
 
 #endif /* LIBEMBEDDING_CPP_EMBEDDING_POOL_HPP */
-
-
-
-
