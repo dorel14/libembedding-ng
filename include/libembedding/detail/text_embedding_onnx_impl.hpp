@@ -162,18 +162,30 @@ lembed_status_t lembed_text_embedding_create_v2(
          * there is nothing to choose between. */
         lembed_model_info_t info;
         if (lembed_get_text_model_info(base.model, &info) == LEMBED_OK) {
-            int has_variant = 0;
-            static const int kProbe[] = {
-                LEMBED_QUANTIZATION_STATIC, LEMBED_QUANTIZATION_DYNAMIC,
-                LEMBED_QUANTIZATION_FP16,
-            };
-            for (size_t k = 0; k < sizeof(kProbe) / sizeof(kProbe[0]); k++) {
-                if (lembed_find_text_model_variant(info.model_name, kProbe[k]) >= 0) {
-                    has_variant = 1;
-                    break;
+            /* "Does this family ship more than one set of weights?" is answered
+             * by walking the registry, not by testing a hardcoded list of
+             * quantization modes: the list would have to be duplicated from
+             * quantization_auto_impl.hpp and would drift the moment a mode is
+             * added.
+             *
+             * It is deliberately computed here rather than through
+             * quant_auto_collect_variants(). autotuner.h includes
+             * quantization_auto_entry.hpp from *inside* that header's own
+             * include, before text_embedding.h is reached, so when this file is
+             * compiled in that order its own #include of
+             * quantization_auto_entry.hpp is a no-op and any symbol from it would
+             * be undeclared. Asking the registry keeps this file free of that
+             * dependency. */
+            int family_entries = 0;
+            for (int k = 0; k < LEMBED_TEXT_MODEL_COUNT; k++) {
+                lembed_model_info_t other;
+                if (lembed_get_text_model_info((lembed_text_model_t)k, &other) != LEMBED_OK) {
+                    continue;
                 }
+                if (other.model_name == info.model_name) family_entries++;
             }
-            if (has_variant) {
+            /* Exactly one entry means there is nothing to choose between. */
+            if (family_entries > 1) {
                 lembed_quantization_choice_t choice;
                 if (lembed_quantization_auto_select(base.model, base.num_threads,
                                                     base.batch_size, 0, 0,
@@ -192,8 +204,18 @@ lembed_status_t lembed_text_embedding_create_v2(
     if (s != LEMBED_OK || !*out) return s;
 
     /* Registry entry and request now agree; keep them in sync so ctx never
-     * reports a mode the loaded file does not implement. */
-    (*out)->quantization = (lembed_quantization_t)resolved;
+     * reports a mode the loaded file does not implement.
+     *
+     * AUTO is a *request*, never a state. It is left untouched here: either the
+     * model ships no sibling (nothing to choose between) or the selection failed,
+     * and in both cases the weights really loaded are the entry the registry
+     * describes. Writing the sentinel through would leave ctx->quantization
+     * disagreeing with ctx->desc_v2.quantization, which create() filled from
+     * info.quantization before this line, and would report a mode nothing
+     * implements. */
+    if (resolved != LEMBED_QUANTIZATION_AUTO) {
+        (*out)->quantization = (lembed_quantization_t)resolved;
+    }
     return LEMBED_OK;
 }
 

@@ -117,17 +117,15 @@ class TextEmbedding:
         resolved_quant = quant_enum
         if preferred_quantization is not None and preferred_quantization != "none":
             if preferred_quantization == "auto":
-                resolved_quant = self._auto_select_quantization(
-                    model_name, provider, threads, batch_size, cache_dir,
-                    max_length, dim, pooling, offline, show_download_progress,
-                    cache_size, auto_workers,
+                resolved_quant, self._quantization_reason = (
+                    self._auto_select_quantization(
+                        model_name, provider, threads, batch_size, cache_dir,
+                        max_length, dim, pooling, offline, show_download_progress,
+                        cache_size, auto_workers,
+                    )
                 )
                 if resolved_quant is None:
                     resolved_quant = lib.LEMBED_QUANTIZATION_NONE
-                self._quantization_reason = getattr(
-                    TextEmbedding, "_last_quantization_reason", ""
-                )
-                TextEmbedding._last_quantization_reason = ""
             else:
                 pq_enum = _QUANTIZATION_ENUM.get(preferred_quantization.lower())
                 if pq_enum is not None:
@@ -276,13 +274,19 @@ class TextEmbedding:
         re-ran on every single construction, and probed "static" -- a mode the
         registry ships no variant for, so two of its three attempts always threw.
 
-        Returns the resolved ``lembed_quantization_t``, or None when nothing could
+        Returns ``(resolved quantization, reason)``, or ``(None, "")`` when nothing could
         be measured, in which case the caller falls back to FP32.
+
+        The reason travels back in the return value rather than through a class
+        attribute: a staticmethod cannot set instance state, and stashing it on
+        the class meant a constructor that bailed out early read whatever the
+        previous one had left there -- so two threads building models
+        concurrently could report each other's rationale.
         """
         try:
             model_index = resolve_text_model(model_name)
         except (LembedError, ValueError):
-            return None
+            return None, ""
 
         choice = ffi.new("lembed_quantization_choice_t *")
         try:
@@ -303,17 +307,12 @@ class TextEmbedding:
                 )
             )
         except (LembedError, OSError):
-            return None
+            return None, ""
 
         if choice.num_measured <= 0:
-            return None
-        # Publish the rationale for the caller; it is a class attribute because
-        # this runs from a staticmethod, and it is copied onto the instance
-        # straight below so one model never inherits another's reason.
-        TextEmbedding._last_quantization_reason = ffi.string(choice.reason).decode(
-            "utf-8", "replace"
-        )
-        return int(choice.quantization)
+            return None, ""
+        reason = ffi.string(choice.reason).decode("utf-8", "replace")
+        return int(choice.quantization), reason
 
     @property
     def dim(self) -> int:

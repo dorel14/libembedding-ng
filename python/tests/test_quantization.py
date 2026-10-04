@@ -165,3 +165,122 @@ class TestQuantizationSelection:
         finally:
             batched.close()
             unbatched.close()
+
+
+class TestAutoQuantization:
+    """preferred_quantization="auto" and what it exposes afterwards.
+
+    This is the path that was reworked to delegate the whole decision to
+    ``lembed_quantization_auto_select``: the benchmark, the decision rule and the
+    cache entry all live on the C side now. What is left to check on this side is
+    the wiring -- that the resolved mode is the one actually loaded, that the
+    rationale is attached to *this* instance, and that the fallbacks are FP32.
+    """
+
+    def test_auto_reports_a_real_mode_and_a_reason(self, require_cached_model):
+        base = _family_with_kinds("none", "dynamic")
+        if base is None:
+            pytest.skip("no registry family offers a quantized sibling")
+        require_cached_model(base)
+
+        model = TextEmbedding(
+            base,
+            preferred_quantization="auto",
+            provider="cpu",
+            batch_size=4,
+            show_download_progress=False,
+        )
+        try:
+            # Not "auto": the AUTO sentinel is a request, and reporting it back
+            # would mean the context kept a mode nothing implements.
+            assert model.quantization in ("none", "dynamic", "static", "fp16"), (
+                f"auto resolved to {model.quantization!r}"
+            )
+            # The decision happened, so the caller can be told why. An empty
+            # reason here would mean the measurement ran but its outcome was lost.
+            assert model.quantization_reason, "auto-selection reported no reason"
+            # And the mode reported must be the weights that were loaded.
+            assert model.info().name == base
+        finally:
+            model.close()
+
+    def test_auto_on_a_model_without_siblings_keeps_fp32(self, require_cached_model):
+        """A family with nothing to choose between resolves to itself, quietly."""
+        families = {}
+        for m in list_text_models():
+            families.setdefault(m.model_name, set()).add(m.quantization)
+        single = next((n for n, k in families.items() if len(k) == 1), None)
+        if single is None:
+            pytest.skip("every registry family has a quantized sibling")
+
+        require_cached_model(single)
+        model = TextEmbedding(
+            single,
+            preferred_quantization="auto",
+            provider="cpu",
+            show_download_progress=False,
+        )
+        try:
+            assert model.quantization == "none"
+            # Nothing was measured, so there is nothing to justify: a reason
+            # here would be claiming a benchmark that never ran.
+            assert model.quantization_reason == ""
+        finally:
+            model.close()
+
+    def test_reason_is_not_shared_between_instances(self, require_cached_model):
+        """Each construction carries its own rationale.
+
+        The reason used to travel through a class attribute that the constructor
+        read back and reset. Any path returning early -- an unresolvable name, an
+        OSError, nothing measurable -- left the previous value in place, so a
+        later instance could report another model's decision.
+        """
+        base = _family_with_kinds("none", "dynamic")
+        if base is None:
+            pytest.skip("no registry family offers a quantized sibling")
+        require_cached_model(base)
+
+        first = TextEmbedding(
+            base,
+            preferred_quantization="auto",
+            provider="cpu",
+            batch_size=4,
+            show_download_progress=False,
+        )
+        try:
+            auto_reason = first.quantization_reason
+            # A plain construction resets the reason: no auto, no rationale.
+            plain = TextEmbedding(
+                base,
+                quantization="none",
+                provider="cpu",
+                show_download_progress=False,
+            )
+            try:
+                assert plain.quantization_reason == ""
+            finally:
+                plain.close()
+            # The auto instance keeps its own rationale: constructing another
+            # model must not overwrite it.
+            assert first.quantization_reason == auto_reason
+        finally:
+            first.close()
+
+    def test_explicit_mode_leaves_the_reason_empty(self, bge_small):
+        model = bge_small(quantization="none")
+        try:
+            assert model.quantization == "none"
+            # An explicit choice has nothing to justify.
+            assert model.quantization_reason == ""
+        finally:
+            model.close()
+
+    def test_unknown_mode_is_refused_before_any_work(self):
+        with pytest.raises(ValueError, match="Unknown quantization"):
+            TextEmbedding(
+                MINILM_L6,
+                quantization="int4",
+                provider="cpu",
+                show_download_progress=False,
+            )

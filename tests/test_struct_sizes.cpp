@@ -59,6 +59,8 @@ int main(void) {
     ASSERT_SIZE(lembed_cache_hardware_info_t, 460);
     ASSERT_SIZE(lembed_tune_config_result_t, 24);
     ASSERT_SIZE(lembed_tune_cache_entry_t, 1104);
+    ASSERT_SIZE(lembed_quantization_measurement_t, 32);
+    ASSERT_SIZE(lembed_quantization_choice_t, 336);
 #else
     printf("32-bit ABI: sizes not frozen, printing only\n");
 #endif

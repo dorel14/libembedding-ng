@@ -1208,11 +1208,18 @@ benchmark does not measure.
 
   Measured on an i7-1065G7:
 
-  | Variant | docs/s | Weights | |
+  | Variant | docs/s | Weights | Decision |
   |---|---|---|---|
   | FP32 | 15.1 | 126.9 MB | baseline |
   | **INT8 dynamic** | **25.6** (1.7x) | **32.2 MB** (3.9x smaller) | **selected** |
   | FP16 | 2.5 (6x slower) | 63.4 MB | rejected |
+
+  > **These numbers are not comparable with the tables above.** Auto-selection
+  > measures a fixed 16-document synthetic corpus, because that is what runs once
+  > per machine and then gets cached. The batch tables above use 950 timed real
+  > texts. Same machine, same weights, 50.5 docs/s against 15.1 for FP32 — the
+  > gap is the corpus, not a regression. What the selection compares is the
+  > *ratio* between variants, and that holds either way.
 
   The rule, in order:
 
@@ -1230,12 +1237,21 @@ benchmark does not measure.
     (CPU, ONNX Runtime version, library version) and the entry identity is
     re-checked on read, so a decision measured on another machine is never served.
     The `quantization=` field of the entry is the *result*, not part of the key.
+    `clear_autotune_cache(model_name)` invalidates it, along with the rest of that
+    model's tuning entries.
   - **Cost: ~3.5 s on the very first load of a model, then free.** The variants
     are not comparable in price — FP16 was 6x slower than INT8 on the same machine
     and would have dominated the whole selection — so measurement runs in two
     phases: a probe bounded to 4 documents *and* 250 ms per variant that drops the
     clear losers, then a full measurement of the survivors only. The warmup is a
-    2-document slice, not the whole corpus.
+    2-document slice, not the whole corpus. A surviving variant is therefore loaded
+    twice, once to probe and once to measure; the probe session is freed first so
+    the two never sit in memory at the same time, but the weights file is read
+    twice. That only happens on a cache miss.
+  - **AUTO never downloads anything to measure it**, and neither does the decision
+    it reaches: a variant whose weights are absent from disk is skipped. If no FP32
+    baseline can be measured, the entry you asked for is kept rather than silently
+    promoted to FP32.
 
   The decision rule is a pure function separated from the measurement, so it is
   covered by unit tests that run in milliseconds without a model

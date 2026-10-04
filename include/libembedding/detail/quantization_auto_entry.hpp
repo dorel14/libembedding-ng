@@ -123,14 +123,23 @@ lembed_status_t lembed_quantization_auto_select(
         lembed::detail::quant_auto_corpus(corpus_size);
 
     /* The baseline always has to be measured, whatever the probe says about it,
-     * because the decision rule compares everything to it. */
+     * because the decision rule compares everything to it. Slot 0 is the FP32
+     * entry of the family, not `model`: the caller may have pointed at an
+     * already-quantized sibling, and comparing the siblings against that would
+     * leave the table with no baseline to compare against. */
+    const int baseline_entry = variants[0];
     std::vector<int> candidates;
-    candidates.push_back((int)model);
+    candidates.push_back(baseline_entry);
 
-    /* ---- Phase 1: probe, and drop the hopeless ---- */
+    /* ---- Phase 1: probe, and drop the hopeless ----
+     *
+     * A surviving variant is loaded twice, once here and once in phase 2. The
+     * probe session is freed before phase 2 opens its own so the two never
+     * overlap in memory, but the file is read twice. That is the price of never
+     * materialising more than one session at a time, and it is bounded: the
+     * probe is only reached on a cache miss, i.e. once per machine per model. */
     double best_rate = 0.0;
-    for (int i = 0; i < n_variants; i++) {
-        if (variants[i] == (int)model) continue; /* already a candidate */
+    for (int i = 1; i < n_variants; i++) {
         lembed_text_embedding_t* ctx =
             lembed::detail::quant_auto_open((lembed_text_model_t)variants[i],
                                             num_threads, batch_size);
@@ -189,7 +198,24 @@ lembed_status_t lembed_quantization_auto_select(
         return LEMBED_OK;
     }
 
-    int winner = lembed::detail::quant_auto_pick(measured);
+    /* quant_auto_pick answers NONE both for "FP32 won" and for "no FP32 row could be
+     * measured". Those two must not collapse: the second happens exactly when the
+     * FP32 weights are absent from disk, and answering NONE there would make AUTO
+     * pick -- and the caller's final, non-offline create then download -- FP32
+     * weights for a caller who asked for a quantized sibling. With no baseline
+     * there is nothing to compare, so the entry the caller named stands. */
+    bool have_baseline = false;
+    for (int i = 0; i < measured.num_measured && i < lembed::detail::kQuantMaxVariants;
+         i++) {
+        if (measured.measured[i].quantization == LEMBED_QUANTIZATION_NONE &&
+            measured.measured[i].docs_per_sec > 0.0) {
+            have_baseline = true;
+            break;
+        }
+    }
+
+    int winner = have_baseline ? lembed::detail::quant_auto_pick(measured)
+                               : (int)info.quantization;
     int variant = (winner == (int)info.quantization)
                       ? (int)model
                       : lembed_find_text_model_variant(info.model_name, winner);

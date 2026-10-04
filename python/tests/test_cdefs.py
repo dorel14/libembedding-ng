@@ -34,6 +34,10 @@ EXPECTED_SIZES_64 = {
     "lembed_cache_hardware_info_t": 460,
     "lembed_tune_config_result_t": 24,
     "lembed_tune_cache_entry_t": 1104,
+    # int at 0, three doubles at 8/16/24 -> 32.
+    "lembed_quantization_measurement_t": 32,
+    # 4 ints (16) + reason[192] = 208, already 8-aligned, + measured[4]*32.
+    "lembed_quantization_choice_t": 336,
 }
 
 IS_64_BIT = struct.calcsize("P") == 8

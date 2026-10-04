@@ -199,8 +199,57 @@ if(WIN32)
 
     # Use explicit .def file for exports instead of WINDOWS_EXPORT_ALL_SYMBOLS
     # This allows LTCG (/GL /LTCG) to be used if desired
+    #
+    # The .def is filtered first: it names every public symbol, but a backend
+    # compiled out (LIBEMBEDDING_NO_IMAGE) has no definition, and the linker
+    # treats an unresolved name in a .def as a hard error rather than a warning.
+    # Naming lembed_image_* while the image backend was disabled therefore failed
+    # the link with LNK2001 on all 13 of them. Blocks bracketed by
+    # ";@IF <cond>" / ";@ENDIF" are dropped when <cond> is false.
+    set(_lembed_def_src "${CMAKE_CURRENT_SOURCE_DIR}/libembedding.def")
+    set(_lembed_def_out "${CMAKE_CURRENT_BINARY_DIR}/libembedding.generated.def")
+    file(READ "${_lembed_def_src}" _lembed_def_text)
+    string(REPLACE "\r\n" "\n" _lembed_def_text "${_lembed_def_text}")
+    # Every ";" is parked behind a sentinel before the text is split on ";", the
+    # list separator: a line like ";@IF X" or "; ---- Image embedding ----"
+    # would otherwise be torn in two and lose its semicolon.
+    string(REPLACE ";" "@semi@" _lembed_def_text "${_lembed_def_text}")
+    string(REPLACE "\n" ";" _lembed_def_lines "${_lembed_def_text}")
+
+    set(_lembed_def_kept "")
+    set(_lembed_def_skipping FALSE)
+    foreach(_lembed_def_line IN LISTS _lembed_def_lines)
+        # The condition is matched in two forms and evaluated by us rather than
+        # handed to if() as one string: if(${c}) with c="NOT X" is a *single*
+        # argument to if(), which reads as an unknown expression and is silently
+        # false. Forms are ";@IF <var>" (keep when true) and ";@IF NOT <var>"
+        # (keep when false). if(<var>) errors on a bad name, so a typo in a
+        # marker stops the configure instead of silently dropping exports.
+        if(_lembed_def_line MATCHES "^[ \t]*@semi@@IF[ \t]+NOT[ \t]+(.+)$")
+            # ";@IF NOT X" keeps the block when X is false.
+            if(${CMAKE_MATCH_1})
+                set(_lembed_def_skipping TRUE)
+            else()
+                set(_lembed_def_skipping FALSE)
+            endif()
+        elseif(_lembed_def_line MATCHES "^[ \t]*@semi@@IF[ \t]+(.+)$")
+            # ";@IF X" keeps the block when X is true.
+            if(${CMAKE_MATCH_1})
+                set(_lembed_def_skipping FALSE)
+            else()
+                set(_lembed_def_skipping TRUE)
+            endif()
+        elseif(_lembed_def_line MATCHES "^[ \t]*@semi@@ENDIF")
+            set(_lembed_def_skipping FALSE)
+        elseif(NOT _lembed_def_skipping)
+            string(REPLACE "@semi@" ";" _lembed_def_line "${_lembed_def_line}")
+            string(APPEND _lembed_def_kept "${_lembed_def_line}\n")
+        endif()
+    endforeach()
+    file(WRITE "${_lembed_def_out}" "${_lembed_def_kept}")
+
     set_target_properties(libembedding PROPERTIES
-        LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/libembedding.def"
+        LINK_FLAGS "/DEF:${_lembed_def_out}"
     )
 
     # Force CMake to accept a shared library without initial source files

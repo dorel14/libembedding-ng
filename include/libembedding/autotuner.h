@@ -98,7 +98,9 @@ lembed_status_t lembed_auto_select_model(
  * variants are benchmarked and the decision is cached; later calls only read the
  * cache. Variants whose weights are absent are skipped, never downloaded.
  *
- * num_docs: corpus size for the benchmark (clamped to [8, 256]).
+ * num_docs: corpus size for the benchmark. Clamped to [16, 256]: the lower
+ *          bound is what makes two variants comparable, the upper one keeps the
+ *          first load from stalling. 0 selects the default (16).
  * dry_run:  1 = measure and report without writing the cache.
  *
  * Returns LEMBED_OK on success. */
