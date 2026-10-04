@@ -1,5 +1,16 @@
 LIBRARY "libembedding"
 EXPORTS
+; This file carries its own conditional markers: ";@IF <condition>" up to the
+; matching ";@ENDIF" is dropped by CMake when <condition> is false.
+;
+; A symbol named here but absent from the library is a hard link error
+; (LNK2001), so exporting a backend that LIBEMBEDDING_NO_IMAGE compiles out --
+; every lembed_image_* plus lembed_ensure_image_model -- broke the build for
+; that configuration. The marker lines are comments to the linker, so this file
+; is still a valid .def on its own.
+;
+; Auteur: David Orel
+; SPDX-License-Identifier: MIT
     ; ---- Version / config ----
     lembed_version
 lembed_onnxruntime_version
@@ -50,6 +61,7 @@ lembed_execution_provider_name
     lembed_sparse_text_embedding_stats_v2
     lembed_sparse_text_embedding_free
 
+    ;@IF NOT LIBEMBEDDING_NO_IMAGE
     ; ---- Image embedding ----
     lembed_image_embedding_create
     lembed_image_embedding_create_from_path
@@ -62,6 +74,7 @@ lembed_execution_provider_name
     lembed_image_embedding_stats
     lembed_image_embedding_stats_v2
     lembed_image_embedding_free
+;@ENDIF
 
     ; ---- Reranker ----
     lembed_reranker_create
@@ -99,7 +112,9 @@ lembed_resolve_sparse_model
     ; ---- Downloader ----
     lembed_ensure_text_model
     lembed_ensure_sparse_model
+;@IF NOT LIBEMBEDDING_NO_IMAGE
     lembed_ensure_image_model
+;@ENDIF
     lembed_ensure_reranker_model
     lembed_ensure_gguf_model
     lembed_free_string
@@ -139,7 +154,9 @@ lembed_resolve_sparse_model
     ; ---- Sparse / image auto-tuner ----
     lembed_sparse_autotune
     lembed_sparse_best_config
+;@IF NOT LIBEMBEDDING_NO_IMAGE
     lembed_image_autotune
+;@ENDIF
 
     ; ---- llama.cpp backend ----
     lembed_llama_backend_available
@@ -153,6 +170,11 @@ lembed_resolve_sparse_model
     lembed_list_gguf_models
     lembed_find_gguf_model
     lembed_default_gguf_model
+
+    ; ---- GGUF inspection (capability convention, read-only) ----
+    lembed_gguf_inspect
+    lembed_gguf_capability_name
+    lembed_gguf_capability_summary
 
 ; Declared in downloader.h and implemented in its LIBEMBEDDING_IMPLEMENTATION
 ; block. Without these two a Windows caller linking against the DLL gets an

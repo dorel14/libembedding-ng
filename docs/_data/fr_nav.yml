@@ -17,6 +17,8 @@
   url: python/stats.html
 - title: Modèles
   url: models.html
+- title: Convention GGUF sparse
+  url: gguf_sparse_convention.html
 - title: Performance
   url: performance_tuning.html
 - title: Usage avancé

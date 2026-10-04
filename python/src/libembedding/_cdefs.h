@@ -2,7 +2,7 @@
  * No preprocessor directives, no C++ constructs.
  * Synced with headers in include/libembedding/ (v1.10.1). */
 
-/* â”€â”€ Error handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Error handling ═══════════════════════════════════════════════ */
 
 typedef enum {
     LEMBED_OK = 0,
@@ -25,7 +25,7 @@ const char* lembed_version(void);
 const char* lembed_onnxruntime_version(void);
 const char* lembed_execution_provider_name(int provider);
 
-/* â”€â”€ Enums â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Enums ════════════════════════════════════════════════════════ */
 
 typedef enum {
     LEMBED_PROVIDER_CPU = 0,
@@ -58,6 +58,11 @@ typedef enum {
     LEMBED_QUANTIZATION_STATIC,
     LEMBED_QUANTIZATION_DYNAMIC,
     LEMBED_QUANTIZATION_AUTO,
+    /* Mirrors types.h: appended last on purpose, the values above are public
+     * ABI. models.py used to hardcode the literal 4 for this one because the
+     * constant was missing here, which is exactly the kind of drift
+     * AGENTS.md warns about. */
+    LEMBED_QUANTIZATION_FP16,
 } lembed_quantization_t;
 
 typedef enum {
@@ -140,7 +145,7 @@ typedef enum {
     LEMBED_RERANKER_MODEL_COUNT,
 } lembed_reranker_model_t;
 
-/* â”€â”€ Structs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Structs ══════════════════════════════════════════════════════ */
 
 typedef struct {
     const char* model_name;
@@ -316,14 +321,14 @@ typedef struct {
     int                  max_length;
 } lembed_user_defined_model_t;
 
-/* â”€â”€ Functions: Options defaults â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Options defaults ══════════════════════════════════ */
 
 lembed_text_options_t    lembed_text_options_default(void);
 lembed_sparse_options_t  lembed_sparse_options_default(void);
 lembed_image_options_t   lembed_image_options_default(void);
 lembed_reranker_options_t lembed_reranker_options_default(void);
 
-/* â”€â”€ Functions: Text embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Text embedding ════════════════════════════════════ */
 
 lembed_status_t lembed_text_embedding_create(const lembed_text_options_t* options, lembed_text_embedding_t** out);
 lembed_status_t lembed_text_embedding_create_v2(const lembed_text_options_v2_t* options, lembed_text_embedding_t** out);
@@ -342,7 +347,7 @@ void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stat
 void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
 
-/* â”€â”€ Functions: Sparse text embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Sparse text embedding ═════════════════════════════ */
 
 lembed_status_t lembed_sparse_text_embedding_create(const lembed_sparse_options_t* options, lembed_sparse_embedding_ctx_t** out);
 lembed_status_t lembed_sparse_text_embedding_create_from_path(const char* dir_path, const lembed_sparse_options_t* options, lembed_sparse_embedding_ctx_t** out);
@@ -354,7 +359,7 @@ void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx
 void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 
-/* â”€â”€ Functions: Image embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Image embedding ════════════════════════════════════ */
 
 lembed_status_t lembed_image_embedding_create(const lembed_image_options_t* options, lembed_image_embedding_t** out);
 lembed_status_t lembed_image_embedding_create_from_path(const char* dir_path, const lembed_image_options_t* options, lembed_image_embedding_t** out);
@@ -368,7 +373,7 @@ void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_st
 void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 
-/* â”€â”€ Functions: Reranker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Reranker ══════════════════════════════════════════ */
 
 lembed_status_t lembed_reranker_create(const lembed_reranker_options_t* options, lembed_reranker_t** out);
 lembed_status_t lembed_reranker_create_v2(const lembed_reranker_options_v2_t* options, lembed_reranker_t** out);
@@ -384,7 +389,7 @@ void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out);
 void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* out);
 void lembed_reranker_free(lembed_reranker_t* ctx);
 
-/* â”€â”€ Functions: Model registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Model registry ════════════════════════════════════ */
 
 lembed_status_t lembed_get_text_model_info(lembed_text_model_t model, lembed_model_info_t* out);
 lembed_status_t lembed_get_sparse_model_info(lembed_sparse_model_t model, lembed_model_info_t* out);
@@ -406,7 +411,7 @@ int lembed_resolve_text_model(const char* model);
 int lembed_resolve_reranker_model(const char* model);
 int lembed_resolve_sparse_model(const char* model);
 
-/* â”€â”€ Functions: Downloader â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Downloader ════════════════════════════════════════ */
 
 lembed_status_t lembed_ensure_text_model(lembed_text_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
 lembed_status_t lembed_ensure_sparse_model(lembed_sparse_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
@@ -431,13 +436,13 @@ lembed_status_t lembed_cleanup_model_cache_except(
     uint64_t* freed_bytes);
 
 
-/* â”€â”€ Functions: Similarity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Similarity ════════════════════════════════════════ */
 
 float lembed_cosine_similarity(const float* a, const float* b, int dim);
 float lembed_dot_product(const float* a, const float* b, int dim);
 float lembed_euclidean_distance(const float* a, const float* b, int dim);
 
-/* â”€â”€ Functions: Memory free â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Functions: Memory free ══════════════════════════════════════ */
 
 void lembed_embeddings_free(lembed_embeddings_t* result);
 void lembed_sparse_embeddings_free(lembed_sparse_embeddings_t* result);
@@ -447,7 +452,7 @@ void lembed_rerank_results_free(lembed_rerank_results_t* result);
 lembed_text_options_v2_t lembed_text_options_default_v2(void);
 lembed_reranker_options_v2_t lembed_reranker_options_default_v2(void);
 
-/* â”€â”€ Autotuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Autotuner ════════════════════════════════════════════════════ */
 
 typedef enum {
     LEMBED_AUTOTUNE_QUICK = 0,
@@ -502,7 +507,7 @@ lembed_status_t lembed_auto_select_model(
     const char* use_case,
     lembed_model_selection_t* result);
 
-/* â”€â”€ Quantization auto-selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Quantization auto-selection ═════════════════ */
 
 /* One measured variant. file_mb is the size of the weights file, not the
  * resident set: peak RSS is a per-process high-water mark, so it can never be
@@ -524,14 +529,14 @@ typedef struct {
 } lembed_quantization_choice_t;
 
 lembed_status_t lembed_quantization_auto_select(
-    int            model,
+    lembed_text_model_t model,
     int            num_threads,
     int            batch_size,
     int            num_docs,
     int            dry_run,
     lembed_quantization_choice_t* result);
 
-/* â”€â”€ Reranker Auto-Tuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Reranker Auto-Tuner ══════════════════════════════════════════ */
 
 typedef struct {
     int threads;
@@ -591,7 +596,7 @@ lembed_status_t lembed_reranker_auto_config(
 
 void lembed_reranker_autotune_clear_cache(const char* model_name);
 
-/* â”€â”€ Unified Auto-Tuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Unified Auto-Tuner ═══════════════════════════════════════════ */
 
 typedef enum {
     LEMBED_TASK_EMBEDDING = 0,
@@ -629,7 +634,7 @@ lembed_status_t lembed_autotune_unified_config(
 
 void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name);
 
-/* â”€â”€ Sparse Auto-Tuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Sparse Auto-Tuner ════════════════════════════════════════════ */
 
 typedef struct {
     int top_k;
@@ -653,7 +658,7 @@ lembed_status_t lembed_sparse_autotune(
     lembed_autotune_mode_t mode,
     lembed_sparse_tuning_result_t* result);
 
-/* â”€â”€ Image Auto-Tuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Image Auto-Tuner ═════════════════════════════════════════════ */
 
 typedef struct {
     int threads;
@@ -668,12 +673,12 @@ lembed_status_t lembed_image_autotune(
     lembed_autotune_mode_t mode,
     lembed_image_tuning_result_t* result);
 
-/* â”€â”€ llama.cpp backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ llama.cpp backend ════════════════════════════════════════════ */
 
 int lembed_llama_backend_available(void);
 const char* lembed_llama_version(void);
 
-/* â”€â”€ Worker auto-tuning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Worker auto-tuning ══════════════════════════════════════════════ */
 
 typedef struct {
     int optimal_workers;
@@ -685,7 +690,7 @@ typedef struct {
 lembed_worker_config_t lembed_detect_optimal_workers(void);
 int lembed_recommended_workers_for_model(const char* model_path);
 
-/* â”€â”€ GGUF model registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ GGUF model registry ═════════════════════════════════════════ */
 
 typedef struct {
     const char* name;
@@ -703,7 +708,64 @@ lembed_status_t lembed_list_gguf_models(const lembed_gguf_model_info_t** out, in
 const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name);
 const lembed_gguf_model_info_t* lembed_default_gguf_model(void);
 
-/* â”€â”€ Embedding cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ GGUF capability inspection (read-only) ═══════════════════════════ */
+
+/* Capabilities are a bitmask, not an enum, so a head added in a later release
+ * does not renumber the ones already published. Spelled as literals: cffi's cdef
+ * accepts only a decimal/hex/octal constant after #define, not (1 << n). Keep in
+ * step with include/libembedding/gguf_inspect.h. */
+#define LEMBED_GGUF_CAP_NONE            0
+#define LEMBED_GGUF_CAP_DENSE           1
+#define LEMBED_GGUF_CAP_SPLADE          2
+#define LEMBED_GGUF_CAP_SPLADE_BIAS     4
+#define LEMBED_GGUF_CAP_SPARSE_LINEAR   8
+#define LEMBED_GGUF_CAP_COLBERT         16
+#define LEMBED_GGUF_CAP_RERANKER        32
+#define LEMBED_GGUF_CAP_TIED_DECODER    64
+#define LEMBED_GGUF_CAP_SPECIAL_TOKENS  128
+
+/* Which sparse formula applies. The two are different algorithms and must not
+ * share a code path; UNKNOWN means the caller should refuse the file. */
+#define LEMBED_GGUF_SPARSE_FORMULA_SPLADE  0
+#define LEMBED_GGUF_SPARSE_FORMULA_SCALAR  1
+#define LEMBED_GGUF_SPARSE_FORMULA_UNKNOWN 2
+
+typedef struct {
+    char     architecture[64];
+    char     name[128];
+
+    int      has_vocab_size;
+    int32_t  vocab_size;
+    int      has_embedding_length;
+    int32_t  embedding_length;
+    int      has_block_count;
+    int32_t  block_count;
+    int      has_context_length;
+    int32_t  context_length;
+    int      has_colbert_dim;
+    int32_t  colbert_dim;
+
+    int64_t  n_tensors;
+
+    unsigned long long capabilities;
+
+    int      sparse_formula;
+
+    int32_t  pad_token_id;       int has_pad_token_id;
+    int32_t  bos_token_id;       int has_bos_token_id;
+    int32_t  eos_token_id;       int has_eos_token_id;
+    int32_t  cls_token_id;       int has_cls_token_id;
+    int32_t  separator_token_id; int has_separator_token_id;
+
+    char     missing_hparams[256];
+    char     diagnostic[256];
+} lembed_gguf_desc_t;
+
+lembed_status_t lembed_gguf_inspect(const char* path, lembed_gguf_desc_t* desc);
+const char* lembed_gguf_capability_name(unsigned long long cap);
+const char* lembed_gguf_capability_summary(lembed_gguf_desc_t* desc);
+
+/* ═══ Embedding cache ════════════════════════════════════════════ */
 
 typedef struct {
     size_t capacity;
@@ -723,7 +785,7 @@ void lembed_cache_put(lembed_cache_t* cache, const char* text, const float* vec,
 size_t lembed_cache_size(const lembed_cache_t* cache);
 size_t lembed_cache_capacity(const lembed_cache_t* cache);
 
-/* â”€â”€ Unified Benchmark â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Unified Benchmark ════════════════════════════════════════════ */
 
 typedef enum {
     LEMBED_CORPUS_SHORT = 0,
@@ -801,7 +863,7 @@ lembed_status_t lembed_benchmark_get_corpus(
     const char* const** out_texts,
     int* out_count);
 
-/* â”€â”€ Model Selection Autotuner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Model Selection Autotuner ════════════════════════════════════ */
 
 lembed_status_t lembed_benchmark_select_model(
     const char* model_dir,
@@ -818,7 +880,7 @@ lembed_status_t lembed_benchmark_detect_sessions(
 
 const char* lembed_benchmark_default_cache_dir(void);
 
-/* â”€â”€ Tuning Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Tuning Cache ═════════════════════════════════════════════════ */
 
 typedef struct {
     int         num_sessions;
@@ -829,7 +891,7 @@ typedef struct {
     float       latency_p95_ms;
 } lembed_tune_config_result_t;
 
-/* â”€â”€ Cache Fingerprints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Cache Fingerprints ════════════════════════════════════════ */
 
 typedef struct {
     char cpu_name[128];
@@ -852,7 +914,7 @@ typedef struct {
     int file_size_bytes;
 } lembed_cache_model_info_t;
 
-/* â”€â”€ Cache Entry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ═══ Cache Entry ═══════════════════════════════════════════════ */
 
 typedef struct {
     int         cache_schema_version;

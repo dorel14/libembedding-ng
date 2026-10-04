@@ -119,6 +119,7 @@ lembed_text_embedding_free(embedder);
 - [Auto-tune workers C API](https://dorel14.github.io/libembedding-ng/c_api/worker_autotune.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/worker_autotune.md)
 - [Benchmark C API](https://dorel14.github.io/libembedding-ng/c_api/embedding_benchmark.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/embedding_benchmark.md)
 - [Registre de modèles GGUF C API](https://dorel14.github.io/libembedding-ng/c_api/gguf_registry.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/gguf_registry.md)
+- [GGUF sparse embedding convention](https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md)
 
 ## Code examples
 

@@ -19,6 +19,8 @@
   url: en/models.html
 - title: Performance Tuning
   url: en/performance_tuning.html
+- title: GGUF sparse convention
+  url: en/gguf_sparse_convention.html
 - title: Advanced usage
   url: en/advanced_usage.html
 - title: C API — Similarity
