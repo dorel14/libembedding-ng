@@ -91,27 +91,43 @@ struct ArchField {
 };
 
 /* Reported under "<architecture>.<field>". Presence is tracked per field
- * because a caller must be able to tell "the file says 512" from "we would have
- * guessed 512".
+ * because a caller must be able to tell "the file says 768" from "we would have
+ * guessed 768".
  *
- * Converters spell the same fact differently -- llama.cpp's BERT converter writes
- * `bert.context_length` while the SPLADE files carry
- * `bert.max_position_embeddings` -- so a field with known synonyms accepts any of
- * them. The first spelling that is present wins. */
+ * Converters spell the same fact differently and there is no reliable spelling:
+ * llama.cpp's BERT converter writes `bert.hidden_size` and
+ * `bert.num_hidden_layers`, other exports carry `bert.embedding_length` and
+ * `bert.block_count`, and the context length appears as either
+ * `context_length` or `max_position_embeddings`. A field with known synonyms
+ * therefore accepts any of them, first spelling found wins. Requiring one
+ * spelling would report a perfectly good file as missing its width or depth. */
 inline void read_arch_fields(const Probe& probe, const char* arch,
                              lembed_gguf_desc_t& d) {
     if (!arch || !*arch) return;
 
     if (probe.get_arch_i32(arch, "vocab_size", d.vocab_size)) d.has_vocab_size = 1;
-    if (probe.get_arch_i32(arch, "embedding_length", d.embedding_length))
+
+    if (!probe.get_arch_i32(arch, "embedding_length", d.embedding_length)) {
+        if (probe.get_arch_i32(arch, "hidden_size", d.embedding_length))
+            d.has_embedding_length = 1;
+    } else {
         d.has_embedding_length = 1;
-    if (probe.get_arch_i32(arch, "block_count", d.block_count)) d.has_block_count = 1;
+    }
+
+    if (!probe.get_arch_i32(arch, "block_count", d.block_count)) {
+        if (probe.get_arch_i32(arch, "num_hidden_layers", d.block_count))
+            d.has_block_count = 1;
+    } else {
+        d.has_block_count = 1;
+    }
+
     if (!probe.get_arch_i32(arch, "context_length", d.context_length)) {
         if (probe.get_arch_i32(arch, "max_position_embeddings", d.context_length))
             d.has_context_length = 1;
     } else {
         d.has_context_length = 1;
     }
+
     if (probe.get_arch_i32(arch, "colbert_dim", d.colbert_dim)) d.has_colbert_dim = 1;
 }
 

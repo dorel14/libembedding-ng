@@ -579,6 +579,48 @@ static void test_dense_file_without_vocab_is_dense_only(void) {
     std::remove(p.c_str());
 }
 
+/* The SPLADE files spell the geometry with llama.cpp's names rather than the
+ * llama.cpp-converted dense ones. Without the synonyms those files report no
+ * width and no depth, and the runtime that comes next cannot size anything. */
+static void test_architecture_field_synonyms(void) {
+    std::vector<Kv> llama_style = {
+        kv_str("general.architecture", "bert"),
+        kv_str("general.name", "splade-like"),
+        kv_u32("bert.vocab_size", 30522),
+        kv_u32("bert.hidden_size", 768),
+        kv_u32("bert.num_hidden_layers", 12),
+        kv_u32("bert.max_position_embeddings", 512),
+        kv_u32("bert.intermediate_size", 3072),
+        kv_u32("bert.num_attention_heads", 12),
+    };
+    std::string p = fixture("synonyms", llama_style, splade_head());
+    if (p.empty()) return;
+
+    lembed_gguf_desc_t d;
+    CHECK(lembed_gguf_inspect(p.c_str(), &d) == LEMBED_OK, "opens");
+    CHECK(d.has_vocab_size && d.vocab_size == 30522, "vocab_size read");
+    CHECK(d.has_embedding_length && d.embedding_length == 768,
+          "bert.hidden_size is accepted as the width");
+    CHECK(d.has_block_count && d.block_count == 12,
+          "bert.num_hidden_layers is accepted as the depth");
+    CHECK(d.has_context_length && d.context_length == 512,
+          "max_position_embeddings is accepted as the context length");
+    CHECK(std::string(d.missing_hparams).empty(), "nothing is missing");
+    CHECK(caps(d, LEMBED_GGUF_CAP_SPLADE),
+          "and the file is still recognised as sparse");
+    std::remove(p.c_str());
+
+    /* bert_meta() uses the other spellings, so they must keep working. */
+    p = fixture("no_synonyms", bert_meta(30522), splade_head());
+    if (p.empty()) return;
+    CHECK(lembed_gguf_inspect(p.c_str(), &d) == LEMBED_OK, "opens");
+    CHECK(d.has_embedding_length && d.embedding_length == 768,
+          "bert.embedding_length still accepted");
+    CHECK(d.has_block_count && d.block_count == 12,
+          "bert.block_count still accepted");
+    std::remove(p.c_str());
+}
+
 int main(void) {
     test_real_splade_files_are_sparse();
     test_second_splade_file_has_the_same_shape();
@@ -601,6 +643,7 @@ int main(void) {
     test_capability_names();
     test_context_length_accepts_both_spellings();
     test_dense_file_without_vocab_is_dense_only();
+    test_architecture_field_synonyms();
 
     printf("%s: %d passed, %d failed\n",
            g_fail == 0 ? "PASS" : "FAIL", g_pass, g_fail);
