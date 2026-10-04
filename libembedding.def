@@ -53,6 +53,8 @@ lembed_execution_provider_name
     ; ---- Sparse text embedding ----
     lembed_sparse_text_embedding_create
     lembed_sparse_text_embedding_create_from_path
+    lembed_sparse_text_embedding_create_from_gguf_path
+    lembed_sparse_text_embedding_create_from_gguf_model
     lembed_sparse_text_embedding_embed
     lembed_sparse_text_embedding_desc
     lembed_sparse_text_embedding_model_name

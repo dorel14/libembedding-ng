@@ -3,7 +3,7 @@
  * error.h - Error codes and error reporting
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,6 +46,13 @@ LEMBED_ERROR_MODEL_NOT_FOUND,
     LEMBED_ERROR_BATCH_SIZE,
     LEMBED_ERROR_LLAMA,
     LEMBED_ERROR_CACHE_MISS,
+    /* The GGUF runtime (this library's own ggml graph, used by the sparse
+     * backend). Appended rather than inserted: removing or reordering an entry
+     * of a public enum is an ABI break, and a C consumer compiled against the
+     * old header would silently compare against the wrong code.
+     * LEMBED_ERROR_LLAMA would have been the wrong code -- llama.cpp is not
+     * involved. */
+    LEMBED_ERROR_GGUF,
 } lembed_status_t;
 
 /* Return a static string for the given status code */
@@ -85,6 +92,7 @@ const char* lembed_status_message(lembed_status_t status) {
         case LEMBED_ERROR_BATCH_SIZE:       return "Invalid batch size for quantization mode";
         case LEMBED_ERROR_LLAMA:            return "llama.cpp error";
         case LEMBED_ERROR_CACHE_MISS:       return "Cache miss";
+        case LEMBED_ERROR_GGUF:             return "GGUF runtime error";
         default:                            return "Unknown error";
     }
 }

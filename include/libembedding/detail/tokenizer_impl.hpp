@@ -8,7 +8,7 @@
  * - BPE (GPT/Sentencepiece-style: nomic, jina, CLIP, etc.)
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -282,6 +282,62 @@ public:
         return result;
     }
 
+    /* Loads the vocabulary from a plain id-ordered list instead of a
+     * tokenizer.json.
+     *
+     * A GGUF file stores its vocabulary as an array of strings under
+     * `tokenizer.ggml.tokens`, so there is no JSON document to parse -- but the
+     * tokenisation itself is unchanged, and deliberately so: the sparse GGUF
+     * backend and the sparse ONNX backend must produce the same ids for the same
+     * text, otherwise a fidelity comparison between them measures the
+     * tokeniser instead of the runtime. Sharing this class is what makes that
+     * true by construction rather than by convention.
+     *
+     * The cost of sharing is that the known approximations are shared too:
+     * lowercasing is ASCII-only, punctuation is split per byte, and accents are
+     * not stripped. Those are the same limits the ONNX backend has always had.
+     *
+     * `tokens[i]` is the surface form of token id i.
+     *
+     * The four special ids are passed as ids, not as surface forms, because they
+     * are vocabulary specific: [CLS] is 101 on BERT and 0 on XLM-R. Pass -1 for
+     * one the caller has no id for; the surface form is then looked up in the
+     * vocabulary, and if that also fails the id stays unusable (never guessed).
+     *
+     * Returns false with a reason in `err` when the vocabulary is empty. */
+    bool load_vocab(const std::vector<std::string>& tokens,
+                    int pad_id, int unk_id, int cls_id, int sep_id,
+                    int max_length, bool add_special_tokens,
+                    std::string& err) {
+        if (tokens.empty()) {
+            err = "vocabulary is empty";
+            return false;
+        }
+        /* First id wins on a duplicated surface form. cJSON's path iterates the
+         * document's key order, so the two can differ on a vocabulary that
+         * contains the same string twice -- which no real vocabulary does. */
+        vocab_.clear();
+        vocab_.reserve(tokens.size() * 2);
+        id_to_token_.assign(tokens.size(), std::string());
+        for (size_t i = 0; i < tokens.size(); i++) {
+            vocab_.emplace(tokens[i], (int)i);
+            id_to_token_[i] = tokens[i];
+        }
+        type_ = WORDPIECE;
+        wp_prefix_ = "##";
+        do_lower_case_ = true;   /* every SPLADE export is uncased */
+        add_special_tokens_ = add_special_tokens;
+        max_length_ = max_length > 0 ? max_length : 512;
+
+        pad_token_id_ = resolve_special(pad_id, "[PAD]", 0);
+        unk_token_id_ = resolve_special(unk_id, "[UNK]", 100);
+        cls_token_id_ = resolve_special(cls_id, "[CLS]", 101);
+        sep_token_id_ = resolve_special(sep_id, "[SEP]", 102);
+        return true;
+    }
+
+    int pad_token_id() const { return pad_token_id_; }
+
     /* Public: encode a single text to token IDs (for length bucketing) */
     std::vector<int> encode(const std::string& text) const {
         return encode_single(text);
@@ -291,6 +347,27 @@ public:
     void set_pad_token_id(int id) { pad_token_id_ = id; }
 
 private:
+    /* An explicit id wins over the surface form: the metadata is what the model
+     * was exported with. `fallback_id` is the conventional BERT value, tried
+     * only when the caller passed nothing and the vocabulary carries no such
+     * token.
+     *
+     * The last resort is 0 rather than -1, and not arbitrarily: an unusable
+     * special id is emitted verbatim into the input ids, which the embedding
+     * graph then uses as an index. 0 exists in every non-empty vocabulary, so
+     * this degrades "the delimiter token is wrong" instead of "an index past
+     * the end of the embedding table". The caller's declared ids are validated
+     * by the loader, so this only fires for a vocabulary too small to hold the
+     * conventional ids. */
+    int resolve_special(int explicit_id, const char* surface, int fallback_id) const {
+        const int vocab_size = (int)id_to_token_.size();
+        if (explicit_id >= 0 && explicit_id < vocab_size) return explicit_id;
+        auto it = vocab_.find(surface);
+        if (it != vocab_.end()) return it->second;
+        if (fallback_id >= 0 && fallback_id < vocab_size) return fallback_id;
+        return 0;
+    }
+
     std::unordered_map<std::string, int> vocab_;
     std::vector<std::string> id_to_token_;
     std::vector<std::string> bpe_merges_;

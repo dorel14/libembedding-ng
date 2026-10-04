@@ -1,7 +1,7 @@
 """High-level image embedding API.
 
 Auteur: David Orel
-Version: 1.10.1
+Version: 1.11.0
 """
 
 from __future__ import annotations

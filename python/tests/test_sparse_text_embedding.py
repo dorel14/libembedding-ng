@@ -165,3 +165,95 @@ def test_sparse_min_weight():
         model.close()
     except DownloadError:
         pytest.skip("sparse model download unavailable")
+
+
+# ---------------------------------------------------------------------------
+# The GGUF backend
+#
+# The refusals need neither a model nor a network, which is the point: they are
+# the paths a user hits first. The end-to-end case is marked network and skips
+# when the 111 MB file cannot be fetched.
+# ---------------------------------------------------------------------------
+
+
+def test_gguf_missing_file_is_refused(tmp_path):
+    """A path that does not exist raises, it does not return an empty model."""
+    from libembedding import SparseTextEmbedding
+    from libembedding.exceptions import LembedError
+
+    missing = str(tmp_path / "not-here.gguf")
+    with pytest.raises(LembedError):
+        SparseTextEmbedding.from_gguf(missing, show_download_progress=False)
+
+
+def test_gguf_non_gguf_file_is_refused(tmp_path):
+    """A file that is not a GGUF is refused, not loaded into something empty."""
+    from libembedding import SparseTextEmbedding
+    from libembedding.exceptions import LembedError
+
+    junk = tmp_path / "junk.gguf"
+    junk.write_bytes(b"this is not a gguf file at all")
+
+    with pytest.raises(LembedError):
+        SparseTextEmbedding.from_gguf(str(junk), show_download_progress=False)
+
+
+def test_gguf_constructor_routes_a_gguf_path(tmp_path):
+    """The generic constructor reaches the GGUF runtime for a .gguf path.
+
+    Not a test that it succeeds -- there is no model here -- but that the
+    failure is the GGUF runtime's and not "no such directory", which is what
+    would happen if the .gguf routing were missing.
+    """
+    from libembedding import SparseTextEmbedding
+    from libembedding.exceptions import LembedError
+
+    junk = tmp_path / "junk.gguf"
+    junk.write_bytes(b"not a gguf")
+
+    with pytest.raises(LembedError):
+        SparseTextEmbedding(str(junk), show_download_progress=False)
+
+
+def test_gguf_rejects_unknown_keyword():
+    """A typo is a TypeError, not a silently ignored option."""
+    from libembedding import SparseTextEmbedding
+
+    with pytest.raises(TypeError, match="bogus_option"):
+        SparseTextEmbedding.from_gguf("x.gguf", bogus_option=1)
+
+
+def test_gguf_rejects_unknown_storage_format():
+    from libembedding import SparseTextEmbedding
+
+    with pytest.raises(ValueError, match="storage_format"):
+        SparseTextEmbedding.from_gguf("x.gguf", storage_format="csr")
+
+
+@pytest.mark.network
+def test_gguf_splade_embeds():
+    """The real Q8_0 SPLADE export, through the Python surface."""
+    from libembedding import SparseTextEmbedding
+    from libembedding.exceptions import DownloadError
+
+    try:
+        model = SparseTextEmbedding.from_gguf_model(
+            "cstr/splade-pp-en-v1-GGUF",
+            "splade-pp-en-v1-q8_0.gguf",
+            show_download_progress=False,
+        )
+    except DownloadError:
+        pytest.skip("sparse GGUF download unavailable")
+
+    with model:
+        results = model.embed(["hello world", "a fast brown fox"])
+        assert len(results) == 2
+        for r in results:
+            assert r.indices.dtype == np.int32
+            assert r.values.dtype == np.float32
+            assert len(r.indices) == len(r.values) > 0
+            assert r.indices.min() >= 0
+            # Weights come out heaviest first by default.
+            assert np.all(np.diff(r.values) <= 1e-6)
+        # Two different sentences must not collapse to the same vector.
+        assert not np.array_equal(results[0].indices, results[1].indices)

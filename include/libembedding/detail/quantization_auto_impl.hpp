@@ -3,7 +3,7 @@
  * Automatic selection of the best available quantization variant for a model.
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */

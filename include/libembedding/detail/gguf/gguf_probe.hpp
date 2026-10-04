@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace lembed {
 namespace gguf {
@@ -80,6 +81,49 @@ public:
             gguf_free(ctx_);
             ctx_ = nullptr;
         }
+    }
+
+    /* Takes over a gguf context somebody else already opened, instead of
+     * opening the file a second time. The sparse runtime needs the header *and*
+     * the tensor data from one parse: gguf_init_from_file reads the data blob
+     * only when no_alloc is false, and Probe::open reads it only when it is
+     * true, so there is no single option that serves both. Taking the context
+     * keeps one parse of the 30522-entry vocabulary. Ownership transfers to the
+     * Probe, which frees it in close(). */
+    bool adopt(gguf_context* ctx) {
+        close();
+        ctx_ = ctx;
+        return ctx_ != nullptr;
+    }
+
+    /* Hands the context back to the caller and forgets it, so ownership can
+     * move without a double free. Returns nullptr when there was nothing. */
+    gguf_context* release() {
+        gguf_context* ctx = ctx_;
+        ctx_ = nullptr;
+        return ctx;
+    }
+
+    /* The vocabulary lives in an array of strings, not a scalar, so it needs
+     * its own accessor. Returns false when the key is absent or is not an
+     * array of strings. */
+    bool get_arr_str(const char* key, std::vector<std::string>& out) const {
+        out.clear();
+        if (!ctx_) return false;
+        const int64_t id = gguf_find_key(ctx_, key);
+        if (id < 0 || gguf_get_kv_type(ctx_, id) != GGUF_TYPE_ARRAY) return false;
+        /* GGUF arrays are homogeneous and gguf_get_arr_type reports the single
+         * element type, not a pointer to a per-element type list. */
+        if (gguf_get_arr_type(ctx_, id) != GGUF_TYPE_STRING) return false;
+        const int64_t n = gguf_get_arr_n(ctx_, id);
+        if (n <= 0) return false;
+        out.reserve((size_t)n);
+        for (int64_t i = 0; i < n; i++) {
+            const char* v = gguf_get_arr_str(ctx_, id, i);
+            if (!v) return false;
+            out.emplace_back(v);
+        }
+        return true;
     }
 
     bool valid() const { return ctx_ != nullptr; }
@@ -137,6 +181,32 @@ public:
         if (!v) return false;
         out.assign(v);
         return true;
+    }
+
+    /* Floats are stored as F32, but a hand-written converter may well have used
+     * F64 for something like a LayerNorm epsilon, so both are accepted. Reading
+     * the wrong width out of a GGUF_TYPE_FLOAT32 slot yields a plausible
+     * epsilon, which is precisely the failure this check exists to prevent. */
+    bool get_f32(const char* key, float& out) const {
+        if (!ctx_) return false;
+        const int64_t id = gguf_find_key(ctx_, key);
+        if (id < 0) return false;
+        const gguf_type t = gguf_get_kv_type(ctx_, id);
+        if (t == GGUF_TYPE_FLOAT32) {
+            out = gguf_get_val_f32(ctx_, id);
+            return true;
+        }
+        if (t == GGUF_TYPE_FLOAT64) {
+            out = (float)gguf_get_val_f64(ctx_, id);
+            return true;
+        }
+        return false;
+    }
+
+    bool get_arch_f32(const char* arch, const char* field, float& out) const {
+        if (!arch || !*arch || !field) return false;
+        const std::string key = std::string(arch) + "." + field;
+        return get_f32(key.c_str(), out);
     }
 
     /* gguf stores booleans as int8; a converter is free to have written 0/1 as
