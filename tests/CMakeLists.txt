@@ -54,6 +54,12 @@ add_executable(test_quantization_auto test_quantization_auto.cpp)
 target_link_libraries(test_quantization_auto PRIVATE libembedding)
 add_test(NAME test_quantization_auto COMMAND test_quantization_auto)
 
+# HuggingFace parity for the BERT normaliser (no network): the expectations are
+# HF's, and the vocabulary is synthetic, so this runs in milliseconds.
+add_executable(test_tokenizer test_tokenizer.cpp)
+target_link_libraries(test_tokenizer PRIVATE libembedding)
+add_test(NAME test_tokenizer COMMAND test_tokenizer)
+
 # The GGUF capability convention (no network): fixtures are synthesised in a
 # temp directory, so the suite is hermetic and runs in milliseconds.
 add_executable(test_gguf_inspect test_gguf_inspect.cpp)
@@ -62,13 +68,13 @@ add_test(NAME test_gguf_inspect COMMAND test_gguf_inspect)
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_tokenizer)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_tokenizer)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
