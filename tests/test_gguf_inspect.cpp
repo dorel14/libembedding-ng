@@ -24,6 +24,10 @@
  */
 
 #include <libembedding/gguf_inspect.h>
+/* The Probe is an internal layer, and this test drives it directly: the element
+ * count it reports is the unit resolve_formula()'s decision rests on, and that
+ * decision is not observable from the public description alone. */
+#include <libembedding/detail/gguf/gguf_probe.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -621,6 +625,43 @@ static void test_architecture_field_synonyms(void) {
     std::remove(p.c_str());
 }
 
+/* ==========================================================================
+ * Element counts, not byte counts
+ * ========================================================================== */
+
+/* gguf_get_tensor_size() returns ggml_nbytes. An accessor that reports it under
+ * a name and a comment both saying "elements" is wrong by a factor of the type
+ * size, and it happened to survive only because its one caller compared the
+ * result against a vocabulary size. The fixtures below are 1x2 and 3x4 in F32:
+ * 8 and 48 bytes, but 2 and 12 elements. */
+static void test_tensor_numel_counts_elements_not_bytes(void) {
+    std::vector<Tensor> ts = encoder_bert();
+    ts.push_back(t("probe.two", {1, 2}));     /*  2 elements,  8 bytes */
+    ts.push_back(t("probe.twelve", {3, 4}));  /* 12 elements, 48 bytes */
+    std::string p = fixture("numel", bert_meta(30522), ts);
+    if (p.empty()) return;
+
+    lembed::gguf::Probe probe;
+    CHECK(probe.open(p.c_str()), "the probe opens the fixture");
+
+    int64_t n = 0;
+    CHECK(probe.tensor_numel("probe.two", n) && n == 2,
+          "a [1,2] tensor reports 2 elements");
+    CHECK(probe.tensor_numel("probe.twelve", n) && n == 12,
+          "a [3,4] tensor reports 12 elements");
+    CHECK(!probe.tensor_numel("probe.missing", n),
+          "an absent tensor is a miss, not a zero");
+
+    int64_t ne[GGML_MAX_DIMS];
+    int n_dims = 0;
+    CHECK(probe.tensor_dims("probe.twelve", ne, n_dims) && n_dims == 2 &&
+              ne[0] == 3 && ne[1] == 4,
+          "tensor_dims reports [3,4]");
+
+    probe.close();
+    std::remove(p.c_str());
+}
+
 int main(void) {
     test_real_splade_files_are_sparse();
     test_second_splade_file_has_the_same_shape();
@@ -644,6 +685,7 @@ int main(void) {
     test_context_length_accepts_both_spellings();
     test_dense_file_without_vocab_is_dense_only();
     test_architecture_field_synonyms();
+    test_tensor_numel_counts_elements_not_bytes();
 
     printf("%s: %d passed, %d failed\n",
            g_fail == 0 ? "PASS" : "FAIL", g_pass, g_fail);

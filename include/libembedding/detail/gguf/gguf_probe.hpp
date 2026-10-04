@@ -267,13 +267,46 @@ public:
         return ctx_ ? gguf_find_tensor(ctx_, name) : -1;
     }
 
-    /* Number of elements (not bytes) of a tensor. Returns false when the tensor
-     * is absent, so a caller cannot size a buffer from a shape it imagined. */
+    /* Number of *elements* of a tensor. Returns false when the tensor is absent,
+     * so a caller cannot size a buffer from a shape it imagined.
+     *
+     * Computed from the shape, not from gguf_get_tensor_size(): that function
+     * returns ggml_nbytes, i.e. BYTES, so the first version of this accessor
+     * reported a byte count under a name and a comment that both said
+     * "elements". It happened to be harmless only because the one caller
+     * compared it against a vocabulary size, and an F32 byte count of a
+     * [1, hidden] weight lands near the vocabulary by coincidence rather than by
+     * construction. Deriving the product from `ne` is the only way that holds for
+     * every quantisation. */
     bool tensor_numel(const char* name, int64_t& out) const {
         if (!ctx_) return false;
         const int64_t id = gguf_find_tensor(ctx_, name);
         if (id < 0) return false;
-        out = (int64_t)gguf_get_tensor_size(ctx_, id);
+        const int64_t* ne = gguf_get_tensor_ne(ctx_, id);
+        if (!ne) return false;
+        int64_t n = 1;
+        for (int d = 0; d < GGML_MAX_DIMS; d++) {
+            if (ne[d] <= 0) return false;  /* a 0 dimension means a malformed file */
+            n *= ne[d];
+        }
+        out = n;
+        return true;
+    }
+
+    /* Dimensions of a tensor, most-significant first as ggml stores them.
+     * ne[0] is the fastest-moving axis. Returns false when absent. */
+    bool tensor_dims(const char* name, int64_t out_ne[GGML_MAX_DIMS],
+                     int& out_n_dims) const {
+        if (!ctx_) return false;
+        const int64_t id = gguf_find_tensor(ctx_, name);
+        if (id < 0) return false;
+        const int64_t* ne = gguf_get_tensor_ne(ctx_, id);
+        if (!ne) return false;
+        out_n_dims = 0;
+        for (int d = 0; d < GGML_MAX_DIMS; d++) {
+            out_ne[d] = ne[d];
+            if (ne[d] > 1) out_n_dims = d + 1;
+        }
         return true;
     }
 
