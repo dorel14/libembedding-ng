@@ -1,11 +1,12 @@
 # GGUF sparse embedding convention
 
 Version: 1.0.0
-Status: implemented, covered by `tests/test_gguf_inspect.cpp` (63 assertions)
+Status: implemented, covered by `tests/test_gguf_inspect.cpp` (81 assertions)
 
 Defines **what a GGUF file is capable of** — nothing about how it is executed.
 This page is the normative reference for that decision; the implementation is
-`include/libembedding/gguf_inspect.h`.
+`include/libembedding/gguf_inspect.h`. How a file that passed is actually run is
+[`gguf_sparse_runtime.md`](gguf_sparse_runtime.md).
 
 ---
 
@@ -15,10 +16,10 @@ This page is the normative reference for that decision; the implementation is
 reads no weights. Opening a file costs a header parse, not a load, so a caller can
 classify a model before deciding whether to load it.
 
-It is **not** an inference API. The runtime that consumes these capabilities lives
-in P1.5c (`detail/gguf/gguf_sparse_session.hpp`). Keeping the two apart is what
-stops the format convention from growing into an inference engine nobody can
-review.
+It is **not** an inference API. The runtime that consumes these capabilities is
+`detail/gguf/gguf_sparse_session.hpp`, documented separately. Keeping the two
+apart is what stops the format convention from growing into an inference engine
+nobody can review.
 
 ---
 

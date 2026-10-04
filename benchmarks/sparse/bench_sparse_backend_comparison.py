@@ -75,15 +75,18 @@ _REPORT_PATH = Path(__file__).resolve().parent / "LE-9.6-results.md"
 # vocabulary. Dense vectors are fully populated, hence 100% by convention.
 _VOCAB_SPARSE = 30522
 
-UNAVAILABLE_SPARSE_GGUF = (
-    "blocked, not measured: llama.cpp v0.3.0 loads a BERT GGUF but neither loads "
-    "nor builds the mlm_* projection head SPLADE requires "
-    "(third_party/llama.cpp/src/models/bert.cpp:23-74 and 227-232), so it never "
-    "produces the [seq_len, vocab_size] logits. The GGUF files themselves do carry "
-    "the head, so a different runtime may work -- see the P1.5a/P1.5b spike in "
-    "benchmarks/sparse/LE-9.4-validation.md before concluding anything about "
-    "sparse GGUF"
-)
+UNAVAILABLE_SPARSE_GGUF = None
+"""The sparse GGUF cell is measured since P1.5c.
+
+The runtime is libembedding's own ggml graph, not llama.cpp: llama.cpp v0.3.0
+cannot load these files at all, because their tensor names (`enc.N.attn.q.weight`)
+and metadata keys (`bert.hidden_size`) are not the ones it looks for
+(`blk.N.attn_q.weight`, `%s.embedding_length`). See
+benchmarks/sparse/LE-9.4-validation.md section 3(d).
+
+Kept as a named constant rather than deleted so that the reason the cell used to
+be unavailable stays greppable next to the code that changed its mind.
+"""
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,10 @@ class Backend:
     model: str
     quantization: str
     unavailable_reason: str | None = None
+    # File name inside the repository, for the cells addressed by repo+file
+    # rather than by a registry name. The dense GGUF registry resolves its own
+    # file name from the entry, so only the sparse cell needs it.
+    gguf_file: str | None = None
 
 
 @dataclass
@@ -362,13 +369,28 @@ def run_worker(payload: dict) -> BackendResult:
     try:
         t0 = time.perf_counter()
         load_target = model_name
-        if payload["backend"] == "gguf":
+        sparse_gguf_file = payload.get("gguf_file")
+        if kind == "dense" and payload["backend"] == "gguf":
             load_target = resolve_model_path(model_name, offline=payload.get("offline"))
         if kind == "dense":
             model = TextEmbedding(
                 load_target,
                 batch_size=batch_size,
                 show_download_progress=False,
+            )
+        elif payload["backend"] == "gguf":
+            # The sparse GGUF cell is addressed by repo + file, not through the
+            # dense GGUF registry: the sparse runtime is not llama.cpp and there
+            # is no registry entry for it (see docs/gguf_sparse_runtime.md).
+            if not sparse_gguf_file:
+                raise ValueError("the sparse GGUF cell needs a file name")
+            model = SparseTextEmbedding.from_gguf_model(
+                model_name,
+                sparse_gguf_file,
+                batch_size=batch_size,
+                show_download_progress=False,
+                offline=payload.get("offline", False),
+                top_terms=top_k,
             )
         else:
             model = SparseTextEmbedding(
@@ -477,6 +499,7 @@ def run_backend(
         "backend": backend_spec.backend,
         "model": backend_spec.model,
         "quantization": backend_spec.quantization,
+        "gguf_file": backend_spec.gguf_file,
         "batch_size": batch_size,
         "iterations": iterations,
         "warmup_docs": warmup_docs,
@@ -598,13 +621,14 @@ def write_report(
     )
     for r in unavailable:
         lines.append(f"- **{r.label}** is unavailable — {r.reason}")
-    if unavailable:
-        lines.append(
-            "- Consequently there is no sparse GGUF column: libembedding's sparse path "
-            "is ONNX-only today. This is a *blocked* state, not a closed door — the "
-            "P1.5a/P1.5b spike decides whether a different runtime changes it "
-            "(`benchmarks/sparse/LE-9.4-validation.md`)."
-        )
+    lines.append(
+        "- The **Sparse GGUF** row is libembedding's own ggml runtime, not "
+        "llama.cpp: llama.cpp v0.3.0 cannot load these files at all, their tensor "
+        "names and metadata keys being the ones it does not look for "
+        "(`benchmarks/sparse/LE-9.4-validation.md` §3(d)). Fidelity against the "
+        "sparse ONNX model is measured by "
+        "`tests/test_sparse_gguf_vs_onnx.cpp`, not here."
+    )
     lines.append("")
 
     lines.append("## 1. Objectif")
@@ -736,8 +760,9 @@ def build_matrix(args) -> list[Backend]:
             "sparse",
             "gguf",
             args.sparse_gguf,
-            "q4_k_m",
+            args.sparse_gguf_quant,
             unavailable_reason=UNAVAILABLE_SPARSE_GGUF,
+            gguf_file=args.sparse_gguf_file,
         ),
     ]
     selected = {s.strip() for s in args.backends.split(",") if s.strip()}
@@ -751,7 +776,22 @@ def main() -> int:
     parser.add_argument("--dense-onnx", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--dense-gguf", default="MiniLM-L6-Q4")
     parser.add_argument("--sparse-onnx", default="prithivida/Splade_PP_en_v1")
-    parser.add_argument("--sparse-gguf", default="SPLADE-PP-En-v1")
+    parser.add_argument(
+        "--sparse-gguf",
+        default="cstr/splade-pp-en-v1-GGUF",
+        help="Repository holding the SPLADE GGUF export. Loaded by libembedding's "
+        "own ggml runtime; llama.cpp cannot read these files.",
+    )
+    parser.add_argument(
+        "--sparse-gguf-file",
+        default="splade-pp-en-v1-q8_0.gguf",
+        help="File name inside --sparse-gguf.",
+    )
+    parser.add_argument(
+        "--sparse-gguf-quant",
+        default="q8_0",
+        help="Weight type of --sparse-gguf-file, for the report table only.",
+    )
     parser.add_argument(
         "--backends",
         default="",

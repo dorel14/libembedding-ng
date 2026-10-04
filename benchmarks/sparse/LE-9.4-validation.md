@@ -92,7 +92,46 @@ grep -ri "mlm_head|has_mlm_head|output_head|build_mlm" third_party/llama.cpp
 
 La clé `bert.has_mlm_head` n'est lue par aucun fichier du projet llama.cpp.
 
-**Conséquence.** `LLAMA_POOLING_TYPE_NONE` donne bien les états cachés par token
+**(d) Correction ajoutée le 2026-10-04 — le chargeur ne trouve *aucun* tenseur
+d'encodeur, pas seulement pas de tête**
+
+Les vérifications (a) à (c) portent sur la tête. En implémentant le runtime
+(P1.5c), un constat plus fort est apparu : **le fichier ne se charge pas du
+tout**, parce que les noms de tenseurs et les clés de métadonnées ne sont pas
+ceux que llama.cpp attend. Ce n'est plus « la tête est perdue », c'est « le
+modèle est absent ».
+
+`src/llama-arch.cpp:407-453` définit les noms attendus ; `create_tensor` lève
+`missing tensor 'blk.N.attn_q.weight'` pour un tenseur requis absent
+(`src/llama-model-loader.cpp:1103-1106`), et les clés hparam lues avec
+`required = true` lèvent de la même façon (`:1225-1233`).
+
+| llama.cpp attend | `cstr/splade-pp-en-v1-q8_0.gguf` contient |
+|---|---|
+| `blk.N.attn_q.weight` | `enc.N.attn.q.weight` |
+| `blk.N.ffn_up.weight` | `enc.N.ffn.fc1.weight` |
+| `blk.N.layer_output_norm.weight` | `enc.N.ln2.weight` |
+| `blk.N.attn_output_norm.weight` | `enc.N.ln1.weight` |
+| `token_embd_norm.weight` | `embd_ln.weight` |
+| `token_types.weight` | `token_type_embd.weight` |
+| `%s.embedding_length` | `bert.hidden_size` |
+| `%s.block_count` | `bert.num_hidden_layers` |
+| `%s.attention.head_count` | `bert.num_attention_heads` |
+| `%s.feed_forward_length` | `bert.intermediate_size` |
+| `%s.attention.layer_norm_epsilon` | `bert.layer_norm_eps` |
+| `%s.context_length` | `bert.max_position_embeddings` |
+
+Seuls `token_embd.weight` et `position_embd.weight` correspondent. Les
+conventions de nommage divergent, et il n'existe aucun mécanisme de repli par
+plusieurs préfixes côté llama.cpp (le seul repli multi-noms de
+`create_tensor_qkv` couvre `attn_qkv` contre `attn_q`/`attn_k`/`attn_v`, tous
+sous `blk.N.`).
+
+Cela ne rend pas (a)-(c) fausses : la tête est bien absente du chargeur. Cela les
+contraint : la route llama.cpp n'était pas « partially blocked », elle était
+inutilisable, et le bloqueur est plus large que le MLM.
+
+**Conséquence.** `LLAMA_POOLING_TYPE_NONE` donnerait bien les états cachés par token
 (`res->t_embd`, forme `[768, n_tokens]`), mais la projection vers le vocabulaire
 exige `mlm_transform` (768×768), `mlm_ln` et `mlm_bias` (30522) — **aucun n'est
 chargé**, donc aucun n'est accessible depuis le contexte. `cls_out` existe
@@ -132,8 +171,9 @@ mlm_bias               dims=[30522]        <- biais vocabulaire
 La matrice 30522 × 768 n'est pas un tenseur distinct : elle est **tied** à
 `token_embd.weight`, comportement standard d'une tête MLM BERT.
 
-**Verdict : la tête sparse est dans le fichier, llama.cpp la jette.** Ce n'est pas
-un problème de conversion mais de moteur.
+**Verdict : la tête sparse est dans le fichier, llama.cpp ne sait pas le lire.**
+Ce n'est pas un problème de conversion mais de moteur — et §3(d) précise que le
+moteur ne sait pas lire *le fichier* : ni la tête, ni l'encodeur.
 
 ### 4.2 `cstr/splade-v3-GGUF` — CC-BY-NC-SA-4.0 ⚠️
 
@@ -558,6 +598,22 @@ Trois défauts relevés dans le source, à corriger chez nous dès le départ :
    architecture ;
 3. chemin sparse `out_dim == 1` sans `log(1+x)` : à documenter explicitement
    plutôt qu'à copier sans le savoir.
+
+**État au 2026-10-04 (P1.5c livré).** Les trois ont été évités :
+
+1. les ids de tokens spéciaux viennent **uniquement** des métadonnées
+   (`tokenizer.ggml.{pad,bos,eos,cls,separator}_token_id`), sans liste codée en
+   dur — voir `detail/gguf/gguf_weights.hpp`, `read_special_ids()` ;
+2. aucune dimension n'est devinée : `n_embd`, `n_head`, `n_layer`, `n_ff`,
+   `n_vocab`, `n_pos` et l'epsilon sont tous **exigés**, avec les synonymes de la
+   convention comme second essai ;
+3. seul SPLADE est implémenté ; `sparse_linear` est refusé avec un message
+   plutôt que traité par une formule approximative.
+
+Point notable : la tête est calculée par `ggml_mul_mat`, pas par la boucle
+scalaire de CrispEmbed. La déquantisation Q8_0 y est gratuite, ce qui **rend le
+piège des lectures déquant-sûres sans objet** — aucun poids quantifié n'est lu
+élément par élément dans le runtime livré.
 
 ---
 

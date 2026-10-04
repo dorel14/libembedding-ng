@@ -55,6 +55,12 @@ sparse = SparseTextEmbedding()
 results = sparse.embed(["machine learning"])
 print(results[0].indices, results[0].values)
 
+# Sparse embeddings from a GGUF export (this library's own ggml runtime)
+sparse_gguf = SparseTextEmbedding.from_gguf_model(
+    "cstr/splade-pp-en-v1-GGUF", "splade-pp-en-v1-q8_0.gguf"
+)
+results = sparse_gguf.embed(["machine learning"])
+
 # Reranking
 reranker = Reranker("BAAI/bge-reranker-base")
 ranked = reranker.rerank("What is deep learning?", [
@@ -793,6 +799,41 @@ for (int i = 0; i < count; i++) {
 ```
 
 **Recommended GGUF models** are listed in the registry. Query them with `lembed_list_gguf_models()`, `lembed_find_gguf_model()`, or `lembed_default_gguf_model()`.
+
+#### Sparse models: a separate runtime
+
+**Sparse** GGUF models do not go through llama.cpp. llama.cpp v0.3.0 cannot load
+this family of files at all — their tensor names (`enc.N.attn.q.weight`,
+`embd_ln.weight`) and metadata keys (`bert.hidden_size`,
+`bert.num_attention_heads`) are not the ones it looks for
+(`blk.N.attn_q.weight`, `%s.embedding_length`), and a missing required tensor is
+fatal. Sparse models therefore run on libembedding's own ggml graph, on the same
+CPU backend that is already vendored:
+
+```c
+#include <libembedding/sparse_text_embedding.h>
+
+/* A local file, or a HuggingFace repo + filename */
+lembed_sparse_options_t opts = lembed_sparse_options_default();
+opts.top_k = 256;
+
+lembed_sparse_embedding_ctx_t* embedder = NULL;
+lembed_sparse_text_embedding_create_from_gguf_path(
+    "/path/to/splade-pp-en-v1-q8_0.gguf", &opts, &embedder);
+
+/* ... or, equivalently */
+lembed_sparse_text_embedding_create_from_gguf_model(
+    "cstr/splade-pp-en-v1-GGUF", "splade-pp-en-v1-q8_0.gguf", &opts, &embedder);
+```
+
+`lembed_sparse_text_embedding_create_from_path()` routes a path ending in `.gguf`
+here automatically. The file must carry an MLM/SPLADE head over a declared
+vocabulary; a dense GGUF is refused with a reason rather than accepted.
+
+Measured against the sparse ONNX model on the same texts, cosine similarity is
+0.9998 (worst case over 12 texts), i.e. Q8_0 quantisation noise rather than an
+implementation divergence. See `docs/gguf_sparse_runtime.md` and
+`benchmarks/sparse/LE-9.6-results.md`.
 
 ---
 

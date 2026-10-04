@@ -1,6 +1,6 @@
 /* Flattened C declarations for cffi — derived from libembedding public headers.
  * No preprocessor directives, no C++ constructs.
- * Synced with headers in include/libembedding/ (v1.10.1). */
+ * Synced with headers in include/libembedding/ (v1.11.0). */
 
 /* ═══ Error handling ═══════════════════════════════════════════════ */
 
@@ -351,6 +351,8 @@ void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
 
 lembed_status_t lembed_sparse_text_embedding_create(const lembed_sparse_options_t* options, lembed_sparse_embedding_ctx_t** out);
 lembed_status_t lembed_sparse_text_embedding_create_from_path(const char* dir_path, const lembed_sparse_options_t* options, lembed_sparse_embedding_ctx_t** out);
+lembed_status_t lembed_sparse_text_embedding_create_from_gguf_path(const char* path, const lembed_sparse_options_t* options, lembed_sparse_embedding_ctx_t** out);
+lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(const char* repo, const char* filename, const lembed_sparse_options_t* options, lembed_sparse_embedding_ctx_t** out);
 lembed_status_t lembed_sparse_text_embedding_embed(lembed_sparse_embedding_ctx_t* ctx, const char* const* texts, int num_texts, int batch_size, const lembed_sparse_options_t* sparse_opts, lembed_sparse_embeddings_t* result);
 const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);

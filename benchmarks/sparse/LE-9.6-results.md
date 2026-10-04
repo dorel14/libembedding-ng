@@ -2,9 +2,8 @@
 
 ## Verdict
 
-- **3** backend(s) measured, **1** unavailable, **0** failed.
-- **Sparse GGUF** is unavailable — blocked, not measured: llama.cpp v0.3.0 loads a BERT GGUF but neither loads nor builds the mlm_* projection head SPLADE requires (third_party/llama.cpp/src/models/bert.cpp:23-74 and 227-232), so it never produces the [seq_len, vocab_size] logits. The GGUF files themselves do carry the head, so a different runtime may work -- see the P1.5a/P1.5b spike in benchmarks/sparse/LE-9.4-validation.md before concluding anything about sparse GGUF
-- Consequently there is no sparse GGUF column: libembedding's sparse path is ONNX-only today. This is a *blocked* state, not a closed door — the P1.5a/P1.5b spike decides whether a different runtime changes it (`benchmarks/sparse/LE-9.4-validation.md`).
+- **4** backend(s) measured, **0** unavailable, **0** failed.
+- The **Sparse GGUF** row is libembedding's own ggml runtime, not llama.cpp: llama.cpp v0.3.0 cannot load these files at all, their tensor names and metadata keys being the ones it does not look for (`benchmarks/sparse/LE-9.4-validation.md` §3(d)). Fidelity against the sparse ONNX model is measured by `tests/test_sparse_gguf_vs_onnx.cpp`, not here.
 
 ## 1. Objectif
 
@@ -14,14 +13,14 @@ Compare the four backend×type combinations of LE-9.6 on one corpus: throughput,
 
 | Parameter | Value |
 |---|---|
-| platform | Windows-11-10.0.26200-SP0 |
+| platform | Windows-11-10.0.26300-SP0 |
 | machine | AMD64 |
 | cpu_count | 8 |
 | hostname | PC_Asus |
 | python | 3.12.10 |
-| libembedding | 1.10.1 |
-| git | 6d22255 |
-| timestamp | 2026-10-03T16:22:03Z |
+| libembedding | 1.11.0 |
+| git | 223e4d6 |
+| timestamp | 2026-10-04T17:01:18Z |
 | corpus (timed) | 95 docs |
 | warmup (untimed) | 5 docs |
 | batch_size | 32 |
@@ -32,10 +31,10 @@ Compare the four backend×type combinations of LE-9.6 on one corpus: throughput,
 
 | Backend | Model | Quant. | Top-K | Load (ms) | docs/s | ms/doc | Peak RAM (MB) | nnz | vocab | Sparsity (%) |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Dense ONNX | `sentence-transformers/all-MiniLM-L6-v2` | fp32 | — | 352 | 134.7 | 7.42 | 203 | 384 | — | 100.000 |
-| Dense GGUF | `MiniLM-L6-Q4` | q4_k_m | — | 81 | 53.0 | 18.87 | 75 | 384 | — | 100.000 |
-| Sparse ONNX | `prithivida/Splade_PP_en_v1` | fp32 | 50 | 1347 | 8.5 | 117.97 | 1371 | 50 | 30522 | 0.162 |
-| Sparse GGUF | `SPLADE-PP-En-v1` | q4_k_m | — | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| Dense ONNX | `sentence-transformers/all-MiniLM-L6-v2` | fp32 | — | 408 | 120.6 | 8.29 | 200 | 384 | — | 100.000 |
+| Dense GGUF | `MiniLM-L6-Q4` | q4_k_m | — | 118 | 53.2 | 18.79 | 72 | 384 | — | 100.000 |
+| Sparse ONNX | `prithivida/Splade_PP_en_v1` | fp32 | 50 | 1176 | 9.7 | 102.80 | 1368 | 50 | 30522 | 0.162 |
+| Sparse GGUF | `cstr/splade-pp-en-v1-GGUF` | q8_0 | 50 | 109 | 2.8 | 357.85 | 905 | 50 | 30522 | 0.163 |
 
 ## 4. How to read these numbers
 
@@ -46,7 +45,5 @@ Compare the four backend×type combinations of LE-9.6 on one corpus: throughput,
 
 ## 5. Backends not measured
 
-### Sparse GGUF — `SPLADE-PP-En-v1`
-
-Reason: blocked, not measured: llama.cpp v0.3.0 loads a BERT GGUF but neither loads nor builds the mlm_* projection head SPLADE requires (third_party/llama.cpp/src/models/bert.cpp:23-74 and 227-232), so it never produces the [seq_len, vocab_size] logits. The GGUF files themselves do carry the head, so a different runtime may work -- see the P1.5a/P1.5b spike in benchmarks/sparse/LE-9.4-validation.md before concluding anything about sparse GGUF
+None — every backend in the matrix was measured.
 
