@@ -728,25 +728,34 @@ static void test_batching_is_stable(void) {
     const char* texts[] = {"hello", "the quick brown fox jumps over the lazy dog",
                            "sparse embedding", "gguf", "model"};
 
-    lembed_sparse_embeddings_t singles;
+lembed_sparse_embeddings_t singles;
     memset(&singles, 0, sizeof(singles));
     CHECK(lembed_sparse_text_embedding_embed(ctx, texts, 5, 1, nullptr, &singles)
               == LEMBED_OK && singles.count == 5,
-          "five texts embed one by one");
+           "five texts embed one by one");
 
-    lembed_sparse_embeddings_t batched;
-    memset(&batched, 0, sizeof(batched));
-    CHECK(lembed_sparse_text_embedding_embed(ctx, texts, 5, 2, nullptr, &batched)
-              == LEMBED_OK && batched.count == 5,
-          "five texts embed in batches of two");
-
-    for (int i = 0; i < batched.count && i < singles.count; i++) {
-        CHECK(same_vector(singles.items[i], batched.items[i]),
-              "a batch of two gives the same vector as a batch of one");
+    /* Sweep every batch size the runtime actually uses. The original guard
+     * compared batches of two against batches of one, and a mask whose document
+     * axis is transposed, or whose query/key axes are swapped, can still pass
+     * that: a fully valid document's mask is all zeros either way, and the only
+     * place a transposed mask differs is across documents, which two documents
+     * are enough to expose -- but only when the batch is split across two
+     * documents. Batches of 2, 3, 4 and 5 cover splits of one, two and three
+     * documents, and a batch larger than the set is covered by the next test. */
+    for (int bs = 2; bs <= 5; bs++) {
+        lembed_sparse_embeddings_t batched;
+        memset(&batched, 0, sizeof(batched));
+        CHECK(lembed_sparse_text_embedding_embed(ctx, texts, 5, bs, nullptr, &batched)
+                  == LEMBED_OK && batched.count == 5,
+              "five texts embed in batches of N");
+        for (int i = 0; i < batched.count && i < singles.count; i++) {
+            CHECK(same_vector(singles.items[i], batched.items[i]),
+                  "a batch of N gives the same vector as a batch of one");
+        }
+        lembed_sparse_embeddings_free(&batched);
     }
 
     lembed_sparse_embeddings_free(&singles);
-    lembed_sparse_embeddings_free(&batched);
     lembed_sparse_text_embedding_free(ctx);
 }
 

@@ -261,28 +261,26 @@ private:
         const int seq_len = enc.seq_length;
         if (seq_len <= 0) return results;
 
-        /* One flat row of tokens: [document][position] concatenated. The mask is
-         * what keeps the documents apart, so nothing else has to know where one
-         * ends and the next begins -- except the pooling, which does, by walking
-         * each document's own slice. */
+        /* One flat row of tokens: [document][position] concatenated, document
+         * major. The batch is an axis of its own in the graph, so the mask is
+         * [seq_len, seq_len, 1, batch] and is what keeps the documents apart --
+         * nothing else has to know where one ends and the next begins, except
+         * the pooling, which does, by walking each document's own slice. */
         const int n_tokens = batch * seq_len;
         std::vector<int32_t> tokens((size_t)n_tokens);
         std::vector<int32_t> positions((size_t)n_tokens);
         std::vector<int64_t> valid((size_t)n_tokens, 0);
-        std::vector<int32_t> doc_id((size_t)n_tokens, 0);
 
         for (int b = 0; b < batch; b++) {
             for (int j = 0; j < seq_len; j++) {
                 const size_t t = (size_t)(b * seq_len + j);
-                doc_id[t] = (int32_t)b;
                 positions[t] = (int32_t)j;
                 tokens[t] = (int32_t)enc.input_ids[(size_t)b][j];
                 valid[t] = enc.attention_mask[(size_t)b][j];
             }
         }
 
-        const float* logits =
-            run_graph(tokens, positions, doc_id, valid, n_tokens);
+        const float* logits = run_graph(tokens, positions, valid, seq_len, batch);
         if (!logits) return results;
 
         for (int b = 0; b < batch; b++) {
@@ -326,8 +324,8 @@ private:
      * the batch shape changes. */
     const float* run_graph(const std::vector<int32_t>& tokens,
                            const std::vector<int32_t>& positions,
-                           const std::vector<int32_t>& doc_id,
-                           const std::vector<int64_t>& valid, int n_tokens) {
+                           const std::vector<int64_t>& valid,
+                           int seq_len, int batch) {
         ggml_init_params iparams{};
         iparams.mem_size = ggml_graph_overhead() + ggml_tensor_overhead() * 2048;
         iparams.mem_buffer = nullptr;
@@ -336,21 +334,25 @@ private:
         ggml_context* ctx = ggml_init(iparams);
         if (!ctx) return nullptr;
 
-        ggml_tensor* t_tokens = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
-        ggml_tensor* t_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, n_tokens);
-        ggml_tensor* t_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_tokens,
-                                                 n_tokens);
+        ggml_tensor* t_tokens = ggml_new_tensor_1d(ctx, GGML_TYPE_I32,
+                                                   seq_len * batch);
+        ggml_tensor* t_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32,
+                                                seq_len * batch);
+        /* [seq_len, seq_len, 1, batch]: the head axis is broadcast, so one plane
+         * of mask per document, and the whole thing is linear in the batch. */
+        ggml_tensor* t_mask = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, seq_len,
+                                                 seq_len, 1, batch);
         ggml_cgraph* gf = ggml_new_graph(ctx);
         if (!t_tokens || !t_pos || !t_mask || !gf) {
             ggml_free(ctx);
             return nullptr;
         }
 
-        const std::vector<float> mask = build_mask(doc_id, valid, n_tokens);
+        const std::vector<float> mask = build_mask(valid, seq_len, batch);
 
         ggml_tensor* logits = build_mlm_head(ctx, build_bert_encoder(
                                                  ctx, *weights_, t_tokens, t_pos,
-                                                 t_mask, n_tokens));
+                                                 t_mask, seq_len, batch));
         if (!logits) {
             ggml_free(ctx);
             return nullptr;
@@ -365,19 +367,22 @@ private:
         }
 
         /* After allocation: until then the input tensors have no data to write
-         * into. */
+         * into. The mask is written from mask.size(), not from n_tokens * n_tokens:
+         * those two are the same only when the batch is one, and writing the
+         * larger count into the smaller tensor is a heap overflow. */
         ggml_backend_tensor_set(t_tokens, tokens.data(), 0,
-                                (size_t)n_tokens * sizeof(int32_t));
+                                (size_t)seq_len * (size_t)batch * sizeof(int32_t));
         ggml_backend_tensor_set(t_pos, positions.data(), 0,
-                                (size_t)n_tokens * sizeof(int32_t));
+                                (size_t)seq_len * (size_t)batch * sizeof(int32_t));
         ggml_backend_tensor_set(t_mask, mask.data(), 0,
-                                (size_t)n_tokens * (size_t)n_tokens * sizeof(float));
+                                (size_t)mask.size() * sizeof(float));
 
         bool ok = ggml_backend_graph_compute(weights_->backend(), gf) ==
                   GGML_STATUS_SUCCESS;
 
         if (ok) {
-            const size_t n_values = (size_t)vocab_size_ * (size_t)n_tokens;
+            const size_t n_values =
+                (size_t)vocab_size_ * (size_t)seq_len * (size_t)batch;
             scratch_.resize(n_values);
             ggml_backend_tensor_get(logits, scratch_.data(), 0,
                                     n_values * sizeof(float));
@@ -404,32 +409,50 @@ private:
         return ggml_add(ctx, ggml_mul_mat(ctx, head.tok_embd, x), head.mlm_bias);
     }
 
-    /* Block-diagonal attention mask, added to the scores before the softmax.
+    /* Per-document attention mask, [seq_len, seq_len, 1, batch], added to the
+     * scores before the softmax.
      *
-     * A query may attend to a key when they belong to the same document *and* the
-     * key is not padding. Everything else is -infinity.
+     * A query at (document b, position i) may attend to a key at (document b,
+     * position j) when that key is not padding. Everything else is -infinity.
      *
-     * A padding query row is masked against everything but itself. Leaving such a
-     * row entirely at -infinity would make its softmax divide by zero; the NaN
-     * that follows stays in its own column (the LayerNorm that comes next is
-     * computed per column) and the column is discarded during pooling, but there
-     * is no reason to produce one. */
-    std::vector<float> build_mask(const std::vector<int32_t>& doc_id,
-                                  const std::vector<int64_t>& valid,
-                                  int n_tokens) const {
+     * The head axis is left at 1: a BERT mask has no per-head component, so
+     * every head reads the same plane, and ggml's softmax indexes it with
+     * i02 % ne12 (ggml-cpu/ops.cpp:5499-5500), so a single plane is read for
+     * every head and never out of bounds.
+     *
+     * A query row that is padding attends to its own document's real tokens
+     * instead of to itself, so the softmax is well defined and the row's column
+     * is discarded at pooling. The "mask a padding row against itself only"
+     * special case is gone: it existed to avoid a divide by zero, and it is
+     * unnecessary now that every document carries at least one real token.
+     *
+     * The one case that cannot happen is a document with no real token at all:
+     * its rows would be all -infinity and the softmax a NaN. [CLS] and [SEP]
+     * guarantee that never happens, but the guard is two lines and a silent NaN
+     * is worse than a dead branch. */
+    std::vector<float> build_mask(const std::vector<int64_t>& valid,
+                                  int seq_len, int batch) const {
         const float neg = -std::numeric_limits<float>::infinity();
-        std::vector<float> mask((size_t)n_tokens * (size_t)n_tokens);
-        for (int i = 0; i < n_tokens; i++) {
-            float* row = mask.data() + (size_t)i * (size_t)n_tokens;
-            if (valid[(size_t)i] == 0) {
-                for (int j = 0; j < n_tokens; j++) row[j] = (i == j) ? 0.0f : neg;
-                continue;
+        std::vector<float> mask((size_t)seq_len * (size_t)seq_len * (size_t)batch);
+        for (int b = 0; b < batch; b++) {
+            const int64_t* vb = valid.data() + (size_t)b * (size_t)seq_len;
+            float* plane_b = mask.data() + (size_t)b * (size_t)seq_len *
+                                                (size_t)seq_len;
+            bool any_valid = false;
+            for (int i = 0; i < seq_len; i++) {
+                float* row = plane_b + (size_t)i * (size_t)seq_len;
+                for (int j = 0; j < seq_len; j++) {
+                    if (vb[j] != 0) {
+                        row[j] = 0.0f;
+                        any_valid = true;
+                    } else {
+                        row[j] = neg;
+                    }
+                }
             }
-            for (int j = 0; j < n_tokens; j++) {
-                row[j] = (doc_id[(size_t)i] == doc_id[(size_t)j] &&
-                          valid[(size_t)j] != 0)
-                             ? 0.0f
-                             : neg;
+            if (!any_valid) {
+                for (int i = 0; i < seq_len; i++)
+                    plane_b[(size_t)i * (size_t)seq_len + i] = 0.0f;
             }
         }
         return mask;
