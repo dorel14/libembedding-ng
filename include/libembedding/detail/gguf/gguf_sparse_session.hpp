@@ -349,6 +349,12 @@ private:
                 ggml_free(graph_.ctx);
                 graph_.ctx = nullptr;
             }
+            /* Tensors/graph lived in the freed ctx: clear dangling pointers */
+            graph_.t_tokens = nullptr;
+            graph_.t_pos = nullptr;
+            graph_.t_mask = nullptr;
+            graph_.gf = nullptr;
+            graph_.logits = nullptr;
 
             ggml_init_params iparams{};
             iparams.mem_size = ggml_graph_overhead() + ggml_tensor_overhead() * 2048;
