@@ -308,7 +308,7 @@ class SparseTextEmbedding:
 
         Args:
             texts: List of strings to embed.
-            batch_size: Batch size override (None = use default).
+            batch_size: Batch size override (None = use constructor default).
             top_terms: Override max terms per document (None = use constructor value).
             min_weight: Override minimum weight threshold (None = use constructor value).
             storage_format: Override output format - "dict" or "index_order"
@@ -321,7 +321,7 @@ class SparseTextEmbedding:
         if n == 0:
             return []
 
-        bs = 0 if batch_size is None else batch_size
+        bs = self._batch_size if batch_size is None else batch_size
 
         encoded = [t.encode("utf-8") for t in texts]
         c_strs = [ffi.new("char[]", e) for e in encoded]

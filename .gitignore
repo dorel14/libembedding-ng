@@ -36,7 +36,7 @@ Makefile
 *.pyc
 *.pyo
 __pycache__/
-
+*.csv
 # Model cache
 models/*.gguf
 libembedding_cache/

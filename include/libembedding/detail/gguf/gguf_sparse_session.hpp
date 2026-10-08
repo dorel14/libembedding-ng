@@ -90,6 +90,17 @@ public:
     SparseSession(SparseSession&&) = delete;
     SparseSession& operator=(SparseSession&&) = delete;
 
+    ~SparseSession() {
+        if (graph_.galloc) {
+            ggml_gallocr_free(graph_.galloc);
+            graph_.galloc = nullptr;
+        }
+        if (graph_.ctx) {
+            ggml_free(graph_.ctx);
+            graph_.ctx = nullptr;
+        }
+    }
+
     /* Loads a SPLADE GGUF.
      *
      * The capability check is the same one lembed_gguf_inspect() performs, and it
@@ -314,82 +325,98 @@ private:
         r.values.resize(keep);
     }
 
-    /* Builds the graph, allocates it, feeds it and returns a pointer to the
+/* Builds the graph, allocates it, feeds it and returns a pointer to the
      * logits in the session's scratch buffer, valid until the next call. Null on
      * a compute failure.
      *
-     * The graph context holds tensor *metadata* only -- every byte of activation
-     * lives in the buffer the allocator reserves -- so the context itself is
-     * small and cheap to create per call, and nothing has to be invalidated when
-     * the batch shape changes. */
+     * The graph context is cached and reused across calls. It is rebuilt only when
+     * the shape (seq_len, batch) changes. */
     const float* run_graph(const std::vector<int32_t>& tokens,
                            const std::vector<int32_t>& positions,
                            const std::vector<int64_t>& valid,
                            int seq_len, int batch) {
-        ggml_init_params iparams{};
-        iparams.mem_size = ggml_graph_overhead() + ggml_tensor_overhead() * 2048;
-        iparams.mem_buffer = nullptr;
-        iparams.no_alloc = true;
+        bool rebuild = (graph_.ctx == nullptr) ||
+                       (graph_.cached_seq_len != seq_len) ||
+                       (graph_.cached_batch != batch);
 
-        ggml_context* ctx = ggml_init(iparams);
-        if (!ctx) return nullptr;
+        if (rebuild) {
+            /* Free old graph if exists */
+            if (graph_.galloc) {
+                ggml_gallocr_free(graph_.galloc);
+                graph_.galloc = nullptr;
+            }
+            if (graph_.ctx) {
+                ggml_free(graph_.ctx);
+                graph_.ctx = nullptr;
+            }
 
-        ggml_tensor* t_tokens = ggml_new_tensor_1d(ctx, GGML_TYPE_I32,
-                                                   seq_len * batch);
-        ggml_tensor* t_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32,
-                                                seq_len * batch);
-        /* [seq_len, seq_len, 1, batch]: the head axis is broadcast, so one plane
-         * of mask per document, and the whole thing is linear in the batch. */
-        ggml_tensor* t_mask = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, seq_len,
-                                                 seq_len, 1, batch);
-        ggml_cgraph* gf = ggml_new_graph(ctx);
-        if (!t_tokens || !t_pos || !t_mask || !gf) {
-            ggml_free(ctx);
-            return nullptr;
-        }
+            ggml_init_params iparams{};
+            iparams.mem_size = ggml_graph_overhead() + ggml_tensor_overhead() * 2048;
+            iparams.mem_buffer = nullptr;
+            iparams.no_alloc = true;
 
-        const std::vector<float> mask = build_mask(valid, seq_len, batch);
+            graph_.ctx = ggml_init(iparams);
+            if (!graph_.ctx) return nullptr;
 
-        ggml_tensor* logits = build_mlm_head(ctx, build_bert_encoder(
-                                                 ctx, *weights_, t_tokens, t_pos,
-                                                 t_mask, seq_len, batch));
-        if (!logits) {
-            ggml_free(ctx);
-            return nullptr;
-        }
-        ggml_build_forward_expand(gf, logits);
+            graph_.t_tokens = ggml_new_tensor_1d(graph_.ctx, GGML_TYPE_I32,
+                                                 seq_len * batch);
+            graph_.t_pos = ggml_new_tensor_1d(graph_.ctx, GGML_TYPE_I32,
+                                              seq_len * batch);
+            graph_.t_mask = ggml_new_tensor_4d(graph_.ctx, GGML_TYPE_F32, seq_len,
+                                               seq_len, 1, batch);
+            graph_.gf = ggml_new_graph(graph_.ctx);
+            if (!graph_.t_tokens || !graph_.t_pos || !graph_.t_mask || !graph_.gf) {
+                ggml_free(graph_.ctx);
+                graph_.ctx = nullptr;
+                return nullptr;
+            }
 
-        ggml_gallocr_t galloc = ggml_gallocr_new(weights_->buffer_type());
-        if (!galloc || !ggml_gallocr_alloc_graph(galloc, gf)) {
-            if (galloc) ggml_gallocr_free(galloc);
-            ggml_free(ctx);
-            return nullptr;
+            graph_.logits = build_mlm_head(graph_.ctx, build_bert_encoder(
+                                                 graph_.ctx, *weights_, graph_.t_tokens, graph_.t_pos,
+                                                 graph_.t_mask, seq_len, batch));
+            if (!graph_.logits) {
+                ggml_free(graph_.ctx);
+                graph_.ctx = nullptr;
+                return nullptr;
+            }
+            ggml_build_forward_expand(graph_.gf, graph_.logits);
+
+            graph_.galloc = ggml_gallocr_new(weights_->buffer_type());
+            if (!graph_.galloc || !ggml_gallocr_alloc_graph(graph_.galloc, graph_.gf)) {
+                if (graph_.galloc) ggml_gallocr_free(graph_.galloc);
+                ggml_free(graph_.ctx);
+                graph_.ctx = nullptr;
+                return nullptr;
+            }
+
+            graph_.cached_seq_len = seq_len;
+            graph_.cached_batch = batch;
         }
 
         /* After allocation: until then the input tensors have no data to write
          * into. The mask is written from mask.size(), not from n_tokens * n_tokens:
          * those two are the same only when the batch is one, and writing the
          * larger count into the smaller tensor is a heap overflow. */
-        ggml_backend_tensor_set(t_tokens, tokens.data(), 0,
+        const std::vector<float> mask = build_mask(valid, seq_len, batch);
+
+        ggml_backend_tensor_set(graph_.t_tokens, tokens.data(), 0,
                                 (size_t)seq_len * (size_t)batch * sizeof(int32_t));
-        ggml_backend_tensor_set(t_pos, positions.data(), 0,
+        ggml_backend_tensor_set(graph_.t_pos, positions.data(), 0,
                                 (size_t)seq_len * (size_t)batch * sizeof(int32_t));
-        ggml_backend_tensor_set(t_mask, mask.data(), 0,
+        ggml_backend_tensor_set(graph_.t_mask, mask.data(), 0,
                                 (size_t)mask.size() * sizeof(float));
 
-        bool ok = ggml_backend_graph_compute(weights_->backend(), gf) ==
+        bool ok = ggml_backend_graph_compute(weights_->backend(), graph_.gf) ==
                   GGML_STATUS_SUCCESS;
 
         if (ok) {
             const size_t n_values =
                 (size_t)vocab_size_ * (size_t)seq_len * (size_t)batch;
             scratch_.resize(n_values);
-            ggml_backend_tensor_get(logits, scratch_.data(), 0,
+            ggml_backend_tensor_get(graph_.logits, scratch_.data(), 0,
                                     n_values * sizeof(float));
         }
 
-        ggml_gallocr_free(galloc);
-        ggml_free(ctx);
         return ok ? scratch_.data() : nullptr;
     }
 
@@ -465,6 +492,21 @@ private:
     std::vector<float> scratch_;
     int vocab_size_ = 0;
     int max_length_ = 0;
+
+    /* Cached graph context for reuse across embed_batch() calls.
+     * The graph structure depends only on (seq_len, batch, vocab_size, n_embd, n_head, n_layers),
+     * so it can be built once and reused. Only input tensor data changes per batch. */
+    struct CachedGraph {
+        ggml_context* ctx = nullptr;
+        ggml_gallocr_t galloc = nullptr;
+        ggml_cgraph* gf = nullptr;
+        ggml_tensor* t_tokens = nullptr;
+        ggml_tensor* t_pos = nullptr;
+        ggml_tensor* t_mask = nullptr;
+        ggml_tensor* logits = nullptr;
+        int cached_seq_len = 0;
+        int cached_batch = 0;
+    } graph_;
 };
 
 } /* namespace gguf */
