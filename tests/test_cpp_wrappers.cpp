@@ -26,6 +26,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#define LIBEMBEDDING_IMPLEMENTATION
 #include <libembedding/cpp/embedding.hpp>
 #include <libembedding/cpp/embedding_provider.hpp>
 #include <libembedding/cpp/embedding_pool.hpp>
