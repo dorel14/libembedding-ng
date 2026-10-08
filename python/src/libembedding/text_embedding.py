@@ -261,7 +261,7 @@ class TextEmbedding:
         cache_dir: str | None, max_length: int, dim: int, pooling: str,
         offline: bool, show_download_progress: bool,
         cache_size: int, auto_workers: bool,
-    ) -> int | None:
+    ) -> tuple[int | None, str]:
         """Benchmark the quantization variants this model actually ships.
 
         Thin delegation to the C implementation, which is the one that matters:
@@ -286,7 +286,7 @@ class TextEmbedding:
         try:
             model_index = resolve_text_model(model_name)
         except (LembedError, ValueError):
-            return None, ""
+            return (None, "")
 
         choice = ffi.new("lembed_quantization_choice_t *")
         try:
@@ -307,12 +307,12 @@ class TextEmbedding:
                 )
             )
         except (LembedError, OSError):
-            return None, ""
+            return (None, "")
 
         if choice.num_measured <= 0:
-            return None, ""
+            return (None, "")
         reason = ffi.string(choice.reason).decode("utf-8", "replace")
-        return int(choice.quantization), reason
+        return (int(choice.quantization), reason)
 
     @property
     def dim(self) -> int:
