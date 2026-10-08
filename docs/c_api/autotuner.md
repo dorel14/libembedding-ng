@@ -38,6 +38,107 @@ Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (
 | `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
 | `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
+| `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Choisir la variante de quantification la plus rapide sur cette machine |
+
+## Sélection automatique de la quantification
+
+`lembed_quantization_auto_select()` répond à une question que l'appelant ne peut pas
+poser seul : **sur cette machine, quel fichier de poids est le plus rapide pour ce
+modèle ?** Les variantes quantifiées sont des entrées de registre distinctes avec
+leur propre `model_file`, donc choisir un mode, c'est choisir un fichier.
+
+Seules les variantes **réellement livrées** sont considérées : un modèle sans
+variante `static` n'est jamais comparé à une variante `static` fantôme. Les
+variantes dont les poids sont absents sont **sautées**, jamais téléchargées pour
+être mesurées.
+
+### Règle de décision
+
+1. sans baseline FP32 mesurable → FP32 ;
+2. une variante doit battre FP32 de **plus de 5 %** — en dessous, l'écart est dans
+   le bruit d'un benchmark court et un échange de poids ne se justifie pas ;
+3. **biais vers l'INT8 dynamique** : une autre variante doit le battre de **plus de
+   15 %** pour le remplacer, car c'est l'option quantifiée la plus sûre côté
+   qualité.
+
+### Cache
+
+La clé de cache **est** l'empreinte matérielle : elle est inscrite dans le nom du
+fichier (CPU, version ONNX Runtime, version de libembedding) et l'identité de
+l'entrée est re-vérifiée à la lecture. Une décision mesurée sur une autre machine
+ou une autre version ne peut donc jamais être servie. Emplacement dédié
+`quantization/`, pour qu'une décision de quantification n'écrase jamais un réglage
+threads/batch.
+
+Coût : **~3,5 s au tout premier chargement** d'un modèle, puis **gratuit**.
+
+### Deux phases de mesure
+
+Les variantes n'ont pas le même prix : sur la même machine, FP16 s'est mesuré
+**6x plus lent** que l'INT8 dynamique, et aurait donc dominé toute la sélection
+sans rien apprendre que quelques centaines de millisecondes n'auraient pas appris.
+
+| Phase | Ce qu'elle fait | Bornes |
+|---|---|---|
+| 1 — sonde | Rejette les variantes manifestement perdantes. **4 documents max, 250 ms max** par variante. | Bornée à ~750 ms pour 3 variantes, quelle que soit leur vitesse relative |
+| 2 — mesure | Corpus complet, warmup séparé, uniquement sur la baseline et les survivantes. | 16 documents, warmup de 2 |
+
+Le budget **en temps** est la moitié importante : une sonde limitée en nombre de
+documents paie encore plein pot sur une variante pathologique, ce qui est
+précisément le cas qu'on veut éviter.
+
+La sonde est un **rejeteur, pas un classement** : son premier document est hors
+chronomètre (le premier `embed` paie la sélection de kernels et l'allocation), et
+elle n'élimine que si la variante est plus de 3x plus lente que la meilleure vue.
+
+### Mesures réelles (bge-small-en-v1.5, i7-1065G7)
+
+| Variante | docs/s | Poids |
+|---|---|---|
+| FP32 | 15.1 | 126.9 MB |
+| **INT8 dynamique** | **25.6** (1.7x) | **32.2 MB** (3.9x plus petit) |
+| FP16 | 2.5 (6x plus lent) | 63.4 MB |
+
+> **Note de mesure.** La taille rapportée est celle **des poids sur disque**, pas
+> le RSS résident : le pic RSS est un high-water mark **par process**, il ne peut
+> donc jamais décroître et ne peut pas être attribué à une variante mesurée après
+> une autre. Compter le graphe seul serait pire : un modèle ONNX au-delà de la
+> limite protobuf est un petit fichier graphe + un sidecar de poids, et le
+> `model_quantized.onnx` INT8 de bge-small fait 413 Ko pour 33 Mo de poids. Le
+> sidecar est donc compté, sinon l'INT8 ressortirait **plus petit** que le FP32.
+
+### Exemple
+
+```c
+#include <libembedding/autotuner.h>
+
+lembed_quantization_choice_t choice;
+if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                    /*num_threads*/ 0,
+                                    /*batch_size*/  32,
+                                    /*num_docs*/    0,   /* 0 = défaut */
+                                    /*dry_run*/     0,
+                                    &choice) == LEMBED_OK) {
+    printf("quantization = %s\n", choice.reason);   /* ex. "1.69x the fp32 variant ..." */
+    printf("from_cache   = %d\n", choice.from_cache);
+
+    /* Ou laisser create_v2 résoudre : LEMBED_QUANTIZATION_AUTO dans les options
+     * v2 déclenche exactement la même sélection, et persiste la décision. */
+    lembed_text_options_v2_t opts = lembed_text_options_v2_default();
+    opts.base.model = LEMBED_TEXT_BGE_SMALL_EN_V15;
+    opts.quantization = LEMBED_QUANTIZATION_AUTO;
+    lembed_text_embedding_t* ctx = NULL;
+    lembed_text_embedding_create_v2(&opts, &ctx);
+}
+```
+
+`lembed_quantization_choice_t` est déclaré dans `types.h` et non dans
+`autotuner.h` : le chemin de création doit résoudre `AUTO` sans charger la
+machinerie d'autotune.
+
+La règle de décision est une fonction **pure**, séparée de la mesure, ce qui la rend
+testable en quelques millisecondes sans modèle ni réseau
+(`tests/test_quantization_auto.cpp`).
 
 > **Les deux formes du nom sont acceptées.** Le registre donne à chaque modèle
 > deux chaînes différentes — le dépôt HuggingFace (`model_code`,

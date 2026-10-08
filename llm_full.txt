@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.9.0
+Version: 1.11.0
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -65,6 +65,12 @@ similarity = np.dot(embeddings[0], embeddings[1])  # 0.82
 sparse = SparseTextEmbedding()
 results = sparse.embed(["machine learning"])
 print(results[0].indices, results[0].values)
+
+# Sparse embeddings from a GGUF export (this library's own ggml runtime)
+sparse_gguf = SparseTextEmbedding.from_gguf_model(
+    "cstr/splade-pp-en-v1-GGUF", "splade-pp-en-v1-q8_0.gguf"
+)
+results = sparse_gguf.embed(["machine learning"])
 
 # Reranking
 reranker = Reranker("BAAI/bge-reranker-base")
@@ -805,6 +811,41 @@ for (int i = 0; i < count; i++) {
 
 **Recommended GGUF models** are listed in the registry. Query them with `lembed_list_gguf_models()`, `lembed_find_gguf_model()`, or `lembed_default_gguf_model()`.
 
+#### Sparse models: a separate runtime
+
+**Sparse** GGUF models do not go through llama.cpp. llama.cpp v0.3.0 cannot load
+this family of files at all — their tensor names (`enc.N.attn.q.weight`,
+`embd_ln.weight`) and metadata keys (`bert.hidden_size`,
+`bert.num_attention_heads`) are not the ones it looks for
+(`blk.N.attn_q.weight`, `%s.embedding_length`), and a missing required tensor is
+fatal. Sparse models therefore run on libembedding's own ggml graph, on the same
+CPU backend that is already vendored:
+
+```c
+#include <libembedding/sparse_text_embedding.h>
+
+/* A local file, or a HuggingFace repo + filename */
+lembed_sparse_options_t opts = lembed_sparse_options_default();
+opts.top_k = 256;
+
+lembed_sparse_embedding_ctx_t* embedder = NULL;
+lembed_sparse_text_embedding_create_from_gguf_path(
+    "/path/to/splade-pp-en-v1-q8_0.gguf", &opts, &embedder);
+
+/* ... or, equivalently */
+lembed_sparse_text_embedding_create_from_gguf_model(
+    "cstr/splade-pp-en-v1-GGUF", "splade-pp-en-v1-q8_0.gguf", &opts, &embedder);
+```
+
+`lembed_sparse_text_embedding_create_from_path()` routes a path ending in `.gguf`
+here automatically. The file must carry an MLM/SPLADE head over a declared
+vocabulary; a dense GGUF is refused with a reason rather than accepted.
+
+Measured against the sparse ONNX model on the same texts, cosine similarity is
+0.9998 (worst case over 12 texts), i.e. Q8_0 quantisation noise rather than an
+implementation divergence. See `docs/gguf_sparse_runtime.md` and
+`benchmarks/sparse/LE-9.6-results.md`.
+
 ---
 
 ### Unified Auto-Tuner and Benchmark
@@ -1205,10 +1246,86 @@ benchmark does not measure.
   run published before the fix is void too. The 2026-10-02 run above is the first
   one that both resolves registry entries and measures a genuine INT8 file.
 
-  Two caveats: `quantization="auto"` selects **no** weights (it loads the FP32
-  default while `.quantization` reports `"auto"`) — use
-  `preferred_quantization="auto"` for a measured auto-selection. And
-  `Reranker(quantization=...)` does not resolve a variant either: pass the name of
+  - **`preferred_quantization="auto"` measures and picks for you.** The variants the
+  registry actually ships are benchmarked once per (model, machine, library
+  version), the winner is cached, and later loads read the cache:
+
+  ```python
+  from libembedding import TextEmbedding
+
+  m = TextEmbedding("BAAI/bge-small-en-v1.5", preferred_quantization="auto")
+  m.quantization         # 'dynamic'
+  m.quantization_reason  # '1.69x the fp32 variant (15 -> 26 docs/s)'
+  ```
+
+  Measured on an i7-1065G7:
+
+  | Variant | docs/s | Weights | Decision |
+  |---|---|---|---|
+  | FP32 | 15.1 | 126.9 MB | baseline |
+  | **INT8 dynamic** | **25.6** (1.7x) | **32.2 MB** (3.9x smaller) | **selected** |
+  | FP16 | 2.5 (6x slower) | 63.4 MB | rejected |
+
+  > **These numbers are not comparable with the tables above.** Auto-selection
+  > measures a fixed 16-document synthetic corpus, because that is what runs once
+  > per machine and then gets cached. The batch tables above use 950 timed real
+  > texts. Same machine, same weights, 50.5 docs/s against 15.1 for FP32 — the
+  > gap is the corpus, not a regression. What the selection compares is the
+  > *ratio* between variants, and that holds either way.
+
+  The rule, in order:
+
+  1. no measurable FP32 baseline → FP32;
+  2. a variant must beat FP32 by **more than 5 %** — under that, the difference is
+     inside the noise of a short benchmark and a weights swap is not worth it;
+  3. **dynamic INT8 is preferred**: another variant must beat it by **more than
+     15 %** to take over, because it is the safer of the quantized options quality
+     wise. FP16, at 6x slower on a CPU without native FP16 arithmetic, never comes
+     close.
+
+  Two implementation points worth knowing:
+
+  - **The cache key is the hardware fingerprint.** It is baked into the file name
+    (CPU, ONNX Runtime version, library version) and the entry identity is
+    re-checked on read, so a decision measured on another machine is never served.
+    The `quantization=` field of the entry is the *result*, not part of the key.
+    `clear_autotune_cache(model_name)` invalidates it, along with the rest of that
+    model's tuning entries.
+  - **Cost: ~3.5 s on the very first load of a model, then free.** The variants
+    are not comparable in price — FP16 was 6x slower than INT8 on the same machine
+    and would have dominated the whole selection — so measurement runs in two
+    phases: a probe bounded to 4 documents *and* 250 ms per variant that drops the
+    clear losers, then a full measurement of the survivors only. The warmup is a
+    2-document slice, not the whole corpus. A surviving variant is therefore loaded
+    twice, once to probe and once to measure; the probe session is freed first so
+    the two never sit in memory at the same time, but the weights file is read
+    twice. That only happens on a cache miss.
+  - **AUTO never downloads anything to measure it**, and neither does the decision
+    it reaches: a variant whose weights are absent from disk is skipped. If no FP32
+    baseline can be measured, the entry you asked for is kept rather than silently
+    promoted to FP32.
+
+  The decision rule is a pure function separated from the measurement, so it is
+  covered by unit tests that run in milliseconds without a model
+  (`tests/test_quantization_auto.cpp`).
+
+  In C, `LEMBED_QUANTIZATION_AUTO` in the v2 options resolves the same way, and
+  `lembed_quantization_auto_select()` exposes the measurement directly:
+
+  ```c
+  lembed_quantization_choice_t choice;
+  if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                      /*threads*/ 0, /*batch*/ 32,
+                                      /*num_docs*/ 0, /*dry_run*/ 0,
+                                      &choice) == LEMBED_OK) {
+      /* choice.quantization, choice.reason, choice.measured[] */
+  }
+  ```
+
+- **`quantization="auto"` is still a no-op for weights**, and stays that way on
+  purpose: it loads the FP32 default and `.quantization` reports `"auto"`. Use
+  `preferred_quantization="auto"` for a measured decision. Also note
+  `Reranker(quantization=...)` does not resolve a variant: pass the name of
   the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
 
 - **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
@@ -1611,6 +1728,7 @@ TextEmbedding(
 | `auto_workers` | `bool` | `False` | `True` = auto-detect optimal sessions/workers for llama.cpp backend |
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
 | `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
+| `preferred_quantization` | `str \| None` | `None` | `"auto"` = **measured selection**: the variants the registry actually ships for this model are benchmarked once per (model, machine, library version), the winner is cached, and later loads read the cache. Rule: no measurable FP32 baseline → FP32; a variant must beat FP32 by **more than 5 %**; and **dynamic INT8 is preferred** — another variant must beat it by **more than 15 %**. Cost: ~3.5 s on the very first load of a model, then free. See [Quantization](#quantization--fp32-vs-int8) for the measurements. |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -1621,7 +1739,8 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
 | `dim` | `int` (property) | Embedding dimension |
-| `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
+| `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
+| `quantization_reason` | `str` (property) | Why `preferred_quantization="auto"` picked that mode, e.g. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Empty when nothing was measured (explicit mode, or a model with no quantized sibling). |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name or local path |
 | `model_name` | `str` (property) | Registry name of the loaded model |
@@ -1669,7 +1788,7 @@ Generates **sparse** embeddings (sparse vectors with token indices and weights).
 
 ```python
 SparseTextEmbedding(
-    model_name="prithvida/SPLADE_PP_en_v1",
+    model_name="prithivida/Splade_PP_en_v1",
     provider="cpu",
     device_id=0,
     cache_dir=None,
@@ -1691,7 +1810,7 @@ SparseTextEmbedding(
 
 | HuggingFace name | Description |
 |------------------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | SPLADE++ (default) |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ (default) |
 | `BAAI/bge-m3` | Multilingual BGE-M3 |
 
 #### Methods and properties
@@ -2480,7 +2599,7 @@ for (int i = 0; i < count; i++) {
 
 | HuggingFace name | Dim | Max tokens | Description |
 |------------------|-----|-----------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | variable | 512 | SPLADE++ v1 (default) |
+| `prithivida/Splade_PP_en_v1` | variable | 512 | SPLADE++ v1 (default) |
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ languages |
 
 > **Note:** Sparse embeddings have no fixed dimension. The returned dimension equals the number of active tokens in the vocabulary.
@@ -4495,6 +4614,104 @@ This module provides comprehensive auto-tuning to find optimal configuration (wo
 | `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Constrained autotune |
 | `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Latency-budget autoconfig |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Profile-based autoconfig |
+| `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Pick the fastest quantization variant for this machine |
+
+## Automatic quantization selection
+
+`lembed_quantization_auto_select()` answers a question the caller cannot answer
+alone: **on this machine, which weights file is fastest for this model?** Quantized
+variants are separate registry entries with their own `model_file`, so choosing a
+mode means choosing a file.
+
+Only the variants **actually shipped** are considered: a model with no `static`
+sibling is never compared against a phantom one. Variants whose weights are absent
+are **skipped**, never downloaded just to be measured.
+
+### Decision rule
+
+1. no measurable FP32 baseline -> FP32;
+2. a variant must beat FP32 by **more than 5 %** -- below that the difference sits
+   inside the noise of a short benchmark and a weights swap is not worth it;
+3. **biased toward dynamic INT8**: another variant must beat it by **more than
+   15 %** to take over, because it is the safer of the quantized options quality
+   wise.
+
+### Cache
+
+The cache key **is** the hardware fingerprint: it is baked into the file name (CPU,
+ONNX Runtime version, library version) and the entry identity is re-checked on
+read, so a decision measured on another machine or version can never be served.
+Dedicated `quantization/` location, so a quantization decision can never overwrite
+a threads/batch tuning entry.
+
+Cost: **~3.5 s on the very first load** of a model, then **free**.
+
+### Two-phase measurement
+
+The variants are not comparable in price: FP16 measured **6x slower** than dynamic
+INT8 on the same machine and would have dominated the whole selection without
+teaching anything a few hundred milliseconds would not have.
+
+| Phase | What it does | Bounds |
+|---|---|---|
+| 1 -- probe | Rejects clear losers. **4 documents max, 250 ms max** per variant. | Bounded at ~750 ms for three variants, whatever their relative speed |
+| 2 -- measure | Full corpus, separate warmup, baseline and survivors only. | 16 documents, 2-document warmup |
+
+The **time** budget is the important half: a document-count-only probe still pays
+full price on a pathological variant, which is exactly the case worth avoiding.
+
+The probe is a **rejector, not a ranker**: its first document is untimed (the
+first embed pays kernel selection and buffer allocation), and it only eliminates a
+variant that is more than 3x slower than the best seen so far.
+
+### Measured (bge-small-en-v1.5, i7-1065G7)
+
+| Variant | docs/s | Weights |
+|---|---|---|
+| FP32 | 15.1 | 126.9 MB |
+| **Dynamic INT8** | **25.6** (1.7x) | **32.2 MB** (3.9x smaller) |
+| FP16 | 2.5 (6x slower) | 63.4 MB |
+
+> **Measurement note.** The size reported is the on-disk size of the weights, not
+> resident memory: peak RSS is a per-process high-water mark, so it can never go
+> down and cannot be attributed to a variant measured after another one. Counting
+> only the graph file would be worse still -- an ONNX model past the protobuf size
+> limit is a small graph plus a weights sidecar, and bge-small's INT8
+> `model_quantized.onnx` is 413 KB next to 33 MB of weights. The sidecar is
+> therefore counted, otherwise INT8 would report **smaller** than FP32.
+
+### Example
+
+```c
+#include <libembedding/autotuner.h>
+
+lembed_quantization_choice_t choice;
+if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                    /*num_threads*/ 0,
+                                    /*batch_size*/  32,
+                                    /*num_docs*/    0,   /* 0 = default */
+                                    /*dry_run*/     0,
+                                    &choice) == LEMBED_OK) {
+    printf("quantization = %s\n", choice.reason);
+    printf("from_cache   = %d\n", choice.from_cache);
+}
+
+/* Or let create_v2 resolve it: LEMBED_QUANTIZATION_AUTO in the v2 options runs
+ * the exact same selection and persists the decision. */
+lembed_text_options_v2_t opts = lembed_text_options_v2_default();
+opts.base.model = LEMBED_TEXT_BGE_SMALL_EN_V15;
+opts.quantization = LEMBED_QUANTIZATION_AUTO;
+lembed_text_embedding_t* ctx = NULL;
+lembed_text_embedding_create_v2(&opts, &ctx);
+```
+
+`lembed_quantization_choice_t` is declared in `types.h` rather than
+`autotuner.h`: the creation path has to resolve `AUTO` without pulling in the
+autotune machinery.
+
+The decision rule is a **pure** function, separated from the measurement, which
+makes it testable in milliseconds without a model or network
+(`tests/test_quantization_auto.cpp`).
 
 > **Both forms of the name are accepted.** The registry gives every model two
 > different strings -- the HuggingFace repo (`model_code`,
@@ -5087,6 +5304,7 @@ TextEmbedding(
 | `auto_workers` | `bool` | `False` | `True` = auto-détection du nombre optimal de sessions/workers pour llama.cpp |
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
 | `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. ⚠️ `"fp16"` n'est pas de l'INT8 : ce sont des poids `FLOAT16` servis par un graphe optimisé ORT. Sur un CPU sans arithmétique FP16 native, ils sont plus lents que FP32 tout en occupant moins de disque — utile pour la taille, pas pour le débit. Les quatre entrées `Qdrant/*-onnx-Q` (dont `bge-small-en-v1.5`) sont dans ce cas ; leur suffixe `_Q` et leur description historique « Quantized » ne Changeaient pas. |
+| `preferred_quantization` | `str \| None` | `None` | `"auto"` = **sélection mesurée** : les variantes réellement livrées par le registre pour ce modèle sont benchmarkées une fois par (modèle, machine, version de la lib), le gagnant est mis en cache, et les chargements suivants lisent le cache. Règle : sans baseline FP32 mesurable → FP32 ; une variante doit battre FP32 de **plus de 5 %** ; et **l'INT8 dynamique est préféré** — une autre variante doit le battre de **plus de 15 %**. Coût : ~3,5 s au tout premier chargement d'un modèle, puis gratuit. Voir [Quantification](#quantification--fp32-vs-int8) pour les mesures. |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -5097,7 +5315,8 @@ TextEmbedding(
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
 | `dim` | `int` (property) | Dimension de l'embedding |
-| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
+| `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
+| `quantization_reason` | `str` (property) | Justification du choix quand `preferred_quantization="auto"` a tourné, ex. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Vide si aucun mode n'a été mesuré (mode explicite, ou modèle sans variante quantifiée). |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `model_name` | `str` (property) | Nom de registre du modèle chargé |
@@ -5145,7 +5364,7 @@ Génère des embeddings **sparse** (vecteurs creux avec indices de tokens et poi
 
 ```python
 SparseTextEmbedding(
-    model_name="prithvida/SPLADE_PP_en_v1",
+    model_name="prithivida/Splade_PP_en_v1",
     provider="cpu",
     device_id=0,
     cache_dir=None,
@@ -5167,7 +5386,7 @@ SparseTextEmbedding(
 
 | Nom HuggingFace | Description |
 |-----------------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | SPLADE++ (défaut) |
+| `prithivida/Splade_PP_en_v1` | SPLADE++ (défaut) |
 | `BAAI/bge-m3` | BGE-M3 multilingue |
 
 #### Méthodes et propriétés
@@ -5931,7 +6150,7 @@ Les modèles GGUF sont chargés par chemin de fichier (pas par enum). Ils utilis
 
 | Nom HuggingFace | Dim | Tokens max | Description |
 |-----------------|-----|-----------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | variable | 512 | SPLADE++ v1 (défaut) |
+| `prithivida/Splade_PP_en_v1` | variable | 512 | SPLADE++ v1 (défaut) |
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ langues |
 
 > **Note :** Les embeddings sparse n'ont pas de dimension fixe. La dimension retournée correspond au nombre de tokens actifs dans le vocabulaire.
@@ -7965,6 +8184,107 @@ Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (
 | `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
 | `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
+| `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Choisir la variante de quantification la plus rapide sur cette machine |
+
+## Sélection automatique de la quantification
+
+`lembed_quantization_auto_select()` répond à une question que l'appelant ne peut pas
+poser seul : **sur cette machine, quel fichier de poids est le plus rapide pour ce
+modèle ?** Les variantes quantifiées sont des entrées de registre distinctes avec
+leur propre `model_file`, donc choisir un mode, c'est choisir un fichier.
+
+Seules les variantes **réellement livrées** sont considérées : un modèle sans
+variante `static` n'est jamais comparé à une variante `static` fantôme. Les
+variantes dont les poids sont absents sont **sautées**, jamais téléchargées pour
+être mesurées.
+
+### Règle de décision
+
+1. sans baseline FP32 mesurable → FP32 ;
+2. une variante doit battre FP32 de **plus de 5 %** — en dessous, l'écart est dans
+   le bruit d'un benchmark court et un échange de poids ne se justifie pas ;
+3. **biais vers l'INT8 dynamique** : une autre variante doit le battre de **plus de
+   15 %** pour le remplacer, car c'est l'option quantifiée la plus sûre côté
+   qualité.
+
+### Cache
+
+La clé de cache **est** l'empreinte matérielle : elle est inscrite dans le nom du
+fichier (CPU, version ONNX Runtime, version de libembedding) et l'identité de
+l'entrée est re-vérifiée à la lecture. Une décision mesurée sur une autre machine
+ou une autre version ne peut donc jamais être servie. Emplacement dédié
+`quantization/`, pour qu'une décision de quantification n'écrase jamais un réglage
+threads/batch.
+
+Coût : **~3,5 s au tout premier chargement** d'un modèle, puis **gratuit**.
+
+### Deux phases de mesure
+
+Les variantes n'ont pas le même prix : sur la même machine, FP16 s'est mesuré
+**6x plus lent** que l'INT8 dynamique, et aurait donc dominé toute la sélection
+sans rien apprendre que quelques centaines de millisecondes n'auraient pas appris.
+
+| Phase | Ce qu'elle fait | Bornes |
+|---|---|---|
+| 1 — sonde | Rejette les variantes manifestement perdantes. **4 documents max, 250 ms max** par variante. | Bornée à ~750 ms pour 3 variantes, quelle que soit leur vitesse relative |
+| 2 — mesure | Corpus complet, warmup séparé, uniquement sur la baseline et les survivantes. | 16 documents, warmup de 2 |
+
+Le budget **en temps** est la moitié importante : une sonde limitée en nombre de
+documents paie encore plein pot sur une variante pathologique, ce qui est
+précisément le cas qu'on veut éviter.
+
+La sonde est un **rejeteur, pas un classement** : son premier document est hors
+chronomètre (le premier `embed` paie la sélection de kernels et l'allocation), et
+elle n'élimine que si la variante est plus de 3x plus lente que la meilleure vue.
+
+### Mesures réelles (bge-small-en-v1.5, i7-1065G7)
+
+| Variante | docs/s | Poids |
+|---|---|---|
+| FP32 | 15.1 | 126.9 MB |
+| **INT8 dynamique** | **25.6** (1.7x) | **32.2 MB** (3.9x plus petit) |
+| FP16 | 2.5 (6x plus lent) | 63.4 MB |
+
+> **Note de mesure.** La taille rapportée est celle **des poids sur disque**, pas
+> le RSS résident : le pic RSS est un high-water mark **par process**, il ne peut
+> donc jamais décroître et ne peut pas être attribué à une variante mesurée après
+> une autre. Compter le graphe seul serait pire : un modèle ONNX au-delà de la
+> limite protobuf est un petit fichier graphe + un sidecar de poids, et le
+> `model_quantized.onnx` INT8 de bge-small fait 413 Ko pour 33 Mo de poids. Le
+> sidecar est donc compté, sinon l'INT8 ressortirait **plus petit** que le FP32.
+
+### Exemple
+
+```c
+#include <libembedding/autotuner.h>
+
+lembed_quantization_choice_t choice;
+if (lembed_quantization_auto_select(LEMBED_TEXT_BGE_SMALL_EN_V15,
+                                    /*num_threads*/ 0,
+                                    /*batch_size*/  32,
+                                    /*num_docs*/    0,   /* 0 = défaut */
+                                    /*dry_run*/     0,
+                                    &choice) == LEMBED_OK) {
+    printf("quantization = %s\n", choice.reason);   /* ex. "1.69x the fp32 variant ..." */
+    printf("from_cache   = %d\n", choice.from_cache);
+
+    /* Ou laisser create_v2 résoudre : LEMBED_QUANTIZATION_AUTO dans les options
+     * v2 déclenche exactement la même sélection, et persiste la décision. */
+    lembed_text_options_v2_t opts = lembed_text_options_v2_default();
+    opts.base.model = LEMBED_TEXT_BGE_SMALL_EN_V15;
+    opts.quantization = LEMBED_QUANTIZATION_AUTO;
+    lembed_text_embedding_t* ctx = NULL;
+    lembed_text_embedding_create_v2(&opts, &ctx);
+}
+```
+
+`lembed_quantization_choice_t` est déclaré dans `types.h` et non dans
+`autotuner.h` : le chemin de création doit résoudre `AUTO` sans charger la
+machinerie d'autotune.
+
+La règle de décision est une fonction **pure**, séparée de la mesure, ce qui la rend
+testable en quelques millisecondes sans modèle ni réseau
+(`tests/test_quantization_auto.cpp`).
 
 > **Les deux formes du nom sont acceptées.** Le registre donne à chaque modèle
 > deux chaînes différentes — le dépôt HuggingFace (`model_code`,
@@ -8326,6 +8646,551 @@ if (status == LEMBED_OK) {
 
 - [Modèles](models.html) — Liste des modèles (Python)
 - [Téléchargement C API](downloader.html) — Téléchargement de modèles
+
+---
+
+## DOCUMENT (FR): GGUF sparse embedding convention
+Source: https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md
+Rendu: https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html
+
+# GGUF sparse embedding convention
+
+Version: 1.0.0
+Status: implemented, covered by `tests/test_gguf_inspect.cpp` (81 assertions)
+
+Defines **what a GGUF file is capable of** — nothing about how it is executed.
+This page is the normative reference for that decision; the implementation is
+`include/libembedding/gguf_inspect.h`. How a file that passed is actually run is
+[`gguf_sparse_runtime.md`](gguf_sparse_runtime.md).
+
+---
+
+## 1. Scope, and what it deliberately is not
+
+`lembed_gguf_inspect()` answers one question: *what does this file contain?* It
+reads no weights. Opening a file costs a header parse, not a load, so a caller can
+classify a model before deciding whether to load it.
+
+It is **not** an inference API. The runtime that consumes these capabilities is
+`detail/gguf/gguf_sparse_session.hpp`, documented separately. Keeping the two
+apart is what stops the format convention from growing into an inference engine
+nobody can review.
+
+---
+
+## 2. Why a convention is needed at all
+
+The GGUF format has no vocabulary for what a head *is*. Converters emit tensors
+and stop. The reference sparse implementation documents no metadata key for its
+own capability — it derives `has_sparse` from whether `mlm_transform.weight`
+exists in the file, and a documented `has_mlm_head` key that llama.cpp itself
+never reads.
+
+Three rules follow from that, and every decision below traces back to one of them.
+
+### Rule 1 — capabilities come from tensor presence, never from a name or a flag
+
+Not from an enum, not from a filename, not from a `has_sparse` field.
+
+A flag means trusting each converter in turn. `bert.has_mlm_head` exists in
+`cstr/splade-*-GGUF` and is read by nothing; a file advertising it without
+shipping the tensor would be believed. Presence cannot lie.
+
+The test suite pins both directions: a file with the tensors and no flag is
+recognised, and a file with the flag and no tensors is not.
+
+### Rule 2 — a missing key is reported, never defaulted
+
+A default of 30522 for `vocab_size` does not fail. It produces a plausible,
+normalised, entirely wrong sparse vector over the wrong vocabulary, and returns a
+success code. That is the failure mode this whole document exists to prevent.
+
+Every reported field carries a `has_*` flag. `has_vocab_size == 0` means *the file
+did not say*; it never means 30522. When a key was looked for under the
+architecture prefix and not found, its name is listed in `missing_hparams`.
+
+A sparse head **without** a known vocabulary is refused: the capability is
+cleared and the formula becomes `UNKNOWN`. It is better to report unusable than to
+compute a wrong answer quickly.
+
+### Rule 3 — the two sparse formulas are different algorithms
+
+They share a name and nothing else:
+
+| Path | Formula |
+|---|---|
+| **SPLADE** (MLM head) | `max` over tokens of `log(1 + relu(vocab_logits))` |
+| **BGE-M3 scalar** (`sparse_linear`, `out_dim == 1`) | scatter the per-token weight onto its own token id, `max` over tokens, **no `log(1+x)`, no vocabulary projection** |
+
+They must not share a code path. `lembed_gguf_sparse_formula_t` names which one
+applies, and `UNKNOWN` is a legitimate outcome that the caller is expected to
+refuse.
+
+---
+
+## 3. Recognised heads
+
+Names are the ones observed in the files examined in
+`benchmarks/sparse/LE-9.4-validation.md`.
+
+| Tensors | Capability | Meaning |
+|---|---|---|
+| `token_embd.weight` | *required* | Without it the file is not a text encoder |
+| *(none)* | `DENSE` | The encoder always yields one pooled vector per input |
+| `mlm_transform.weight` + `.bias` | `SPLADE` | `GELU(W·h + b)`, dense→dense |
+| `mlm_ln.weight` + `.bias` | *(refines `SPLADE`)* | LayerNorm after the transform |
+| `mlm_bias` | `SPLADE_BIAS` | `[vocab_size]` decoder bias, optional |
+| `sparse_linear.weight` + `.bias` | `SPARSE_LINEAR` | BGE-M3 style; shape decides the formula |
+| `colbert_linear.weight` + `.bias` | `COLBERT` | One vector per token, not per input |
+| `classifier.dense.weight` + `classifier.out_proj.weight` | `RERANKER` | Cross-encoder reranking head |
+| `mlm_bias` absent, `mlm_head.weight` absent | `TIED_DECODER` | The vocabulary projection is `token_embd.weight` |
+
+### The tied decoder
+
+`mlm_bias` is stored but the 30522 × 768 projection is **not**: it is tied to
+`token_embd.weight` `[768, 30522]`. That is standard BERT MLM weight tying, and it
+is why a SPLADE head costs almost nothing on disk. An implementation that looks
+for a separate vocabulary matrix will not find one and must fall back to
+`token_embd`.
+
+---
+
+## 4. Hyper-parameters
+
+Read as `<architecture>.<field>`, where `<architecture>` is
+`general.architecture`. Nothing outside this layer knows an architecture name.
+
+| Key | Field | Notes |
+|---|---|---|
+| `<arch>.vocab_size` | `vocab_size` | **Required for any sparse claim** |
+| `<arch>.embedding_length` | `embedding_length` | Hidden width |
+| `<arch>.block_count` | `block_count` | Encoder depth |
+| `<arch>.max_position_embeddings` | `context_length` | |
+| `<arch>.colbert_dim` | `colbert_dim` | Present only when `COLBERT` is |
+
+Special-token ids come from the tokenizer metadata, never from a list:
+
+| Key | Field |
+|---|---|
+| `tokenizer.ggml.pad_token_id` | `pad_token_id` |
+| `tokenizer.ggml.bos_token_id` | `bos_token_id` |
+| `tokenizer.ggml.eos_token_id` | `eos_token_id` |
+| `tokenizer.ggml.cls_token_id` | `cls_token_id` |
+| `tokenizer.ggml.separator_token_id` | `separator_token_id` |
+
+These are vocabulary-specific and a hardcoded list is wrong in both directions.
+BERT has `[CLS]`=101 and `[SEP]`=102; XLM-R has `<s>`=0, `</s>`=2, `<pad>`=1. The
+reference implementation reads these ids from the metadata and then filters a
+hardcoded `{0, 101, 102}` anyway — so on an XLM-R vocabulary `<pad>` and `</s>`
+leak straight into the sparse vector. Do not copy that.
+
+---
+
+## 5. Integer types are read permissively
+
+A count may be written `UINT32` or `INT32`; a flag may be `BOOL` or `UINT8`.
+Readers here accept either spelling and range-check the unsigned path. Rejecting
+the unsigned spelling would report a perfectly good file as missing its
+vocabulary — the same class of bug as Rule 2, reached by a different route.
+
+---
+
+## 6. Capabilities are a bitmask, not an enum
+
+```c
+typedef uint64_t lembed_gguf_capabilities_t;
+#define LEMBED_GGUF_CAP_DENSE          (1 << 0)
+#define LEMBED_GGUF_CAP_SPLADE         (1 << 1)
+#define LEMBED_GGUF_CAP_SPLADE_BIAS    (1 << 2)
+#define LEMBED_GGUF_CAP_SPARSE_LINEAR  (1 << 3)
+#define LEMBED_GGUF_CAP_COLBERT        (1 << 4)
+#define LEMBED_GGUF_CAP_RERANKER       (1 << 5)
+#define LEMBED_GGUF_CAP_TIED_DECODER   (1 << 6)
+#define LEMBED_GGUF_CAP_SPECIAL_TOKENS (1 << 7)
+```
+
+A bitmask, not an enum, for one reason: an enum forces every new head type to
+renumber values already published in the ABI. A bitmask lets a head be added in a
+later minor release without touching the ones already shipped, and an older reader
+ignores unknown bits — which is the forward compatibility a converter-extended
+format needs.
+
+`lembed_gguf_capability_name()` returns `"unknown"` for a bit it does not
+recognise, rather than falling through to a neighbouring name.
+
+---
+
+## 7. Adding a head
+
+The head table is data, not code:
+
+```cpp
+// detail/gguf/gguf_spec.hpp
+inline constexpr CapabilityRule kCapabilityRules[] = {
+    {"mlm_transform.weight", "mlm_bias",       LEMBED_GGUF_CAP_SPLADE},
+    {"sparse_linear.weight", nullptr,          LEMBED_GGUF_CAP_SPARSE_LINEAR},
+    {"colbert_linear.weight", nullptr,         LEMBED_GGUF_CAP_COLBERT},
+    {"classifier.dense.weight",
+     "classifier.out_proj.weight",             LEMBED_GGUF_CAP_RERANKER},
+};
+```
+
+Adding a head means **a row and a bit**. It does not mean editing a
+classification switch, and no caller changes. The classification loop, the report
+and the summary are already generic over the table.
+
+---
+
+## 8. How the reader is built
+
+Two layers, one responsibility each. The binary format is parsed by the ggml
+reader already vendored with llama.cpp, which libembedding links against.
+
+| Layer | File | Responsibility |
+|---|---|---|
+| Probe | `detail/gguf/gguf_probe.hpp` | Typed, type-checked access over `gguf.h`; arch-prefixed key lookup; owns the context. **No semantics.** |
+| Spec | `detail/gguf/gguf_spec.hpp` | The convention: the head table, the hparams, the capability rules, the refusals. **No parsing.** |
+| Entry | `detail/gguf/gguf_inspect_entry.hpp` | The three C functions. |
+
+A fourth parser inside this project would be a second source of truth for the same
+binary layout, free to drift from the first. The probe adds only what `gguf.h`'s
+C API cannot express: typed reads that *reject a mismatched type* rather than
+returning whatever is in memory, and `"<arch>.<field>"` key construction.
+
+The probe opens with `no_alloc = true`: it wants names, types and scalars, never
+tensor contents. Allocating the data blob would read gigabytes to answer a question
+about a few hundred header bytes.
+
+---
+
+## 9. Behaviour on files that cannot be used
+
+`lembed_gguf_inspect()` returns `LEMBED_OK` for a readable file that turns out to
+be unusable, and reports the refusal in `diagnostic` and `capabilities`. It returns
+an error only when the path cannot be read at all.
+
+This matters for directory scanning: a caller walking a model cache keeps going
+and still gets the descriptions of the files it *can* read, instead of the first
+unusable file aborting the walk.
+
+`lembed_gguf_capability_summary()` reduces a description to one word:
+
+| Result | Condition |
+|---|---|
+| `"sparse"` | a sparse capability **and** a decided formula |
+| `"dense"` | dense available, no usable sparse path |
+| `"unsupported"` | no encoder, or a diagnostic with no capability |
+
+---
+
+## 10. Reference files
+
+Shapes recorded from the real artefacts, used to build the test fixtures:
+
+| File | Result |
+|---|---|
+| `cstr/splade-pp-en-v1-q8_0.gguf` | `sparse`, SPLADE formula, tied decoder, bias present |
+| `cstr/splade-v3-q8_0.gguf` | identical shape, different model — the reader must not key on a name |
+| `mradermacher/opensearch-neural-sparse-encoding-doc-v2-mini-GGUF` | **not sparse** — the conversion dropped the projection, so `mlm_*` is absent |
+
+That last row is the reason the convention exists: without a sparse head the file
+is a perfectly good **dense** encoder, and accepting it where a sparse vector was
+requested is the failure this page is written to prevent.
+
+> **`splade-v3-GGUF` is under CC-BY-NC-SA-4.0** and is therefore excluded from
+> the registry. It is listed here only as a shape reference. The usable candidate
+> is `cstr/splade-pp-en-v1-GGUF` (Apache-2.0).
+
+---
+
+## 11. Related
+
+- `benchmarks/sparse/LE-9.4-validation.md` — the investigation that produced this
+  convention, including the llama.cpp blocker and the CrispEmbed architecture
+  reading
+- `roadmap-2.md` § P1.5b (this item), § P1.5c (the runtime that consumes it)
+
+---
+
+## DOCUMENT (FR): Runtime sparse GGUF
+Source: https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_runtime.md
+Rendu: https://dorel14.github.io/libembedding-ng/gguf_sparse_runtime.html
+
+# Runtime sparse GGUF
+
+Version: 1.11.0
+Status: implémenté, couvert par `tests/test_sparse_gguf.cpp` (67 assertions)
+et `tests/test_sparse_gguf_vs_onnx.cpp` (intégration, réseau requis)
+
+Décrit **comment un fichier sparse GGUF est exécuté**. La
+[convention GGUF sparse](gguf_sparse_convention.md) décrit, elle, ce qu'un
+fichier *contient*. Les deux sont normatives et distinctes : la convention décide
+de l'acceptation d'un fichier, cette page du calcul.
+
+---
+
+## 1. Point d'entrée
+
+```c
+/* Un fichier local */
+lembed_sparse_text_embedding_ctx_t* ctx = NULL;
+lembed_sparse_options_t opts = lembed_sparse_options_default();
+opts.top_k = 256;
+
+lembed_status_t s = lembed_sparse_text_embedding_create_from_gguf_path(
+    "splade-pp-en-v1-q8_0.gguf", &opts, &ctx);
+
+/* Ou un dépôt HuggingFace, comme le backend dense */
+s = lembed_sparse_text_embedding_create_from_gguf_model(
+    "cstr/splade-pp-en-v1-GGUF", "splade-pp-en-v1-q8_0.gguf", &opts, &ctx);
+
+lembed_sparse_embeddings_t out;
+lembed_sparse_text_embedding_embed(ctx, texts, n, 8, NULL, &out);
+lembed_sparse_embeddings_free(&out);
+lembed_sparse_text_embedding_free(ctx);
+```
+
+`lembed_sparse_text_embedding_create_from_path()` **route sur l'extension** : un
+chemin terminé par `.gguf` va directement au runtime GGUF. Un appelant qui ne
+connaît qu'un chemin n'a donc pas à connaître le backend.
+
+En Python :
+
+```python
+from libembedding import SparseTextEmbedding
+
+# Chemin local
+model = SparseTextEmbedding.from_gguf("splade-pp-en-v1-q8_0.gguf")
+
+# Dépôt HuggingFace
+model = SparseTextEmbedding.from_gguf_model(
+    "cstr/splade-pp-en-v1-GGUF", "splade-pp-en-v1-q8_0.gguf"
+)
+
+vectors = model.embed(["a fast brown fox"])
+```
+
+Et `SparseTextEmbedding("chemin/vers/modele.gguf")` fonctionne aussi : le
+routage est fait en C.
+
+Le nommage est **agnostique du runtime** : pas de `_llama_` dans les
+identifiants. llama.cpp n'intervient pas (voir §2).
+
+---
+
+## 2. Pourquoi llama.cpp n'est pas utilisé
+
+C'est le point non négociable de cette implémentation, et il est vérifiable dans
+le snapshot vendorisé.
+
+llama.cpp v0.3.0 **ne peut pas charger** cette famille de fichiers. Il cherche
+`blk.N.attn_q.weight`, `blk.N.ffn_up.weight`, `blk.N.layer_output_norm.weight`,
+`blk.N.attn_output_norm.weight`, `token_embd_norm.weight` et
+`token_types.weight` (`third_party/llama.cpp/src/llama-arch.cpp:407-453`), et
+il lit les métadonnées `%s.attention.head_count`, `%s.feed_forward_length`,
+`%s.embedding_length`, `%s.attention.layer_norm_epsilon`. Or les exports SPLADE
+écrivent :
+
+| llama.cpp attend | le fichier contient |
+|---|---|
+| `blk.N.attn_q.weight` | `enc.N.attn.q.weight` |
+| `blk.N.ffn_up.weight` | `enc.N.ffn.fc1.weight` |
+| `blk.N.layer_output_norm.weight` | `enc.N.ln2.weight` |
+| `blk.N.attn_output_norm.weight` | `enc.N.ln1.weight` |
+| `token_embd_norm.weight` | `embd_ln.weight` |
+| `token_types.weight` | `token_type_embd.weight` |
+| `%s.embedding_length` | `bert.hidden_size` |
+| `%s.block_count` | `bert.num_hidden_layers` |
+| `%s.attention.head_count` | `bert.num_attention_heads` |
+| `%s.feed_forward_length` | `bert.intermediate_size` |
+| `%s.attention.layer_norm_epsilon` | `bert.layer_norm_eps` |
+| `%s.context_length` | `bert.max_position_embeddings` |
+
+Un tenseur requis absent est fatal :
+`create_tensor` lève `missing tensor 'blk.0.attn_q.weight'`
+(`src/llama-model-loader.cpp:1103-1106`). Seuls `token_embd.weight` et
+`position_embd.weight` correspondent.
+
+Conséquence : `llama.cpp = n/a` dans
+[`benchmarks/sparse/LE-9.6-results.md`](https://github.com/dorel14/libembedding-ng/blob/dev/benchmarks/sparse/LE-9.6-results.md)
+reste le résultat *correct*, et non une lacune à combler.
+
+Le runtime est donc le nôtre : un graphe ggml sur le backend CPU déjà
+vendorisé, qui lit les tenseurs par `gguf_init_from_file` et calcule dans
+`ggml_mul_mat`. C'est la conclusion de
+[`LE-9.4-validation.md` §5.3](https://github.com/dorel14/libembedding-ng/blob/dev/benchmarks/sparse/LE-9.4-validation.md).
+
+---
+
+## 3. Le pipeline
+
+```
+texte
+  → ids WordPiece            TokenizerWrapper (partagé avec le backend ONNX)
+  → encodeur BERT            graphe ggml, post-LayerNorm
+  → tête MLM                 graphe ggml, ggml_mul_mat contre token_embd
+  → log(1 + relu) max-pool   sur l'hôte, tokens réels uniquement
+  → retrait des ids spéciaux ids des métadonnées
+  → top_k / min_weight / storage_format   sparse_prune_and_sort()
+  → {indices, values}
+```
+
+### 3.1 Encodeur — l'ordre post-LN n'est pas négociable
+
+BERT est **post-LayerNorm**, à l'inverse de presque tous les transformers que
+llama.cpp exécute. Se tromper d'ordre produit un modèle qui charge, s'exécute et
+renvoie des vecteurs plausibles :
+
+- les projections QKV lisent l'entrée **normalisée** ;
+- `ln1` s'applique **après** la résiduelle d'attention ;
+- `ln2` s'applique **après** la résiduelle du FFN.
+
+Le graphe est écrit dans cet ordre, calqué sur le constructeur BERT de
+llama.cpp lui-même (`src/models/bert.cpp:114-225`), qui fait exactement cela.
+L'implémentation est dans
+`include/libembedding/detail/gguf/gguf_bert_graph.hpp`.
+
+Deux détails vérifiés dans le ggml vendorisé :
+
+- `ggml_gelu` **est** l'approximation tanh
+  (`ggml-cpu/vec.h:968-970` : `0.5x(1+tanh(√(2/π)·x(1+0.044715x²)))`), ce
+  contre quoi un export BERT est entraîné. `ggml_gelu_erf` est une autre
+  fonction et ne doit pas la remplacer. `llama-graph.cpp:1806-1813` fait le même
+  choix pour le FFN BERT.
+- `ggml_norm` **soustrait la moyenne** (`ggml-cpu/ops.cpp:3721-3737`) : c'est un
+  vrai LayerNorm, pas un RMSNorm. Il ne travaille qu'en F32, donc les échelles et
+  biais de LayerNorm sont appliqués à part (`ggml_mul` puis `ggml_add`), ce qui
+  tolère des poids de LayerNorm quantifiés.
+
+### 3.2 Tête MLM — dans le graphe, jamais en boucle
+
+```c
+x    = ggml_add(ggml_mul_mat(mlm_transform_w, h), mlm_transform_b);
+x    = ggml_gelu(x);
+x    = layernorm(x, mlm_ln_w, mlm_ln_b, eps);
+logits = ggml_add(ggml_mul_mat(token_embd_w, x), mlm_bias);   /* [vocab, tokens] */
+```
+
+La projection de décodage **est** la matrice d'embeddings de tokens : BERT lie
+la tête MLM aux embeddings, donc il n'existe pas de matrice `vocab × hidden`
+séparée dans le fichier, et il n'en est pas inventé une.
+
+La tête est un `ggml_mul_mat`, pas une boucle scalaire. Une boucle serait
+`O(tokens × hidden × vocab)` — inacceptable à V = 30522 — et l'opérateur
+déquantifie le Q8_0 à notre place, ce qui règle au passage le piège des lectures
+déquantisées : **aucun poids quantifié n'est jamais lu élément par élément**
+(`ggml_backend_tensor_get` au-delà de `ggml_nbytes` fait avorter le processus).
+
+### 3.3 Lots et masque
+
+Tous les tokens d'un lot forment **une seule ligne**. Le masque d'attention
+[T, T] est bloc-diagonal par document et à −∞ sur le padding ; c'est lui qui
+sépare les documents, pas un second graphe. Un lot de deux et un lot de cinq
+donnent donc le même vecteur — ce que `test_sparse_gguf.cpp` vérifie.
+
+### 3.4 Tokenizer : partagé, pas dupliqué
+
+Un GGUF ne contient qu'un vocabulaire (`tokenizer.ggml.tokens`), pas de
+`tokenizer.json`. Le runtime alimente le **même** `TokenizerWrapper` que le
+backend ONNX avec ces chaînes. Conséquence voulue : les deux backends
+tokenisent de façon identique par construction, donc la similarité mesurée entre
+eux mesure la quantification et le runtime, pas une dérive de tokenizer.
+
+Le prix à payer est que les approximations connues du backend ONNX sont
+partagées et non doublées : minuscule ASCII seulement, ponctuation découpée par
+octet, pas de suppression d'accents. C'est un choix assumé, pas un oubli ; un
+tokenizer HF complet exigerait des tables Unicode générées (~470 Ko) pour
+diverger du backend de référence auquel nous comparons ce runtime.
+
+---
+
+## 4. Refus
+
+Un fichier illisible, sans tête sparse, sans vocabulaire ou dont la tête ne
+convient pas est **refusé avec une raison**, jamais accepté silencieusement.
+
+| Situation | Code | Message |
+|---|---|---|
+| chemin nul / vide | `LEMBED_ERROR_INVALID_ARGUMENT` | — |
+| fichier illisible ou non GGUF | `LEMBED_ERROR_UNSUPPORTED` | `cannot read GGUF file '...'` |
+| pas de `general.architecture` | `LEMBED_ERROR_UNSUPPORTED` | `GGUF header has no general.architecture` |
+| `<arch>.vocab_size` absent | `LEMBED_ERROR_UNSUPPORTED` | `GGUF has no <arch>.vocab_size to pool over` |
+| epsilon de LayerNorm absent | `LEMBED_ERROR_UNSUPPORTED` | `GGUF header has no <arch>.attention.layer_norm_epsilon` |
+| tenseur d'encodeur absent | `LEMBED_ERROR_UNSUPPORTED` | `missing encoder tensor '...'` (de `classify()`) |
+| pas de `mlm_transform.weight` | `LEMBED_ERROR_UNSUPPORTED` | `GGUF carries no SPLADE head (mlm_transform.weight is absent)` |
+| formule non SPLADE | `LEMBED_ERROR_UNSUPPORTED` | `GGUF sparse formula is not SPLADE` |
+| tête SPLADE **et** `sparse_linear` | `LEMBED_ERROR_UNSUPPORTED` | `refusing to guess which one this file is meant for` |
+| vocabulaire absent ou de mauvaise taille | `LEMBED_ERROR_UNSUPPORTED` | `GGUF has no tokenizer.ggml.tokens vocabulary array` |
+| tokeniseur non BERT | `LEMBED_ERROR_UNSUPPORTED` | `GGUF declares tokenizer model '...', which this runtime does not implement` |
+| erreur ggml | `LEMBED_ERROR_GGUF` | message de l'exception |
+
+Le refus intervient **avant** toute allocation de poids : annoncer « pas de tête
+sparse » à quelqu'un qui a un fichier dense ne doit pas coûter cent még-octets de
+copie. `LEMBED_ERROR_GGUF` est un code *ajouté en fin* d'énumération, et non
+`LEMBED_ERROR_LLAMA` : llama.cpp n'est pas en jeu.
+
+`max_length = 0` signifie « aussi long que la table de positions le permet ». La
+demande est **plafonnée** à la longueur de contexte du modèle, pas refusée : une
+séquence plus longue indexerait hors de la table.
+
+---
+
+## 5. Mesures
+
+Critère LE-9.6 : cosinus ≥ 0.90 entre le sparse GGUF et le sparse ONNX, sur les
+mêmes textes.
+
+```
+sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.90)
+```
+
+Mesuré sur `cstr/splade-pp-en-v1-q8_0.gguf` (Q8_0, ~111 Mo) contre
+`prithivida/Splade_PP_en_v1` (ONNX), 12 textes, `top_k = 0`. La marge est
+d'un ordre de grandeur au-dessus de la barre : ce qui est mesuré, c'est le bruit
+de quantification Q8_0, pas une divergence d'implémentation.
+
+Les deux modèles dérivent du même export HuggingFace, ce qui rend la comparaison
+légitime ; la licence du dépôt GGUF est Apache-2.0.
+
+`tests/test_sparse_gguf.cpp` est hermétique : fixtures écrites dans un répertoire
+temporaire, poids d'un générateur déterministe, F32 / F16 / Q8_0. Aucune réseau,
+quelques millisecondes.
+
+### Débit, et où il en est
+
+`benchmarks/sparse/bench_sparse_backend_comparison.py`, 95 documents chronométrés,
+lot 32, `top_k = 50` :
+
+| Backend | docs/s | ms/doc | Charge (ms) | Pic RAM (MB) |
+|---|---|---|---|---|
+| Sparse ONNX | 9.7 | 102.80 | 1176 | 1368 |
+| Sparse GGUF (ce runtime) | 2.8 | 357.85 | 109 | 905 |
+
+Le runtime est donc **3,5× plus lent** qu'ONNX Runtime, pour **un tiers de moins de
+RAM** et un chargement **dix fois plus rapide**. Le débit est le point faible, et il
+est attendu : chaque appel reconstruit le graphe et réserve un buffer
+d'activations neuf, là où ONNX Runtime garde un graphe fusionné et son pool de
+mémoire. La correction est connue et bornée — voir « Pas de cache de lots » plus
+bas — mais elle n'est pas faite dans P1.5c, dont le critère de sortie était la
+fidélité.
+
+---
+
+## 6. Limites connues
+
+- **Mémoire au chargement** : le blob GGUF est lu en RAM puis copié dans le
+  buffer du backend, donc le pic vaut deux fois la taille du fichier (~222 Mo
+  pour 111 Mo). Le régime établi est le fichier lui-même : le blob est libéré dès
+  que le vocabulaire en est extrait.
+- **Longueur de contexte** : plafonnée par `bert.max_position_embeddings` (512
+  sur SPLADE PP v1). Au-delà, les positions n'existent pas.
+- **Tokenisation** : voir §3.4. Sur du texte accentué, les deux backends
+  divergent de HuggingFace de la même façon.
+- **Pas de GPU** : backend CPU ggml uniquement. `provider` est rapporté
+  `LEMBED_PROVIDER_CPU` et ignoré à la construction.
+- **Pas de cache de lots** : le graphe est reconstruit à chaque appel. Sur un
+  flux à lot unique et constant, la reconstruction se remarquerait ; ce n'est pas
+  le profil d'usage visé.
 
 ---
 

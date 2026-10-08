@@ -3,7 +3,7 @@
  * C++ wrapper for embedding providers (ONNX vs llama.cpp backend selection).
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -16,8 +16,10 @@
 #include <libembedding/model_registry.h>
 #include <libembedding/detail/status_helper.hpp>
 
-#include <libembedding/cpp/embedding_model.hpp>
-#include <libembedding/cpp/llama_provider.hpp>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace lembed
 {
@@ -61,6 +63,21 @@ public:
 
 /* Forward declaration of LlamaEmbeddingProvider */
 class LlamaEmbeddingProvider;
+
+} /* namespace lembed */
+
+/* The two concrete providers below derive from EmbeddingProvider, so they must be
+ * included only after it is a complete type -- hence the position, not the top of
+ * the file. They include this header back, and the include guard makes that a
+ * no-op, so what they see is the declarations above.
+ *
+ * The namespace is closed around these includes on purpose: <vector>, <memory> and
+ * friends must not be pulled in inside namespace lembed. */
+#include <libembedding/cpp/embedding_model.hpp>
+#include <libembedding/cpp/llama_provider.hpp>
+
+namespace lembed
+{
 
 /* Create an EmbeddingProvider with automatic backend detection
  * Rule: if model_path ends with ".gguf" or contains a "slash" (HF path), choose llama.cpp.

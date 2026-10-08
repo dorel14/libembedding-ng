@@ -3,9 +3,7 @@
 # pyright: reportAttributeAccessIssue=false,reportCallIssue=false
 from __future__ import annotations
 
-import contextlib
 import os
-import time
 import warnings
 
 import numpy as np  # pyright: ignore[reportMissingImports]
@@ -113,15 +111,18 @@ class TextEmbedding:
         self._dim = 0
         self._batch_size = batch_size
         self._quantization = "none"
+        self._quantization_reason = ""
 
         # Resolve preferred_quantization
         resolved_quant = quant_enum
         if preferred_quantization is not None and preferred_quantization != "none":
             if preferred_quantization == "auto":
-                resolved_quant = self._auto_select_quantization(
-                    model_name, provider, threads, batch_size, cache_dir,
-                    max_length, dim, pooling, offline, show_download_progress,
-                    cache_size, auto_workers,
+                resolved_quant, self._quantization_reason = (
+                    self._auto_select_quantization(
+                        model_name, provider, threads, batch_size, cache_dir,
+                        max_length, dim, pooling, offline, show_download_progress,
+                        cache_size, auto_workers,
+                    )
                 )
                 if resolved_quant is None:
                     resolved_quant = lib.LEMBED_QUANTIZATION_NONE
@@ -137,17 +138,23 @@ class TextEmbedding:
 
         if _is_gguf_model(model_name):
             # GGUF model: use llama.cpp backend
-            if "/" in model_name:
+            # Try the local file first, like Reranker does. Order matters: the
+            # downloader hands out mixed-separator absolute paths on Windows
+            # ("C:\Users\<user>/.cache/libembedding/.../model.gguf"), and splitting
+            # such a path on the first "/" yields repo "C:\Users\<user>" plus a
+            # *relative* filename. os.path.isfile() then misses the file that is
+            # sitting right there, and we take the download branch and fail.
+            local_path = os.path.normpath(model_name)
+            if os.path.isfile(local_path):
+                repo = ""
+                filename = local_path
+            elif "/" in model_name:
+                # "<repo>/<filename>" shorthand
                 parts = model_name.split("/", 1)
                 repo = parts[0]
                 filename = parts[1]
             else:
-                # Try local path
-                if os.path.isfile(model_name):
-                    repo = ""
-                    filename = model_name
-                else:
-                    raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
+                raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
 
             opts = ffi.new("lembed_text_options_t *")
             opts.provider = _PROVIDER_MAP.get(provider, 0)
@@ -254,65 +261,58 @@ class TextEmbedding:
         cache_dir: str | None, max_length: int, dim: int, pooling: str,
         offline: bool, show_download_progress: bool,
         cache_size: int, auto_workers: bool,
-    ) -> int | None:
-        """Benchmark FP32/INT8-static/INT8-dynamic on a small corpus.
-        Returns the lembed_quantization_t enum value of the best mode."""
-        sample_texts = [
-            "Machine learning enables systems to learn from data.",
-            "Embeddings are dense vector representations of text.",
-            "The transformer architecture revolutionized NLP.",
-            "Natural language processing understanding text semantics.",
-            "Deep learning models learn hierarchical representations.",
-        ]
+    ) -> tuple[int | None, str]:
+        """Benchmark the quantization variants this model actually ships.
 
-        _QUANT_NAMES = {
-            "none": lib.LEMBED_QUANTIZATION_NONE,
-            "static": lib.LEMBED_QUANTIZATION_STATIC,
-            "dynamic": lib.LEMBED_QUANTIZATION_DYNAMIC,
-        }
-        _QUANT_KEYS = ["none", "static", "dynamic"]
+        Thin delegation to the C implementation, which is the one that matters:
+        it warms up separately from the timed run, sizes the corpus, skips
+        variants whose weights are absent instead of failing, and caches the
+        decision per (model, machine, library version).
 
-        best_name = _QUANT_KEYS[0]
-        best_tp = -1.0
+        The previous Python implementation benchmarked five texts with no warmup
+        and no cache, so it measured session construction rather than throughput,
+        re-ran on every single construction, and probed "static" -- a mode the
+        registry ships no variant for, so two of its three attempts always threw.
 
-        for qname in _QUANT_KEYS:
-            model = None
-            try:
-                model = TextEmbedding(
-                    model_name=model_name,
-                    provider=provider,
-                    threads=threads,
-                    batch_size=batch_size,
-                    offline=offline,
-                    show_download_progress=False,
-                    cache_dir=cache_dir,
-                    max_length=max_length,
-                    dim=dim,
-                    pooling=pooling,
-                    cache_size=0,
-                    quantization=qname,
-                    preferred_quantization="none",
+        Returns ``(resolved quantization, reason)``, or ``(None, "")`` when nothing could
+        be measured, in which case the caller falls back to FP32.
+
+        The reason travels back in the return value rather than through a class
+        attribute: a staticmethod cannot set instance state, and stashing it on
+        the class meant a constructor that bailed out early read whatever the
+        previous one had left there -- so two threads building models
+        concurrently could report each other's rationale.
+        """
+        try:
+            model_index = resolve_text_model(model_name)
+        except (LembedError, ValueError):
+            return (None, "")
+
+        choice = ffi.new("lembed_quantization_choice_t *")
+        try:
+            check_status(
+                lib.lembed_quantization_auto_select(
+                    model_index,
+                    int(threads),
+                    int(batch_size),
+                    # num_docs: the C side clamps this to a sane range.
+                    0,
+                    # dry_run = 0, so this call is the one that persists the
+                    # decision. create_v2 is handed the resolved mode below, so
+                    # it never re-measures; if this passed dry_run instead, the
+                    # decision would be thrown away and every construction would
+                    # benchmark again.
+                    0,
+                    choice,
                 )
-                start = time.perf_counter()
-                result = model.embed(sample_texts)
-                elapsed = time.perf_counter() - start
-                if elapsed > 0 and len(result) > 0:
-                    tp = len(result) / elapsed
-                    if tp > best_tp:
-                        best_tp = tp
-                        best_name = qname
-            except (LembedError, OSError, ValueError):
-                # A quantization mode that cannot be loaded or executed is
-                # simply not a candidate; keep probing the other modes.
-                continue
-            finally:
-                if model is not None:
-                    with contextlib.suppress(Exception):
-                        model.close()
+            )
+        except (LembedError, OSError):
+            return (None, "")
 
-        if best_tp <= 0.0:
-            return None
-        return _QUANT_NAMES[best_name]
+        if choice.num_measured <= 0:
+            return (None, "")
+        reason = ffi.string(choice.reason).decode("utf-8", "replace")
+        return (int(choice.quantization), reason)
 
     @property
     def dim(self) -> int:
@@ -321,12 +321,22 @@ class TextEmbedding:
 
     @property
     def quantization(self) -> str:
-        """Quantization mode actually in use: "none", "static" or "dynamic".
+        """Quantization mode actually in use: "none", "static", "dynamic" or "fp16".
 
         With ``preferred_quantization="auto"`` this reports the mode that was
         selected, not the request.
         """
         return self._quantization
+
+    @property
+    def quantization_reason(self) -> str:
+        """Why ``preferred_quantization="auto"`` picked that mode.
+
+        Empty unless auto-selection ran for this construction: an explicit mode
+        has nothing to justify, and a model with no quantized sibling resolves
+        to itself without measuring anything.
+        """
+        return self._quantization_reason
 
     @property
     def batch_size(self) -> int:
@@ -372,7 +382,7 @@ class TextEmbedding:
 
         Args:
             texts: List of strings to embed.
-            batch_size: Batch size override (None = use default).
+            batch_size: Batch size override (None = use constructor default).
             dtype: Output dtype, "float32" or "float16".
             normalized: L2 normalize before returning.
 
@@ -392,7 +402,7 @@ class TextEmbedding:
             c_texts[i] = c_strs[i]
 
         result = ffi.new("lembed_embeddings_t *")
-        bs = 0 if batch_size is None else batch_size
+        bs = self._batch_size if batch_size is None else batch_size
         check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, bs, result))
 
         try:
@@ -512,7 +522,7 @@ class TextEmbedding:
         Args:
             texts: List of strings to embed.
             callback: Called for each embedding with (array, dim, userdata).
-            batch_size: Batch size override.
+            batch_size: Batch size override (None = use constructor default).
         """
         n = len(texts)
         if n == 0:
@@ -524,7 +534,7 @@ class TextEmbedding:
             c_strs.append(ffi.new("char[]", t.encode("utf-8")))
             c_texts[i] = c_strs[i]
 
-        bs = 0 if batch_size is None else batch_size
+        bs = self._batch_size if batch_size is None else batch_size
 
         @ffi.callback("void(const float*, int, void*)")
         def cb(data, dim, userdata):
@@ -551,14 +561,13 @@ class TextEmbedding:
         if n == 0:
             return
 
-        bs = 0 if batch_size is None else batch_size
-        actual_bs = bs if bs > 0 else self._batch_size
-        if actual_bs <= 0:
-            actual_bs = 32
+        bs = self._batch_size if batch_size is None else batch_size
+        if bs <= 0:
+            bs = 32
 
-        for i in range(0, n, actual_bs):
-            batch = texts[i : i + actual_bs]
-            embeddings = self.embed(batch, batch_size=actual_bs)
+        for i in range(0, n, bs):
+            batch = texts[i : i + bs]
+            embeddings = self.embed(batch, batch_size=bs)
             yield from embeddings
 
     def close(self) -> None:

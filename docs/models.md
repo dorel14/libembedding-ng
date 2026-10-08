@@ -156,7 +156,7 @@ Les modèles GGUF sont chargés par chemin de fichier (pas par enum). Ils utilis
 
 | Nom HuggingFace | Dim | Tokens max | Description |
 |-----------------|-----|-----------|-------------|
-| `prithvida/SPLADE_PP_en_v1` | variable | 512 | SPLADE++ v1 (défaut) |
+| `prithivida/Splade_PP_en_v1` | variable | 512 | SPLADE++ v1 (défaut) |
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ langues |
 
 > **Note :** Les embeddings sparse n'ont pas de dimension fixe. La dimension retournée correspond au nombre de tokens actifs dans le vocabulaire.

@@ -453,24 +453,10 @@ inline bool cache_identity_matches(const std::string& path, const autotune_cache
  * Cache lifecycle
  * ========================================================================= */
 
-/* Clear cache for a model (or all if model_name is nullptr).
- *
- * Entries are matched on the "model" field stored inside the file, because the
- * file name is a hardware-dependent hash that cannot be reconstructed from the
- * model name. Entries written by the legacy layout (no "model" field) are
- * matched on the sanitized model name embedded in their file name, delimited on
- * both sides so that "org/model" cannot match "org/model-v2". */
-inline void clear_autotune_cache(const char* model_name, const std::string& subdir = "") {
-    std::string dir = autotune_cache_dir();
-    if (!subdir.empty()) dir += "/" + subdir;
-
-    if (!model_name) {
-        std::error_code ec;
-        if (std::filesystem::exists(dir, ec))
-            std::filesystem::remove_all(dir, ec);
-        return;
-    }
-
+/* Per-model sweep inside one directory. Split out so clear_autotune_cache() can
+ * apply it to the root *and* to every sub-directory. */
+inline void clear_autotune_cache_in_dir(const std::string& dir,
+                                        const char* model_name) {
     std::error_code ec;
     if (!std::filesystem::exists(dir, ec)) return;
 
@@ -497,6 +483,49 @@ inline void clear_autotune_cache(const char* model_name, const std::string& subd
             std::filesystem::remove(path, rm);
         }
     }
+}
+
+/* Clear cache for a model (or all if model_name is nullptr).
+ *
+ * Entries are matched on the "model" field stored inside the file, because the
+ * file name is a hardware-dependent hash that cannot be reconstructed from the
+ * model name. Entries written by the legacy layout (no "model" field) are
+ * matched on the sanitized model name embedded in their file name, delimited on
+ * both sides so that "org/model" cannot match "org/model-v2".
+ *
+ * A per-model clear reaches every sub-directory, not only the root. The
+ * quantization decisions live in <root>/quantization and the reranker entries in
+ * <root>/reranker, and a directory_iterator over the root does not descend: a
+ * clear for one model therefore left both untouched, with no way to invalidate a
+ * recorded decision except deleting the cache by hand. The sub-directories are
+ * discovered rather than listed, so a new one is covered without editing this. */
+inline void clear_autotune_cache(const char* model_name, const std::string& subdir = "") {
+    std::string dir = autotune_cache_dir();
+    if (!subdir.empty()) dir += "/" + subdir;
+
+    if (!model_name) {
+        /* remove_all is recursive, so the NULL case always reached the
+         * sub-directories. Only the per-model case did not. */
+        std::error_code ec;
+        if (std::filesystem::exists(dir, ec))
+            std::filesystem::remove_all(dir, ec);
+        return;
+    }
+
+    if (!subdir.empty()) {
+        clear_autotune_cache_in_dir(dir, model_name);
+        return;
+    }
+
+    std::vector<std::string> dirs;
+    dirs.push_back(dir);
+    std::error_code ec;
+    for (const auto& entry :
+             std::filesystem::directory_iterator(autotune_cache_dir(), ec)) {
+        std::error_code fec;
+        if (entry.is_directory(fec)) dirs.push_back(entry.path().string());
+    }
+    for (const std::string& d : dirs) clear_autotune_cache_in_dir(d, model_name);
 }
 
 }} /* namespace lembed::detail */

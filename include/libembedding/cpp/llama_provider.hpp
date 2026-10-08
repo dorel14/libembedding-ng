@@ -3,10 +3,13 @@
  * llama.cpp backend implementation for embeddings.
  *
  * Author: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
+
+#ifndef LIBEMBEDDING_CPP_LLAMA_PROVIDER_HPP
+#define LIBEMBEDDING_CPP_LLAMA_PROVIDER_HPP
 
 #include <libembedding/cpp/provider.hpp>
 #include <libembedding/llamacpp_backend.h>
@@ -119,3 +122,5 @@ private:
 };
 
 } /* namespace lembed */
+
+#endif /* LIBEMBEDDING_CPP_LLAMA_PROVIDER_HPP */

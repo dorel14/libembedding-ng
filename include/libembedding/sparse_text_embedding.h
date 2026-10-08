@@ -3,7 +3,7 @@
  * Sparse text embedding C API (SPLADE, BGE-M3)
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -70,6 +70,32 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
     const lembed_sparse_options_t* options,
     lembed_sparse_embedding_ctx_t** out);
 
+/* Load a SPLADE model from a GGUF file.
+ *
+ * The GGUF runtime is this library's own ggml graph, not llama.cpp: llama.cpp
+ * v0.3.0 cannot load these files (it looks for `blk.N.attn_q.weight` and
+ * friends, which the SPLADE exports do not use). The functions are named for the
+ * format rather than the runtime on purpose.
+ *
+ * The file must carry an MLM/SPLADE head over a declared vocabulary; a dense
+ * GGUF is refused with LEMBED_ERROR_UNSUPPORTED and a reason in
+ * lembed_last_error() rather than silently producing nothing.
+ *
+ * ..._create_from_path() routes a path ending in ".gguf" here, so a caller that
+ * only knows a file path does not have to know the backend. */
+lembed_status_t lembed_sparse_text_embedding_create_from_gguf_path(
+    const char* path,
+    const lembed_sparse_options_t* options,
+    lembed_sparse_embedding_ctx_t** out);
+
+/* Download a GGUF sparse model from HuggingFace (repo + filename, same shape as
+ * the dense llamacpp entry point) and load it. */
+lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
+    const char* repo,
+    const char* filename,
+    const lembed_sparse_options_t* options,
+    lembed_sparse_embedding_ctx_t** out);
+
 #ifdef __cplusplus
 }
 #endif
@@ -86,10 +112,12 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
 #include "detail/tokenizer_impl.hpp"
 #include "detail/sparse_postprocess.hpp"
 #include "detail/batch.hpp"
+#include "detail/gguf/gguf_sparse_session.hpp"
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -99,6 +127,10 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
 struct lembed_sparse_embedding {
     lembed::detail::OnnxSession session;
     lembed::detail::TokenizerWrapper tokenizer;
+    /* Non-null exactly when this context was built from a GGUF file. The two
+     * backends are alternatives, never both: the ONNX session stays empty in
+     * that case and is the only thing constructed when it is the one in use. */
+    std::unique_ptr<lembed::gguf::SparseSession> gguf;
     lembed_sparse_model_t model;
     int max_length;
 
@@ -119,6 +151,30 @@ struct lembed_sparse_embedding {
     int      stats_calls = 0;
     int      storage_format = 0;  /* lembed_sparse_format_t */
 };
+
+/* Defined at the bottom of this file, in detail/sparse_text_embedding_gguf_impl.hpp.
+ * Declared here because the single public embed entry point dispatches on the
+ * backend rather than the caller having to know which one it holds. */
+lembed_status_t lembed_sparse_text_embedding_embed_gguf(
+    struct lembed_sparse_embedding* ctx,
+    const char* const* texts,
+    int num_texts,
+    int batch_size,
+    const lembed_sparse_options_t* sparse_opts,
+    lembed_sparse_embeddings_t* result);
+
+/* Case-insensitive ".gguf" test.
+ *
+ * Written out rather than with _stricmp (MSVC) or strcasecmp (POSIX): neither is
+ * portable to both, and the library builds on Windows, Linux and macOS. Five
+ * comparisons cost less than the #ifdef that would be needed to choose. */
+static bool ends_with_gguf(const char* path, size_t len) {
+    if (len < 5) return false;
+    const char* s = path + len - 5;
+    return s[0] == '.' &&
+           (s[1] == 'g' || s[1] == 'G') && (s[2] == 'g' || s[2] == 'G') &&
+           (s[3] == 'u' || s[3] == 'U') && (s[4] == 'f' || s[4] == 'F');
+}
 
 #ifdef __cplusplus
 extern "C" {
@@ -185,6 +241,14 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
         const lembed_sparse_options_t* options,
         lembed_sparse_embedding_ctx_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    /* A file, not a directory of ONNX artefacts. Routing on the extension means
+     * a caller that only knows a path does not have to know the backend, and it
+     * is unambiguous: an ONNX model directory cannot be called model.gguf. */
+    if (ends_with_gguf(dir_path, strlen(dir_path))) {
+        return lembed_sparse_text_embedding_create_from_gguf_path(dir_path, options,
+                                                                   out);
+    }
 
     try {
         /* Read files from directory */
@@ -256,6 +320,12 @@ lembed_status_t lembed_sparse_text_embedding_embed(
 
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
+    if (ctx->gguf) {
+        return lembed_sparse_text_embedding_embed_gguf(ctx, texts, num_texts,
+                                                       batch_size, sparse_opts,
+                                                       result);
+    }
+
     try {
         result->count = num_texts;
         result->items = (lembed_sparse_embedding_t*)calloc(
@@ -316,103 +386,11 @@ lembed_status_t lembed_sparse_text_embedding_embed(
             for (int i = 0; i < bsz; i++) {
                 auto& sr = sparse_results[i];
 
-                /* Apply min_weight pruning */
-                if (min_weight > 0.0f) {
-                    std::vector<int32_t> filt_idx;
-                    std::vector<float> filt_val;
-                    filt_idx.reserve(sr.indices.size());
-                    filt_val.reserve(sr.values.size());
-                    for (size_t j = 0; j < sr.indices.size(); j++) {
-                        if (sr.values[j] >= min_weight) {
-                            filt_idx.push_back(sr.indices[j]);
-                            filt_val.push_back(sr.values[j]);
-                        }
-                    }
-                    sr.indices = std::move(filt_idx);
-                    sr.values = std::move(filt_val);
-                }
-
-                /* Apply top_k selection */
-                if (top_k > 0 && (int)sr.indices.size() > top_k) {
-                    std::vector<std::pair<float, int32_t>> val_idx;
-                    val_idx.reserve(sr.indices.size());
-                    for (size_t j = 0; j < sr.indices.size(); j++) {
-                        val_idx.emplace_back(sr.values[j], sr.indices[j]);
-                    }
-                    std::partial_sort(
-                        val_idx.begin(),
-                        val_idx.begin() + top_k,
-                        val_idx.end(),
-                        [](const auto& a, const auto& b) {
-                            return a.first > b.first;
-                        });
-                    std::vector<int32_t> filt_idx(top_k);
-                    std::vector<float> filt_val(top_k);
-                    for (int k = 0; k < top_k; k++) {
-                        filt_idx[k] = val_idx[k].second;
-                        filt_val[k] = val_idx[k].first;
-                    }
-                    sr.indices = std::move(filt_idx);
-                    sr.values = std::move(filt_val);
-                }
-
-                /* Apply storage format: DICT (default) sorts by weight descending,
-                 * INDEX_ORDER sorts by index ascending */
-                if (storage_format == LEMBED_SPARSE_FORMAT_INDEX_ORDER) {
-                    std::vector<std::pair<int32_t, float>> idx_val;
-                    idx_val.reserve(sr.indices.size());
-                    for (size_t j = 0; j < sr.indices.size(); j++) {
-                        idx_val.emplace_back(sr.indices[j], sr.values[j]);
-                    }
-                    std::sort(idx_val.begin(), idx_val.end(),
-                              [](const auto& a, const auto& b) {
-                                  return a.first < b.first;
-                              });
-                    for (size_t j = 0; j < sr.indices.size(); j++) {
-                        sr.indices[j] = idx_val[j].first;
-                        sr.values[j] = idx_val[j].second;
-                    }
-                } else {
-                    /* LEMBED_SPARSE_FORMAT_DICT (0) or unknown: sort by weight descending */
-                    std::vector<std::pair<float, int32_t>> val_idx;
-                    val_idx.reserve(sr.indices.size());
-                    for (size_t j = 0; j < sr.indices.size(); j++) {
-                        val_idx.emplace_back(sr.values[j], sr.indices[j]);
-                    }
-                    std::sort(val_idx.begin(), val_idx.end(),
-                              [](const auto& a, const auto& b) {
-                                  return a.first > b.first;
-                              });
-                    for (size_t j = 0; j < sr.indices.size(); j++) {
-                        sr.indices[j] = val_idx[j].second;
-                        sr.values[j] = val_idx[j].first;
-                    }
-                }
+                lembed::detail::sparse_prune_and_sort(sr, top_k, min_weight,
+                                                      storage_format);
 
                 int idx = out_offset + i;
-                result->items[idx].length = 0;
-                result->items[idx].indices = nullptr;
-                result->items[idx].values = nullptr;
-                if (sr.indices.empty()) continue;
-
-                result->items[idx].indices = (int32_t*)malloc(
-                    sr.indices.size() * sizeof(int32_t));
-                result->items[idx].values = (float*)malloc(
-                    sr.values.size() * sizeof(float));
-                if (result->items[idx].indices && result->items[idx].values) {
-                    result->items[idx].length = (int)sr.indices.size();
-                    std::memcpy(result->items[idx].indices, sr.indices.data(),
-                               sr.indices.size() * sizeof(int32_t));
-                    std::memcpy(result->items[idx].values, sr.values.data(),
-                               sr.values.size() * sizeof(float));
-                } else {
-                    /* Allocation failed: never publish a length that does not
-                     * match an allocated buffer. */
-                    free(result->items[idx].indices);
-                    free(result->items[idx].values);
-                    result->items[idx].indices = nullptr;
-                    result->items[idx].values = nullptr;
-                }
+                lembed::detail::sparse_result_store(result, idx, sr);
             }
             out_offset += bsz;
         }
@@ -590,6 +568,11 @@ lembed_status_t lembed_sparse_best_config(
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+/* The GGUF runtime's C entry points. Included last: they need
+ * `struct lembed_sparse_embedding` and they call the downloader, both declared
+ * above, and in turn they are what ..._create_from_path() routes to. */
+#include "detail/sparse_text_embedding_gguf_impl.hpp"
 
 #endif /* LIBEMBEDDING_SPARSE_TEXT_EMBEDDING_IMPL */
 #endif /* LIBEMBEDDING_IMPLEMENTATION */

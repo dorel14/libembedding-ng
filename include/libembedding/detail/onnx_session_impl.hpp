@@ -13,6 +13,23 @@
 #include <coreml_provider_factory.h>
 #endif
 
+/* widen_path() below calls MultiByteToWideChar/CP_UTF8 under _WIN32. This
+ * header used to rely on another one having pulled <windows.h> in first, which
+ * held for every build except a translation unit that reaches the ONNX backend
+ * before the rest of the umbrella -- including tests/test_quantization_auto.cpp,
+ * where autotuner.h sorts before libembedding.h. Declaring what you use is the
+ * fix; NOMINMAX keeps the min/max macros out of the way, per the Windows
+ * constraint in AGENTS.md. */
+#if defined(_WIN32) || defined(WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>

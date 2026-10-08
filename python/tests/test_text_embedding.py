@@ -203,3 +203,29 @@ def test_text_embedding_batched(bge_small):
     for emb in batches:
         assert emb.shape == (model.dim,)
     model.close()
+
+
+@pytest.mark.parametrize("separators", ["native", "mixed"])
+def test_text_embedding_gguf_local_path_is_not_downloaded(tmp_path, separators):
+    """A GGUF path must take the local-file branch, never the download one.
+
+    The downloader builds Windows paths with mixed separators
+    ("C:\\Users/<user>/.cache/libembedding/.../model.gguf"). Splitting such a
+    path on the first "/" used to yield repo "C:\\Users/<user>" plus a
+    *relative* filename, so os.path.isfile() missed the file that was right
+    there and the download branch failed with a DownloadError.
+
+    The file is a stub, so loading it fails either way; what this asserts is
+    *which* branch was taken. A DownloadError would mean the local file was not
+    recognised.
+    """
+    from libembedding.exceptions import DownloadError
+
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"not a real gguf")
+
+    path = str(gguf) if separators == "native" else str(gguf).replace("\\", "/")
+
+    with pytest.raises(Exception) as excinfo:
+        TextEmbedding(path, batch_size=1, show_download_progress=False)
+    assert not isinstance(excinfo.value, DownloadError)

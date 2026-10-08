@@ -3,7 +3,7 @@
  * Auto-tuning for llama.cpp workers/sessions
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */

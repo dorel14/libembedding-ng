@@ -32,6 +32,14 @@ from .benchmark import (
 )
 from .cache import EmbeddingCache, cache_config_default
 from .exceptions import LembedError, LlamaError
+from .gguf_inspect import (
+    SPARSE_FORMULA_SCALAR,
+    SPARSE_FORMULA_SPLADE,
+    SPARSE_FORMULA_UNKNOWN,
+    GgufCapabilities,
+    GgufDesc,
+    inspect_gguf,
+)
 from .image_embedding import ImageEmbedding, image_autotune
 from .models import (
     list_image_models,
@@ -125,11 +133,16 @@ __all__ = [
     "LEMBED_TASK_IMAGE",
     "LEMBED_TASK_RERANKING",
     "LEMBED_TASK_SPARSE",
+    "SPARSE_FORMULA_SCALAR",
+    "SPARSE_FORMULA_SPLADE",
+    "SPARSE_FORMULA_UNKNOWN",
     "Benchmark",
     "BenchmarkResult",
     "ComparisonResult",
     "CorpusType",
     "EmbeddingCache",
+    "GgufCapabilities",
+    "GgufDesc",
     "HardwareInfo",
     "ImageEmbedding",
     "ImageTuningResult",
@@ -167,6 +180,7 @@ __all__ = [
     "dot_product",
     "euclidean_distance",
     "image_autotune",
+    "inspect_gguf",
     "list_image_models",
     "list_reranker_models",
     "list_sparse_models",

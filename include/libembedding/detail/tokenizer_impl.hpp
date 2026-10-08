@@ -8,7 +8,7 @@
  * - BPE (GPT/Sentencepiece-style: nomic, jina, CLIP, etc.)
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -53,6 +53,175 @@ static inline std::string to_lower_ascii(const std::string& s) {
         if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
     }
     return r;
+}
+
+/* =========================================================================
+ * HF-faithful normalisation for BertNormalizer
+ *
+ * Why this exists: the reference SPLADE model is a HuggingFace
+ * BertTokenizer, and its `tokenize()` does, per whitespace-delimited token,
+ *
+ *     token = token.lower()                  # Python str.lower() semantics
+ *     token = _run_strip_accents(token)      # NFD, then drop the Mn category
+ *
+ * Without the accent strip this tokeniser disagreed with HF on accented text
+ * while llama.cpp's own WPM tokenizer stripped them -- so the two backends were
+ * not comparable, and any "GGUF vs ONNX" figure measured the tokeniser gap
+ * rather than the sparse implementation.
+ *
+ * Two details of the reference implementation are easy to get wrong, and both
+ * were wrong in a first draft of this code:
+ *
+ *  - Lowercase happens **before** the accent strip, not after.
+ *  - The strip is a real NFD followed by dropping combining marks. Letters with
+ *    no canonical decomposition -- AE, OE, Eth, Thorn, D-stroke, L-stroke --
+ *    are therefore NOT folded, and end up as [UNK] exactly as HF leaves them.
+ *    Only "ss"-style output for sharp-s is real, and it comes from the
+ *    decomposition U+00DF -> U+0073 U+0303, not from a ligature rule.
+ *
+ * Scope, stated plainly: this covers Latin-1 Supplement (U+00C0-U+00FF) and
+ * Latin Extended-A (U+0100-U+017F), which is where French, Spanish, Portuguese,
+ * German, Italian, Polish, Czech and Turkish live. Codepoints outside those
+ * ranges pass through unchanged, as they did before, so Greek and Cyrillic are
+ * still not lowercased here. That is a documented gap rather than a silent one:
+ * closing it means adding tables, not changing the shape.
+ * ========================================================================= */
+
+/* Base ASCII letter of a Latin-1 Supplement codepoint, or -1 when the codepoint
+ * has no canonical decomposition (AE, OE, Eth, Thorn, D-stroke, O-stroke,
+ * sharp-s). The sentinel has to be negative: 0 would be indistinguishable from a
+ * successful fold to NUL, and the first draft of this code had exactly that
+ * bug -- it silently turned non-decomposable letters into NUL bytes. */
+static inline int latin1_base(uint32_t cp) {
+    /* Rows are the uppercase half U+00C0-U+00DE and the lowercase half
+     * U+00E0-U+00FF; both fold to the same base. -1 means "leave it alone",
+     * which is what HF does for a letter with no decomposition. */
+    static const int kBases[64] = {
+        /* C0 A-grave   */ 'a', /* C1 A-acute   */ 'a',
+        /* C2 A-circum  */ 'a', /* C3 A-tilde   */ 'a',
+        /* C4 A-diaer   */ 'a', /* C5 A-ring    */ 'a',
+        /* C6 AE        */  -1, /* C7 C-cedilla */ 'c',
+        /* C8 E-grave   */ 'e', /* C9 E-acute   */ 'e',
+        /* CA E-circum  */ 'e', /* CB E-diaer   */ 'e',
+        /* CC I-grave   */ 'i', /* CD I-acute   */ 'i',
+        /* CE I-circum  */ 'i', /* CF I-diaer   */ 'i',
+        /* D0 Eth       */  -1, /* D1 N-tilde   */ 'n',
+        /* D2 O-grave   */ 'o', /* D3 O-acute   */ 'o',
+        /* D4 O-circum  */ 'o', /* D5 O-tilde   */ 'o',
+        /* D6 O-diaer   */ 'o', /* D7 mult sign */  -1,
+        /* D8 O-stroke  */  -1, /* D9 U-grave   */ 'u',
+        /* DA U-acute   */ 'u', /* DB U-circum  */ 'u',
+        /* DC U-diaer   */ 'u', /* DD Y-acute   */ 'y',
+        /* DE Thorn     */  -1, /* DF sharp-s   */  -1,
+        /* E0 a-grave   */ 'a', /* E1 a-acute   */ 'a',
+        /* E2 a-circum  */ 'a', /* E3 a-tilde   */ 'a',
+        /* E4 a-diaer   */ 'a', /* E5 a-ring    */ 'a',
+        /* E6 ae        */  -1, /* E7 c-cedilla */ 'c',
+        /* E8 e-grave   */ 'e', /* E9 e-acute   */ 'e',
+        /* EA e-circum  */ 'e', /* EB e-diaer   */ 'e',
+        /* EC i-grave   */ 'i', /* ED i-acute   */ 'i',
+        /* EE i-circum  */ 'i', /* EF i-diaer   */ 'i',
+        /* F0 eth       */  -1, /* F1 n-tilde   */ 'n',
+        /* F2 o-grave   */ 'o', /* F3 o-acute   */ 'o',
+        /* F4 o-circum  */ 'o', /* F5 o-tilde   */ 'o',
+        /* F6 o-diaer   */ 'o', /* F7 division  */  -1,
+        /* F8 o-stroke  */  -1, /* F9 u-grave   */ 'u',
+        /* FA u-acute   */ 'u', /* FB u-circum  */ 'u',
+        /* FC u-diaer   */ 'u', /* FD y-acute   */ 'y',
+        /* FE thorn     */  -1, /* FF y-diaer   */ 'y',
+    };
+    if (cp >= 0x00C0 && cp <= 0x00FF) return kBases[cp - 0x00C0];
+    return -1;
+}
+
+/* Latin Extended-A is a regular block: even codepoint is the uppercase base,
+ * odd is that base plus a diacritic. Reducing to the base and reusing the
+ * Latin-1 table is therefore equivalent to NFD for the folded subset. The
+ * exceptions are the letters with no canonical decomposition, which HF leaves
+ * untouched. */
+static inline int extended_a_base(uint32_t cp) {
+    switch (cp) {
+        /* No canonical decomposition: HF keeps these verbatim. */
+        case 0x0110: case 0x0111:   /* D with stroke   */
+        case 0x0126: case 0x0127:   /* H with stroke   */
+        case 0x0132: case 0x0133:   /* IJ ligature     */
+        case 0x013F: case 0x0140:   /* L with middle dot */
+        case 0x014A: case 0x014B:   /* ENG             */
+        case 0x0152: case 0x0153:   /* OE ligature     */
+        case 0x0166: case 0x0167:   /* T with stroke   */
+            return -1;
+        default:
+            break;
+    }
+    /* Turkish dotted/dotless I and long-s are not part of the even/odd
+     * pattern but do decompose, and both fold to plain "i"/"s". */
+    if (cp == 0x0130 || cp == 0x0131) return 'i';
+    if (cp == 0x017F) return 's';   /* long s -> s with stroke above -> s */
+    const uint32_t base = (cp % 2 == 0) ? cp : (cp - 1);
+    if (base >= 0x00C0 && base <= 0x00FF) return latin1_base(base);
+    return -1;
+}
+
+/* Decode one UTF-8 codepoint. Returns bytes consumed and stores the codepoint;
+ * malformed bytes are passed through so nothing is silently dropped. */
+static inline size_t utf8_next(const std::string& s, size_t i, uint32_t& cp) {
+    unsigned char c = (unsigned char)s[i];
+    if (c < 0x80) { cp = c; return 1; }
+    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+        cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)s[i + 1] & 0x3F);
+        return 2;
+    }
+    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) {
+        cp = ((uint32_t)(c & 0x0F) << 12) |
+             (((unsigned char)s[i + 1] & 0x3F) << 6) |
+             ((unsigned char)s[i + 2] & 0x3F);
+        return 3;
+    }
+    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) {
+        cp = ((uint32_t)(c & 0x07) << 18) |
+             (((unsigned char)s[i + 1] & 0x3F) << 12) |
+             (((unsigned char)s[i + 2] & 0x3F) << 6) |
+             ((unsigned char)s[i + 3] & 0x3F);
+        return 4;
+    }
+    cp = c;
+    return 1;
+}
+
+/* BertNormalizer-equivalent, in HF's order: lowercase, then strip accents. */
+static inline std::string bert_normalize(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        uint32_t cp = 0;
+        const size_t n = utf8_next(s, i, cp);
+        i += n;
+
+        /* Step 1: lowercase. ASCII plus the Latin ranges we fold below; other
+         * scripts keep their case, which is the documented limit. */
+        if (cp >= 'A' && cp <= 'Z') {
+            out += (char)(cp - 'A' + 'a');
+            continue;
+        }
+        if (cp >= 0x00C0 && cp <= 0x00DE && cp != 0x00D7) {
+            const int b = latin1_base(cp);
+            if (b >= 0) { out += (char)b; continue; }
+            out.append(s, i - n, n);
+            continue;
+        }
+
+        /* Step 2: strip accents, i.e. decompose and drop the Mn category. */
+        int folded = -1;
+        if (cp >= 0x00C0 && cp <= 0x00FF) folded = latin1_base(cp);
+        else if (cp >= 0x0100 && cp <= 0x017F) folded = extended_a_base(cp);
+        if (folded >= 0) {
+            out += (char)folded;
+            continue;
+        }
+
+        out.append(s, i - n, n);
+    }
+    return out;
 }
 
 /* Basic whitespace + punctuation pre-tokenization (BERT-style) */
@@ -282,6 +451,62 @@ public:
         return result;
     }
 
+    /* Loads the vocabulary from a plain id-ordered list instead of a
+     * tokenizer.json.
+     *
+     * A GGUF file stores its vocabulary as an array of strings under
+     * `tokenizer.ggml.tokens`, so there is no JSON document to parse -- but the
+     * tokenisation itself is unchanged, and deliberately so: the sparse GGUF
+     * backend and the sparse ONNX backend must produce the same ids for the same
+     * text, otherwise a fidelity comparison between them measures the
+     * tokeniser instead of the runtime. Sharing this class is what makes that
+     * true by construction rather than by convention.
+     *
+     * The cost of sharing is that the known approximations are shared too:
+     * lowercasing is ASCII-only, punctuation is split per byte, and accents are
+     * not stripped. Those are the same limits the ONNX backend has always had.
+     *
+     * `tokens[i]` is the surface form of token id i.
+     *
+     * The four special ids are passed as ids, not as surface forms, because they
+     * are vocabulary specific: [CLS] is 101 on BERT and 0 on XLM-R. Pass -1 for
+     * one the caller has no id for; the surface form is then looked up in the
+     * vocabulary, and if that also fails the id stays unusable (never guessed).
+     *
+     * Returns false with a reason in `err` when the vocabulary is empty. */
+    bool load_vocab(const std::vector<std::string>& tokens,
+                    int pad_id, int unk_id, int cls_id, int sep_id,
+                    int max_length, bool add_special_tokens,
+                    std::string& err) {
+        if (tokens.empty()) {
+            err = "vocabulary is empty";
+            return false;
+        }
+        /* First id wins on a duplicated surface form. cJSON's path iterates the
+         * document's key order, so the two can differ on a vocabulary that
+         * contains the same string twice -- which no real vocabulary does. */
+        vocab_.clear();
+        vocab_.reserve(tokens.size() * 2);
+        id_to_token_.assign(tokens.size(), std::string());
+        for (size_t i = 0; i < tokens.size(); i++) {
+            vocab_.emplace(tokens[i], (int)i);
+            id_to_token_[i] = tokens[i];
+        }
+        type_ = WORDPIECE;
+        wp_prefix_ = "##";
+        do_lower_case_ = true;   /* every SPLADE export is uncased */
+        add_special_tokens_ = add_special_tokens;
+        max_length_ = max_length > 0 ? max_length : 512;
+
+        pad_token_id_ = resolve_special(pad_id, "[PAD]", 0);
+        unk_token_id_ = resolve_special(unk_id, "[UNK]", 100);
+        cls_token_id_ = resolve_special(cls_id, "[CLS]", 101);
+        sep_token_id_ = resolve_special(sep_id, "[SEP]", 102);
+        return true;
+    }
+
+    int pad_token_id() const { return pad_token_id_; }
+
     /* Public: encode a single text to token IDs (for length bucketing) */
     std::vector<int> encode(const std::string& text) const {
         return encode_single(text);
@@ -291,6 +516,27 @@ public:
     void set_pad_token_id(int id) { pad_token_id_ = id; }
 
 private:
+    /* An explicit id wins over the surface form: the metadata is what the model
+     * was exported with. `fallback_id` is the conventional BERT value, tried
+     * only when the caller passed nothing and the vocabulary carries no such
+     * token.
+     *
+     * The last resort is 0 rather than -1, and not arbitrarily: an unusable
+     * special id is emitted verbatim into the input ids, which the embedding
+     * graph then uses as an index. 0 exists in every non-empty vocabulary, so
+     * this degrades "the delimiter token is wrong" instead of "an index past
+     * the end of the embedding table". The caller's declared ids are validated
+     * by the loader, so this only fires for a vocabulary too small to hold the
+     * conventional ids. */
+    int resolve_special(int explicit_id, const char* surface, int fallback_id) const {
+        const int vocab_size = (int)id_to_token_.size();
+        if (explicit_id >= 0 && explicit_id < vocab_size) return explicit_id;
+        auto it = vocab_.find(surface);
+        if (it != vocab_.end()) return it->second;
+        if (fallback_id >= 0 && fallback_id < vocab_size) return fallback_id;
+        return 0;
+    }
+
     std::unordered_map<std::string, int> vocab_;
     std::vector<std::string> id_to_token_;
     std::vector<std::string> bpe_merges_;
@@ -309,8 +555,12 @@ private:
 
     /* Encode a single text to token IDs */
     std::vector<int> encode_single(const std::string& text) const {
-        std::string processed = text;
-        if (do_lower_case_) processed = to_lower_ascii(processed);
+        /* HuggingFace's basic_tokenizer does strip_accents *then* lowercase when
+         * lowercase is on, and BertTokenizer leaves strip_accents following
+         * do_lower_case. Gating the whole thing on do_lower_case_ therefore
+         * reproduces both settings rather than only the lowercase one. */
+        std::string processed =
+            do_lower_case_ ? bert_normalize(text) : text;
 
         std::vector<int> ids;
 

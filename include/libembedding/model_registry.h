@@ -3,7 +3,7 @@
  * model_registry.h - Model registry query API
  *
  * Auteur: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -76,6 +76,7 @@ int lembed_find_text_model_variant(const char* model_name, int quantization);
  * found again by a caller that passed the other form. */
 int lembed_resolve_text_model(const char* model);
 int lembed_resolve_reranker_model(const char* model);
+int lembed_resolve_sparse_model(const char* model);
 
 #ifdef __cplusplus
 }
@@ -541,8 +542,7 @@ static int lembed__resolve_by_code_or_name(const lembed_model_info_t* models,
              "Unknown %s model '%s' (expected a HuggingFace repo such as "
              "'Qdrant/all-MiniLM-L6-v2-onnx', or a registry name); "
              "call lembed_list_%s_models() to enumerate",
-             kind, model,
-             (strcmp(kind, "reranker") == 0) ? "reranker" : "text");
+             kind, model, kind);
     lembed::detail::set_error(message);
     return -1;
 }
@@ -557,6 +557,12 @@ int lembed_resolve_reranker_model(const char* model) {
     return lembed__resolve_by_code_or_name(lembed__reranker_models,
                                            LEMBED_RERANKER_MODEL_COUNT,
                                            model, "reranker");
+}
+
+int lembed_resolve_sparse_model(const char* model) {
+    return lembed__resolve_by_code_or_name(lembed__sparse_models,
+                                           LEMBED_SPARSE_MODEL_COUNT,
+                                           model, "sparse");
 }
 
 int lembed_find_sparse_model_by_code(const char* model_code) {

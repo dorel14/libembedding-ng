@@ -3,10 +3,13 @@
  * Inline factory for EmbeddingProvider (header-only)
  *
  * Author: David Orel
- * Version: 1.10.1
+ * Version: 1.11.0
  *
  * SPDX-License-Identifier: MIT
  */
+
+#ifndef LIBEMBEDDING_CPP_EMBEDDING_PROVIDER_HPP
+#define LIBEMBEDDING_CPP_EMBEDDING_PROVIDER_HPP
 
 #include <libembedding/cpp/provider.hpp>
 #include <libembedding/cpp/embedding_model.hpp>
@@ -49,4 +52,4 @@ inline std::unique_ptr<EmbeddingProvider> create_embedding_provider(
 
 } /* namespace lembed */
 
-
+#endif /* LIBEMBEDDING_CPP_EMBEDDING_PROVIDER_HPP */
