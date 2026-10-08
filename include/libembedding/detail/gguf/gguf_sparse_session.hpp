@@ -90,16 +90,7 @@ public:
     SparseSession(SparseSession&&) = delete;
     SparseSession& operator=(SparseSession&&) = delete;
 
-    ~SparseSession() {
-        if (graph_.galloc) {
-            ggml_gallocr_free(graph_.galloc);
-            graph_.galloc = nullptr;
-        }
-        if (graph_.ctx) {
-            ggml_free(graph_.ctx);
-            graph_.ctx = nullptr;
-        }
-    }
+    ~SparseSession() { graph_.reset(); }
 
     /* Loads a SPLADE GGUF.
      *
@@ -341,20 +332,7 @@ private:
 
         if (rebuild) {
             /* Free old graph if exists */
-            if (graph_.galloc) {
-                ggml_gallocr_free(graph_.galloc);
-                graph_.galloc = nullptr;
-            }
-            if (graph_.ctx) {
-                ggml_free(graph_.ctx);
-                graph_.ctx = nullptr;
-            }
-            /* Tensors/graph lived in the freed ctx: clear dangling pointers */
-            graph_.t_tokens = nullptr;
-            graph_.t_pos = nullptr;
-            graph_.t_mask = nullptr;
-            graph_.gf = nullptr;
-            graph_.logits = nullptr;
+            graph_.reset();
 
             ggml_init_params iparams{};
             iparams.mem_size = ggml_graph_overhead() + ggml_tensor_overhead() * 2048;
@@ -372,8 +350,7 @@ private:
                                                seq_len, 1, batch);
             graph_.gf = ggml_new_graph(graph_.ctx);
             if (!graph_.t_tokens || !graph_.t_pos || !graph_.t_mask || !graph_.gf) {
-                ggml_free(graph_.ctx);
-                graph_.ctx = nullptr;
+                graph_.reset();
                 return nullptr;
             }
 
@@ -381,17 +358,14 @@ private:
                                                  graph_.ctx, *weights_, graph_.t_tokens, graph_.t_pos,
                                                  graph_.t_mask, seq_len, batch));
             if (!graph_.logits) {
-                ggml_free(graph_.ctx);
-                graph_.ctx = nullptr;
+                graph_.reset();
                 return nullptr;
             }
             ggml_build_forward_expand(graph_.gf, graph_.logits);
 
             graph_.galloc = ggml_gallocr_new(weights_->buffer_type());
             if (!graph_.galloc || !ggml_gallocr_alloc_graph(graph_.galloc, graph_.gf)) {
-                if (graph_.galloc) ggml_gallocr_free(graph_.galloc);
-                ggml_free(graph_.ctx);
-                graph_.ctx = nullptr;
+                graph_.reset();
                 return nullptr;
             }
 
@@ -514,6 +488,23 @@ private:
         ggml_tensor* logits = nullptr;
         int cached_seq_len = 0;
         int cached_batch = 0;
+
+        /* Frees the allocator before the context (the allocator references
+         * tensors owned by the context), then nulls every pointer and resets
+         * the cached dimensions. Safe to call repeatedly. */
+        void reset() {
+            if (galloc) ggml_gallocr_free(galloc);
+            if (ctx) ggml_free(ctx);
+            galloc = nullptr;
+            ctx = nullptr;
+            gf = nullptr;
+            t_tokens = nullptr;
+            t_pos = nullptr;
+            t_mask = nullptr;
+            logits = nullptr;
+            cached_seq_len = 0;
+            cached_batch = 0;
+        }
     } graph_;
 };
 
