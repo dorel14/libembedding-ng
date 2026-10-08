@@ -382,7 +382,7 @@ class TextEmbedding:
 
         Args:
             texts: List of strings to embed.
-            batch_size: Batch size override (None = use default).
+            batch_size: Batch size override (None = use constructor default).
             dtype: Output dtype, "float32" or "float16".
             normalized: L2 normalize before returning.
 
@@ -402,7 +402,7 @@ class TextEmbedding:
             c_texts[i] = c_strs[i]
 
         result = ffi.new("lembed_embeddings_t *")
-        bs = 0 if batch_size is None else batch_size
+        bs = self._batch_size if batch_size is None else batch_size
         check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, bs, result))
 
         try:
@@ -522,7 +522,7 @@ class TextEmbedding:
         Args:
             texts: List of strings to embed.
             callback: Called for each embedding with (array, dim, userdata).
-            batch_size: Batch size override.
+            batch_size: Batch size override (None = use constructor default).
         """
         n = len(texts)
         if n == 0:
@@ -534,7 +534,7 @@ class TextEmbedding:
             c_strs.append(ffi.new("char[]", t.encode("utf-8")))
             c_texts[i] = c_strs[i]
 
-        bs = 0 if batch_size is None else batch_size
+        bs = self._batch_size if batch_size is None else batch_size
 
         @ffi.callback("void(const float*, int, void*)")
         def cb(data, dim, userdata):
@@ -561,14 +561,13 @@ class TextEmbedding:
         if n == 0:
             return
 
-        bs = 0 if batch_size is None else batch_size
-        actual_bs = bs if bs > 0 else self._batch_size
-        if actual_bs <= 0:
-            actual_bs = 32
+        bs = self._batch_size if batch_size is None else batch_size
+        if bs <= 0:
+            bs = 32
 
-        for i in range(0, n, actual_bs):
-            batch = texts[i : i + actual_bs]
-            embeddings = self.embed(batch, batch_size=actual_bs)
+        for i in range(0, n, bs):
+            batch = texts[i : i + bs]
+            embeddings = self.embed(batch, batch_size=bs)
             yield from embeddings
 
     def close(self) -> None:
