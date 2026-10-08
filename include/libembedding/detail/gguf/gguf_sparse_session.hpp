@@ -500,8 +500,10 @@ private:
     int max_length_ = 0;
 
     /* Cached graph context for reuse across embed_batch() calls.
-     * The graph structure depends only on (seq_len, batch, vocab_size, n_embd, n_head, n_layers),
-     * so it can be built once and reused. Only input tensor data changes per batch. */
+     * The graph structure depends only on (seq_len, batch); vocab_size, n_embd, n_head and
+     * n_layers are fixed per session after load_from_file(). It can therefore be built once and
+     * reused. Only input tensor data changes per batch. The cache must be invalidated if a
+     * model is reloaded. */
     struct CachedGraph {
         ggml_context* ctx = nullptr;
         ggml_gallocr_t galloc = nullptr;
