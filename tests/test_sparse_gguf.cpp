@@ -25,6 +25,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#define LIBEMBEDDING_IMPLEMENTATION
 #include <libembedding/libembedding.h>
 
 #include <algorithm>
