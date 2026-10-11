@@ -46,7 +46,7 @@ libembedding/
 ├── docs/                          # Documentation GitHub Pages (FR/EN)
 │   └── archive/                   # Documentation obsolète à archiver
 ├── third_party/                   # Dépendances embarquées (voir third_party/README.md)
-│   ├── llama.cpp/                 # Backend GGUF — snapshot élagué (cmake/ ggml/ include/ src/ vendor/ LICENSE)
+│   ├── llama.cpp/                 # Backend GGUF — snapshot élagué v0.6.0 (cmake/ ggml/ include/ src/ vendor/ LICENSE)
 │   ├── onnxruntime/               # ONNX Runtime (Windows)
 │   ├── stb/                       # stb_image / stb_image_resize
 │   ├── cJSON/                     # Parseur JSON
@@ -113,6 +113,7 @@ cmake .. \
 - Les chemins ONNX Runtime peuvent être surchargés via `ONNXRUNTIME_ROOT` ou les variables CMake `ONNXRuntime_INCLUDE_DIR` / `ONNXRuntime_LIBRARY`.
 - **DLL libcurl** : `third_party/curl` ne contient que les en-têtes et la lib d'import. La DLL (`libcurl-x64.dll`) s'installe avec `scripts/fetch_windows_libcurl.ps1` dans `third_party/curl/bin/` (gitignoré) ; CMake la résout (override `CURL_RUNTIME_DLL`, `third_party/curl/bin`, `CURL_LIBRARY` et son `../bin` type vcpkg, puis `python/src/libembedding/`) et échoue à la configure si elle est absente. Échappatoires : `-DLIBEMBEDDING_NO_DOWNLOAD=ON`, `-DLIBEMBEDDING_CURL_STATIC=ON`.
 - **Options llama.cpp épinglées** : le snapshot vendorisé est élagué, donc toute option amont pointant vers un dossier retiré est forcée à `OFF` dans le `CMakeLists.txt` racine (`LLAMA_BUILD_COMMON`, `LLAMA_BUILD_TOOLS`, `LLAMA_BUILD_APP`, `LLAMA_BUILD_MTMD`, `GGML_BUILD_TESTS`, `GGML_BUILD_EXAMPLES`, `GGML_OPENCL`, `GGML_WEBGPU`, `GGML_VIRTGPU`). Ne pas les passer à `ON` : le dossier correspondant n'existe plus et la configure échoue. `GGML_OPENCL` et `GGML_WEBGPU` sont les deux seuls backends dont les générateurs Python (`embed_kernel.py`, `embed_wgsl.py`) ont été conservés.
+- **Version llama.cpp** : snapshot v0.6.0 (commit d812350, ggml 0.26.0) — voir `third_party/llama.cpp/CMakeLists.txt`. Le pruning est fait via `scripts/prune_llama_cpp.ps1`.
 - **Piège** : une DLL manquante produit `0xC0000135` (`STATUS_DLL_NOT_FOUND`) au démarrage ; `ctest` remonte ça comme un `Timeout` de 60 s. Exécuter le binaire directement (`exit=$LASTEXITCODE`) pour obtenir le vrai code.
 
 ---
@@ -292,7 +293,7 @@ Les agents doivent :
 | Oublier `SPDX-License-Identifier: MIT` | Requis dans tous les fichiers source du projet. |
 | Casser la compatibilité `cffi` | Les bindings Python dépendent de symboles exacts. Toute modification de l’API C doit être reflétée dans `python/src/libembedding/_cdefs.h`. |
 | Archiver un document toujours référencé | Vérifier les liens avant archivage. |
-| Remplacer `third_party/llama.cpp/` sans ré-élaguer | Le snapshot est versionné comme des fichiers ordinaires (pas de sous-module) : un bump réintroduit tout l'outillage amont. Relancer `pwsh -File scripts/prune_llama_cpp.ps1` puis la configure. |
+| Remplacer `third_party/llama.cpp/` sans ré-élaguer | Le snapshot est versionné comme des fichiers ordinaires (pas de sous-module) : un bump réintroduit tout l'outillage amont. Relancer `pwsh -File scripts/prune_llama_cpp.ps1` puis la configure. Version actuelle : v0.6.0 (ggml 0.26.0). |
 
 ---
 
