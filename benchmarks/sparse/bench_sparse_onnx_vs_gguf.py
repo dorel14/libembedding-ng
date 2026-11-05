@@ -159,6 +159,12 @@ class WorkerResult:
     query_p50_ms: float = 0.0
     peak_rss_mb: float = 0.0
     library: str = ""
+    # What the backend actually ran with, not what was asked: threads=0 and
+    # batch_size=0 resolve differently per backend, and the token budget cuts
+    # batches smaller than batch_size.
+    threads: int = 0
+    batch_size: int = 0
+    docs_per_batch: float = 0.0
 
 
 def load_model(spec: Spec):
@@ -204,12 +210,18 @@ def run_worker(payload: dict) -> WorkerResult:
         model = load_model(spec)
         result.load_s = time.perf_counter() - t0
 
+        info = model.info()
+        result.threads, result.batch_size = info.num_threads, info.batch_size
+
         model.embed(docs[: min(16, len(docs))])  # warm the allocators
 
+        batches_before = model.stats().batches_run
         t0 = time.perf_counter()
         doc_vecs = model.embed(docs)
         result.corpus_s = time.perf_counter() - t0
         result.docs_per_s = len(docs) / result.corpus_s if result.corpus_s else 0.0
+        batches = model.stats().batches_run - batches_before
+        result.docs_per_batch = len(docs) / batches if batches else 0.0
 
         query_vecs = model.embed(queries)
         latencies = []
@@ -278,6 +290,57 @@ class SparseMatrix:
     def row(self, i: int) -> tuple[np.ndarray, np.ndarray]:
         lo, hi = self.offsets[i], self.offsets[i + 1]
         return self.indices[lo:hi], self.values[lo:hi]
+
+
+# Upper edges of the term-weight bands the |Δweight| breakdown uses. A term's
+# band is its larger weight across the two backends, so a term one side drops
+# is filed by the weight the other side gave it.
+_WEIGHT_BANDS = (0.1, 0.5, 1.0, 2.0, math.inf)
+
+
+def delta_by_weight(a: SparseMatrix, b: SparseMatrix) -> dict:
+    """Where the weight differences sit: per weight band, and one-sided terms.
+
+    A large max |Δweight| next to a cosine of 0.9999 reads as a contradiction
+    until it is placed: on a heavy term it would move rankings, on a term near
+    zero it only decides whether the term survives a min_weight cut. A term
+    present on one side only is the extreme of the second case.
+    """
+    w_max, delta, one_sided = [], [], []
+    for i in range(len(a)):
+        ia, va = a.row(i)
+        ib, vb = b.row(i)
+        da = dict(zip(ia.tolist(), va.tolist()))
+        db = dict(zip(ib.tolist(), vb.tolist()))
+        for k in set(da) | set(db):
+            x, y = da.get(k, 0.0), db.get(k, 0.0)
+            w_max.append(max(x, y))
+            delta.append(abs(x - y))
+            one_sided.append((k in da) != (k in db))
+    w = np.array(w_max)
+    d = np.array(delta)
+    side = np.array(one_sided, dtype=bool)
+
+    bands, lo = [], 0.0
+    for hi in _WEIGHT_BANDS:
+        sel = (w >= lo) & (w < hi)
+        bands.append({
+            "band": f"[{lo:g}, {hi:g})",
+            "terms": int(sel.sum()),
+            "mean_delta": float(d[sel].mean()) if sel.any() else 0.0,
+            "p99_delta": float(np.percentile(d[sel], 99)) if sel.any() else 0.0,
+            "max_delta": float(d[sel].max()) if sel.any() else 0.0,
+            "max_relative": float((d[sel] / w[sel]).max()) if sel.any() else 0.0,
+        })
+        lo = hi
+    return {
+        "bands": bands,
+        "one_sided_terms": int(side.sum()),
+        "one_sided_share": float(side.mean()) if len(side) else 0.0,
+        "one_sided_max_weight": float(w[side].max()) if side.any() else 0.0,
+        "one_sided_p99_weight": (float(np.percentile(w[side], 99))
+                                 if side.any() else 0.0),
+    }
 
 
 def fidelity(a: SparseMatrix, b: SparseMatrix, top: int = 10) -> dict[str, float]:
@@ -376,6 +439,7 @@ class Report:
     cost: dict = field(default_factory=dict)
     fidelity_docs: dict = field(default_factory=dict)
     fidelity_queries: dict = field(default_factory=dict)
+    delta_docs: dict = field(default_factory=dict)
     retrieval: dict = field(default_factory=dict)
     top10_agreement: float = 0.0
     errors: list = field(default_factory=list)
@@ -418,15 +482,39 @@ def write_markdown(r: Report, path: Path) -> None:
                      f"{f['max_weight_diff']:.4f} | {f['top10_overlap_mean']:.3f} | "
                      f"{f['nnz_ratio_mean']:.3f} |")
 
+    if r.delta_docs:
+        dd = r.delta_docs
+        lines += ["", "### Where the documents' weight differences sit", "",
+                  ("Band = the larger of the two weights of a term. "
+                   "Relative = |Δ| / that weight."), "",
+                  ("| Weight band | terms | mean \\|Δ\\| | p99 \\|Δ\\| | max \\|Δ\\| | "
+                   "max relative |"),
+                  "|---|---|---|---|---|---|"]
+        for b in dd["bands"]:
+            lines.append(f"| {b['band']} | {b['terms']} | {b['mean_delta']:.4f} | "
+                         f"{b['p99_delta']:.4f} | {b['max_delta']:.4f} | "
+                         f"{b['max_relative']:.3f} |")
+        lines += ["", (f"Terms present on one side only: {dd['one_sided_terms']} "
+                       f"({100 * dd['one_sided_share']:.2f} % of terms), weight p99 "
+                       f"{dd['one_sided_p99_weight']:.4f}, max "
+                       f"{dd['one_sided_max_weight']:.4f}.")]
+
     lines += ["", "## Cost", "",
-          "| Backend | corpus docs/s (median) | query p50 ms | load s | peak RSS MB |",
-          "|---|---|---|---|---|"]
+          ("| Backend | corpus docs/s (median) | query p50 ms | load s | peak RSS MB | "
+           "threads | batch_size | docs/batch |"),
+          "|---|---|---|---|---|---|---|---|"]
     for name, c in r.cost.items():
         lines.append(f"| {name} | {c['docs_per_s']:.2f} | {c['query_p50_ms']:.1f} | "
-                 f"{c['load_s']:.2f} | {c['peak_rss_mb']:.0f} |")
+                 f"{c['load_s']:.2f} | {c['peak_rss_mb']:.0f} | "
+                 f"{c['threads'] or 'runtime default'} | {c['batch_size']} | "
+                 f"{c['docs_per_batch']:.2f} |")
     lines += ["",
           ("Throughput is the median over rounds; backends alternate within "
-           "each round. Peak RSS is per subprocess."),
+           "each round. Peak RSS is per subprocess. threads, batch_size and "
+           "docs/batch are what each backend resolved and ran: docs/batch is "
+           "the corpus size over the batches actually run, below batch_size "
+           "when the token budget cuts. GGUF splits its threads over "
+           "threads / 2 workers."),
           ""]
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -437,19 +525,20 @@ def write_markdown(r: Report, path: Path) -> None:
 
 
 @contextlib.contextmanager
-def owned_vectors_dir(report: Report, report_path: Path):
+def owned_vectors_dir(report: Report, report_path: Path, keep: bool):
     """Where the workers leave their vectors: next to the report, not in %TEMP%.
 
     A run lasts up to hours, and %TEMP% is shared ground other tools may clean:
     on 2026-11-04 the GGUF worker of one run found its temporary folder gone
     when it came to save (FileNotFoundError), with no trace of what removed it.
     A folder this run owns cannot be swept from under it. It is removed when the
-    run succeeds and kept when it does not, so a failure can be inspected.
+    run succeeds and kept when it does not, so a failure can be inspected, or
+    when ``keep`` asks for it.
     """
     path = report_path.with_name(report_path.stem + "_vectors")
     path.mkdir(parents=True, exist_ok=True)
     yield str(path)
-    if not report.errors:
+    if not report.errors and not keep:
         shutil.rmtree(path, ignore_errors=True)
 
 
@@ -471,6 +560,8 @@ def main() -> int:
                    help="cost rounds; vectors come from the first")
     p.add_argument("--output", type=Path,
                    default=Path(__file__).resolve().parent / "onnx_vs_gguf_results.md")
+    p.add_argument("--keep-vectors", action="store_true",
+                   help="keep <output stem>_vectors/ after a successful run")
     p.add_argument("--worker", help=argparse.SUPPRESS)
     args = p.parse_args()
 
@@ -490,7 +581,7 @@ def main() -> int:
                   "max_length": args.max_length, "rounds": args.rounds},
     )
 
-    with owned_vectors_dir(report, args.output) as vectors_dir:
+    with owned_vectors_dir(report, args.output, args.keep_vectors) as vectors_dir:
         runs: dict[str, list[WorkerResult]] = {"onnx": [], "gguf": []}
         for rnd in range(args.rounds):
             order = ("onnx", "gguf") if rnd % 2 == 0 else ("gguf", "onnx")
@@ -517,6 +608,9 @@ def main() -> int:
                     "load_s": median([x.load_s for x in rs]),
                     "peak_rss_mb": max(x.peak_rss_mb for x in rs),
                     "library": rs[0].library,
+                    "threads": rs[0].threads,
+                    "batch_size": rs[0].batch_size,
+                    "docs_per_batch": median([x.docs_per_batch for x in rs]),
                 }
 
         vec = Path(vectors_dir)
@@ -533,6 +627,8 @@ def main() -> int:
                                             SparseMatrix(vec / "gguf_docs.npz"))
             report.fidelity_queries = fidelity(SparseMatrix(vec / "onnx_queries.npz"),
                                                SparseMatrix(vec / "gguf_queries.npz"))
+            report.delta_docs = delta_by_weight(SparseMatrix(vec / "onnx_docs.npz"),
+                                                SparseMatrix(vec / "gguf_docs.npz"))
 
     write_markdown(report, args.output)
     args.output.with_suffix(".json").write_text(json.dumps(asdict(report), indent=2),
