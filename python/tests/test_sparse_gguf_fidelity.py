@@ -187,6 +187,18 @@ def test_gguf_workers_keep_vectors(gguf_model):
         pooled.close()
 
 
+def test_gguf_stats_count_budget_batches(gguf_model):
+    """batches_run counts the graphs actually run, token budget included.
+
+    Six 512-token texts at batch_size=256 are six batches under the 512-token
+    budget; the count used to be ceil(6 / 256) = 1.
+    """
+    long_text = " ".join(["sparse retrieval with learned term weights"] * 120)
+    before = gguf_model.stats().batches_run
+    gguf_model.embed([long_text] * 6, batch_size=256)
+    assert gguf_model.stats().batches_run - before == 6
+
+
 def test_gguf_batching_keeps_vectors(gguf_model):
     """The token budget only changes the batch shape, never the result.
 

@@ -327,6 +327,7 @@ public:
             batches.emplace_back(start, end);
             start = end;
         }
+        last_batch_count_ = (int)batches.size();
 
         /* A call that is one batch -- a query, typically -- runs on one worker
          * with the whole thread budget: splitting its threads would only make
@@ -382,6 +383,10 @@ public:
      * 0 removes the cap and leaves batch_size as the only bound. */
     void set_max_batch_tokens(int n) { max_batch_tokens_ = std::max(0, n); }
     int max_batch_tokens() const { return max_batch_tokens_; }
+
+    /* Graphs the last embed() ran: the token budget can cut more batches than
+     * ceil(texts / batch_size), so callers counting batches ask here. */
+    int last_batch_count() const { return last_batch_count_; }
 
     int vocab_size() const { return vocab_size_; }
     int max_length() const { return max_length_; }
@@ -811,6 +816,7 @@ private:
     int vocab_size_ = 0;
     int max_length_ = 0;
     int max_batch_tokens_ = kDefaultMaxBatchTokens;
+    int last_batch_count_ = 0;
     int total_threads_ = 1;
     std::vector<std::unique_ptr<Worker>> workers_;
 #ifdef LIBEMBEDDING_GGUF_PROFILE

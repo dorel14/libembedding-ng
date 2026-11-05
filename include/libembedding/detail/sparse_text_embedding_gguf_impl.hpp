@@ -80,7 +80,7 @@ lembed_status_t lembed_sparse_text_embedding_embed_gguf(
         if (!result->items) return LEMBED_ERROR_OUT_OF_MEMORY;
 
         int out_offset = 0;
-        const int num_batches = lembed::detail::batch_count(num_texts, batch_size);
+        const int num_batches = ctx->gguf->last_batch_count();
         for (size_t b = 0; b < sparse.size() && out_offset < num_texts; b++) {
             lembed::detail::SparseResult& sr = sparse[b];
             lembed::detail::sparse_prune_and_sort(sr, top_k, min_weight,
