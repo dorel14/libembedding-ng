@@ -14,15 +14,26 @@ add_executable(fair_compare fair_compare.cpp)
 target_link_libraries(fair_compare PRIVATE libembedding)
 target_compile_definitions(fair_compare PRIVATE LIBEMBEDDING_NO_DOWNLOAD)
 
+add_executable(gguf_gemm_microbench gguf_gemm_microbench.cpp)
+target_link_libraries(gguf_gemm_microbench PRIVATE ggml)
+if(MSVC)
+    target_compile_options(gguf_gemm_microbench PRIVATE
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/arch:AVX2>
+    )
+endif()
+
 if(WIN32)
-    set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare)
+    set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare
+        gguf_gemm_microbench)
     foreach(_t IN LISTS _benchmark_targets)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare)
+    set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare
+        gguf_gemm_microbench)
     foreach(_t IN LISTS _benchmark_targets)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})

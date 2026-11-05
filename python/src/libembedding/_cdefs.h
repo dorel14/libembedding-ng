@@ -307,6 +307,7 @@ typedef struct {
     int                         top_k;        /* max terms to keep (0 = all) */
     float                       min_weight;   /* pruning threshold */
     int                         storage_format; /* 0=dict, 1=CSR, 2=numpy */
+    int                         workers;      /* GGUF only; 0 = auto */
 } lembed_sparse_options_t;
 
 typedef struct {

@@ -127,9 +127,14 @@ void finish_gguf_ctx(lembed_sparse_embedding_ctx_t* ctx,
     ctx->model = LEMBED_SPARSE_MODEL_COUNT;
     ctx->max_length = resolved_max_length;
     ctx->model_name_str = model_name;
-    ctx->num_threads = options.num_threads;
+    /* The resolved budget, not the request: 0 means "every logical CPU" here,
+     * and the introspection API should say how many threads actually run. */
+    ctx->num_threads = ctx->gguf ? ctx->gguf->total_threads() : options.num_threads;
+    /* Not the ONNX default: here every batch materialises a
+     * [vocab, batch * seq_len] F32 logits tensor, so 256 documents cost
+     * gigabytes and mostly padding. */
     ctx->batch_size = (options.batch_size > 0) ? options.batch_size
-                                               : LEMBED_DEFAULT_BATCH_SIZE;
+                                               : LEMBED_GGUF_DEFAULT_BATCH_SIZE;
     /* The GGUF runtime is a CPU ggml graph; there is no provider to honour, and
      * reporting LEMBED_PROVIDER_LLAMACPP would be wrong -- llama.cpp is not
      * involved. */
@@ -171,7 +176,8 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_path(
         auto session = std::unique_ptr<lembed::gguf::SparseSession>(
             new lembed::gguf::SparseSession());
         std::string err;
-        if (!session->load_from_file(path, opts.num_threads, opts.max_length, err)) {
+        if (!session->load_from_file(path, opts.num_threads, opts.workers,
+                                     opts.max_length, err)) {
             /* Rule 2 of the GGUF convention: say what was missing. A refusal
              * with a reason is debuggable; a refusal without one is not. */
             lembed::detail::set_error(err.c_str());

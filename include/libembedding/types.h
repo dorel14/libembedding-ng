@@ -371,11 +371,13 @@ typedef struct {
     int                         max_length;
     int                         num_threads;
     int                         show_download_progress;
-    int                         batch_size;
+    int                         batch_size;   /* 0 = backend-specific default */
     int                         offline;
     int                         top_k;        /* max terms to keep (0 = all) */
     float                       min_weight;   /* pruning threshold */
-    int                         storage_format; /* 0=dict, 1=CSR, 2=numpy */
+    int                         storage_format; /* lembed_sparse_format_t */
+    int                         workers;      /* GGUF only: independent graphs sharing
+                                                 num_threads; 0 = auto (num_threads / 2) */
 } lembed_sparse_options_t;
 
 typedef struct {
@@ -483,7 +485,7 @@ lembed_sparse_options_t lembed_sparse_options_default(void) {
     opts.model = LEMBED_SPARSE_MODEL_DEFAULT;
     opts.provider = LEMBED_PROVIDER_CPU;
     opts.show_download_progress = 1;
-    opts.batch_size = LEMBED_DEFAULT_BATCH_SIZE;
+    opts.batch_size = 0;
     return opts;
 }
 
@@ -564,7 +566,3 @@ void lembed_rerank_results_free(lembed_rerank_results_t* result) {
 #endif /* LIBEMBEDDING_IMPLEMENTATION */
 
 #endif /* LIBEMBEDDING_TYPES_H */
-
-
-
-

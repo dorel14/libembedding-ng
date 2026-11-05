@@ -52,6 +52,9 @@ add_test(NAME test_cpp_wrappers COMMAND test_cpp_wrappers)
 # not depend on which quantized weights happen to be in the local cache.
 add_executable(test_quantization_auto test_quantization_auto.cpp)
 target_link_libraries(test_quantization_auto PRIVATE libembedding)
+if(WIN32)
+    target_link_libraries(test_quantization_auto PRIVATE ONNXRuntime::ONNXRuntime)
+endif()
 add_test(NAME test_quantization_auto COMMAND test_quantization_auto)
 
 # HuggingFace parity for the BERT normaliser (no network): the expectations are
@@ -63,7 +66,7 @@ add_test(NAME test_tokenizer COMMAND test_tokenizer)
 # The GGUF capability convention (no network): fixtures are synthesised in a
 # temp directory, so the suite is hermetic and runs in milliseconds.
 add_executable(test_gguf_inspect test_gguf_inspect.cpp)
-target_link_libraries(test_gguf_inspect PRIVATE libembedding)
+target_link_libraries(test_gguf_inspect PRIVATE libembedding llama)
 add_test(NAME test_gguf_inspect COMMAND test_gguf_inspect)
 
 # The sparse GGUF runtime (no network): the GGUF writer in test_gguf_inspect.cpp
@@ -74,15 +77,34 @@ add_executable(test_sparse_gguf test_sparse_gguf.cpp)
 target_link_libraries(test_sparse_gguf PRIVATE libembedding)
 add_test(NAME test_sparse_gguf COMMAND test_sparse_gguf)
 
+# End-to-end GGUF profiler. It compiles the internal session with opt-in
+# instrumentation so the public API and normal DLL builds stay unchanged.
+# Invoke manually; this is a performance tool, not a pass/fail CTest.
+add_executable(integration_sparse_gguf integration_sparse_gguf.cpp)
+target_include_directories(integration_sparse_gguf PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+    "${PROJECT_SOURCE_DIR}/third_party"
+)
+target_link_libraries(integration_sparse_gguf PRIVATE ggml cjson)
+if(WIN32)
+    target_link_libraries(integration_sparse_gguf PRIVATE Psapi)
+endif()
+if(MSVC)
+    target_compile_options(integration_sparse_gguf PRIVATE
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/arch:AVX2>
+    )
+endif()
+
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_sparse_gguf test_tokenizer)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_sparse_gguf test_tokenizer)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
@@ -108,10 +130,11 @@ if(LIBEMBEDDING_INTEGRATION_TESTS)
     add_test(NAME test_sparse_embedding COMMAND test_sparse_embedding)
 
     # The sparse GGUF runtime against the sparse ONNX model, on the same texts.
-    # Requires network: the two models are separate downloads.
-    add_executable(integration_sparse_gguf test_sparse_gguf_vs_onnx.cpp)
-    target_link_libraries(integration_sparse_gguf PRIVATE libembedding)
-    add_test(NAME integration_sparse_gguf COMMAND integration_sparse_gguf)
+    # Requires network: the two models are separate downloads. The target is
+    # not called integration_sparse_gguf: that name is the profiler above.
+    add_executable(test_sparse_gguf_vs_onnx test_sparse_gguf_vs_onnx.cpp)
+    target_link_libraries(test_sparse_gguf_vs_onnx PRIVATE libembedding)
+    add_test(NAME test_sparse_gguf_vs_onnx COMMAND test_sparse_gguf_vs_onnx)
 
     add_executable(test_reranker test_reranker.cpp)
     target_link_libraries(test_reranker PRIVATE libembedding)
@@ -136,7 +159,7 @@ if(LIBEMBEDDING_INTEGRATION_TESTS)
     endif()
 
     if(WIN32)
-        foreach(_t test_text_embedding test_introspection test_sparse_embedding test_reranker integration_sparse_gguf)
+        foreach(_t test_text_embedding test_introspection test_sparse_embedding test_reranker test_sparse_gguf_vs_onnx)
             copy_runtime_dlls(${_t})
         endforeach()
         copy_runtime_dlls(test_llama_embedding)
@@ -144,7 +167,7 @@ if(LIBEMBEDDING_INTEGRATION_TESTS)
             copy_runtime_dlls(test_image_embedding)
         endif()
     elseif(ONNXRuntime_LIBRARIES)
-        foreach(_t test_text_embedding test_introspection test_sparse_embedding test_reranker integration_sparse_gguf)
+        foreach(_t test_text_embedding test_introspection test_sparse_embedding test_reranker test_sparse_gguf_vs_onnx)
             copy_runtime_libs(${_t})
         endforeach()
         copy_runtime_libs(test_llama_embedding)
