@@ -1,4 +1,9 @@
-"""Tests for the shared-library lookup in _binding."""
+"""Tests for the shared-library lookup in _binding.
+
+Auteur: David Orel
+
+SPDX-License-Identifier: MIT
+"""
 
 import pytest
 
