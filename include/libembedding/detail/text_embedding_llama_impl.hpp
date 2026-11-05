@@ -35,6 +35,7 @@ extern "C++" {
 #include <chrono>
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #ifdef __cplusplus
 }
 extern "C" {
@@ -48,9 +49,13 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
         const lembed_text_options_t* options,
         lembed_text_embedding_t** out) {
     if (!gguf_path || !gguf_path[0] || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    const lembed_text_options_t defaults = lembed_text_options_default();
+    if (!options) options = &defaults;
 
     try {
-        auto* ctx = new lembed_text_embedding();
+        std::unique_ptr<lembed_text_embedding_t,
+                        decltype(&lembed_text_embedding_free)>
+            ctx(new lembed_text_embedding(), &lembed_text_embedding_free);
         ctx->backend_type = LEMBED_BACKEND_LLAMACPP;
         ctx->pooling = LEMBED_POOLING_MEAN;
         ctx->quantization = LEMBED_QUANTIZATION_NONE;
@@ -83,8 +88,8 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
             ctx->cache = new lembed::detail::LRUCache((size_t)options->cache_size, 0);
         }
 
-        lembed__text_update_desc(ctx);
-        *out = ctx;
+        lembed__text_update_desc(ctx.get());
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -154,4 +159,3 @@ static inline void lembed__llama_embed_stream(
 #endif
 
 #endif /* LIBEMBEDDING_TEXT_EMBEDDING_LLAMA_IMPL_HPP */
-

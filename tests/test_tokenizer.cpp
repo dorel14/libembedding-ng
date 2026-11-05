@@ -20,7 +20,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/detail/tokenizer_impl.hpp>
 
 #include <stdio.h>

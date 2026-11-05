@@ -23,7 +23,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/gguf_inspect.h>
 /* The Probe is an internal layer, and this test drives it directly: the element
  * count it reports is the unit resolve_formula()'s decision rests on, and that

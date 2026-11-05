@@ -91,6 +91,17 @@ class TextEmbedding:
         preferred_quantization: str | None = None,
         num_threads: int | None = None,
     ):
+        provider = provider.lower()
+        if provider not in _PROVIDER_MAP:
+            raise ValueError(
+                f"Unknown provider '{provider}'. Use: {list(_PROVIDER_MAP.keys())}"
+            )
+        pooling = pooling.lower()
+        if pooling not in _POOLING_ENUM:
+            raise ValueError(
+                f"Unknown pooling '{pooling}'. Use: {list(_POOLING_ENUM.keys())}"
+            )
+
         if num_threads is not None:
             warnings.warn(
                 "num_threads is deprecated, use threads",
@@ -105,6 +116,15 @@ class TextEmbedding:
             if quant_enum is None:
                 raise ValueError(
                     f"Unknown quantization '{quantization}'. Use: {list(_QUANTIZATION_ENUM.keys())}"
+                )
+
+        if preferred_quantization is not None:
+            preferred_quantization = preferred_quantization.lower()
+            if preferred_quantization not in _QUANTIZATION_ENUM:
+                raise ValueError(
+                    "Unknown preferred_quantization "
+                    f"'{preferred_quantization}'. Use: "
+                    f"{list(_QUANTIZATION_ENUM.keys())}"
                 )
 
         self._ctx = None
@@ -127,9 +147,7 @@ class TextEmbedding:
                 if resolved_quant is None:
                     resolved_quant = lib.LEMBED_QUANTIZATION_NONE
             else:
-                pq_enum = _QUANTIZATION_ENUM.get(preferred_quantization.lower())
-                if pq_enum is not None:
-                    resolved_quant = pq_enum
+                resolved_quant = _QUANTIZATION_ENUM[preferred_quantization]
 
         # Remember which mode was actually selected: with
         # preferred_quantization="auto" the caller asked for a decision, and
@@ -157,12 +175,12 @@ class TextEmbedding:
                 raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
 
             opts = ffi.new("lembed_text_options_t *")
-            opts.provider = _PROVIDER_MAP.get(provider, 0)
+            opts.provider = _PROVIDER_MAP[provider]
             opts.num_threads = threads
             opts.batch_size = batch_size
             opts.max_length = max_length
             opts.dim = dim
-            opts.pooling = _POOLING_ENUM.get(pooling, 0)
+            opts.pooling = _POOLING_ENUM[pooling]
             opts.offline = 1 if offline else 0
             opts.show_download_progress = 1 if show_download_progress else 0
             opts.auto_workers = 1 if auto_workers else 0
@@ -215,12 +233,12 @@ class TextEmbedding:
 
             if _is_local_path(model_name):
                 opts = ffi.new("lembed_text_options_t *")
-                opts.provider = _PROVIDER_MAP.get(provider, 0)
+                opts.provider = _PROVIDER_MAP[provider]
                 opts.num_threads = threads
                 opts.batch_size = batch_size
                 opts.max_length = max_length
                 opts.dim = dim
-                opts.pooling = _POOLING_ENUM.get(pooling, 0)
+                opts.pooling = _POOLING_ENUM[pooling]
                 opts.offline = 1 if offline else 0
                 opts.show_download_progress = 1 if show_download_progress else 0
                 opts.auto_workers = 1 if auto_workers else 0
@@ -237,12 +255,12 @@ class TextEmbedding:
                 # zero-initialised struct points at entry 0, so every
                 # HuggingFace name silently loaded all-MiniLM-L6-v2.
                 opts.base.model = resolve_text_model(model_name)
-                opts.base.provider = _PROVIDER_MAP.get(provider, 0)
+                opts.base.provider = _PROVIDER_MAP[provider]
                 opts.base.num_threads = threads
                 opts.base.batch_size = batch_size
                 opts.base.max_length = max_length
                 opts.base.dim = dim
-                opts.base.pooling = _POOLING_ENUM.get(pooling, 0)
+                opts.base.pooling = _POOLING_ENUM[pooling]
                 opts.base.offline = 1 if offline else 0
                 opts.base.show_download_progress = 1 if show_download_progress else 0
                 opts.base.auto_workers = 1 if auto_workers else 0
@@ -389,11 +407,10 @@ class TextEmbedding:
         Returns:
             numpy array of shape (len(texts), dim).
         """
+        _validate_output_dtype(dtype)
         n = len(texts)
         if n == 0:
             return np.empty((0, self._dim), dtype=np.float32)
-
-        _validate_output_dtype(dtype)
 
         c_texts = ffi.new("char*[]", n)
         c_strs = []
@@ -435,11 +452,10 @@ class TextEmbedding:
         Returns:
             bytes containing the embeddings (no numpy overhead).
         """
+        _validate_output_dtype(dtype)
         n = len(texts)
         if n == 0:
             return b""
-
-        _validate_output_dtype(dtype)
 
         c_texts = ffi.new("char*[]", n)
         c_strs = []
@@ -479,11 +495,10 @@ class TextEmbedding:
         Yields:
             numpy array of shape (dim,) for each text.
         """
+        _validate_output_dtype(dtype)
         n = len(texts)
         if n == 0:
             return
-
-        _validate_output_dtype(dtype)
 
         c_texts = ffi.new("char*[]", n)
         c_strs = []
@@ -589,3 +604,4 @@ class TextEmbedding:
 # Re-export TextEmbeddingPool from pool module (imported last: pool.py imports
 # TextEmbedding from this module, so the import cannot stay at the top).
 from .pool import TextEmbeddingPool  # noqa: F401
+

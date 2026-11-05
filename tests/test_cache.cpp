@@ -17,13 +17,18 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* Required on Linux/macOS, where libembedding is a header-only INTERFACE
- * target: exactly one translation unit must define this to emit the code. */
+/* Linux/macOS use the header-only implementation; Windows tests link to the DLL. */
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/libembedding.h>
+#include <libembedding/detail/embedding_cache_impl.hpp>
 
 #include <cstdio>
 #include <cstring>
+#include <atomic>
+#include <thread>
+#include <vector>
 
 #define ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -208,6 +213,40 @@ int main(void) {
         bad.capacity = 0;
         ASSERT(lembed_cache_create(&bad) == NULL, "capacity 0 must be rejected");
         ASSERT(lembed_cache_create(NULL) == NULL, "a NULL config must be rejected");
+    }
+
+    /* --- vector-copy lookup stays safe during concurrent replacement - */
+    {
+        lembed::detail::LRUCache concurrent_cache(1);
+        std::vector<float> initial(64, 1.0f);
+        concurrent_cache.put("race", initial.data(), (int)initial.size());
+        std::atomic<bool> done(false);
+        std::atomic<bool> inconsistent(false);
+
+        std::thread writer([&]() {
+            for (int i = 0; i < 20000; ++i) {
+                const int size = (i % 2 == 0) ? 32 : 64;
+                std::vector<float> value((size_t)size, (float)i);
+                concurrent_cache.put("race", value.data(), size);
+            }
+            done.store(true, std::memory_order_release);
+        });
+        std::thread reader([&]() {
+            do {
+                std::vector<float> value;
+                if (concurrent_cache.get_copy("race", value) && !value.empty()) {
+                    for (float item : value) {
+                        if (item != value.front()) {
+                            inconsistent.store(true, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                }
+            } while (!done.load(std::memory_order_acquire));
+        });
+        writer.join();
+        reader.join();
+        ASSERT(!inconsistent.load(), "cache copy must not race with replacement");
     }
 
     lembed_cache_free(cache);

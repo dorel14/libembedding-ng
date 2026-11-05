@@ -18,8 +18,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/autotuner.h>
+#include <libembedding/detail/quantization_auto_impl.hpp>
 
 #include <cstdio>
 #include <cstdlib>

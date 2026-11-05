@@ -38,6 +38,35 @@ def test_text_embedding_empty(bge_small):
     model.close()
 
 
+@pytest.mark.parametrize("dtype", ["invalid", "float64"])
+def test_empty_embedding_rejects_unsupported_dtype(dtype):
+    model = TextEmbedding.__new__(TextEmbedding)
+    model._dim = 384
+    with pytest.raises(ValueError, match="Unsupported dtype"):
+        model.embed([], dtype=dtype)
+    with pytest.raises(ValueError, match="Unsupported dtype"):
+        model.embed_bytes([], dtype=dtype)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"provider": "not-a-provider"}, "Unknown provider"),
+        ({"pooling": "max"}, "Unknown pooling"),
+        ({"preferred_quantization": "not-a-mode"}, "Unknown preferred_quantization"),
+    ],
+)
+def test_text_embedding_rejects_unknown_options(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        TextEmbedding(**kwargs)
+
+
+def test_gguf_detection_is_case_insensitive():
+    from libembedding.models import _is_gguf_model
+
+    assert _is_gguf_model("model.GgUf")
+
+
 def test_text_embedding_cosine_similarity(bge_small):
     model = bge_small()
     result = model.embed(
