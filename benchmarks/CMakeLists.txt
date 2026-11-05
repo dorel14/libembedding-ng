@@ -31,6 +31,10 @@ if(WIN32)
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
+    # These three compile the implementation themselves (see the root helper).
+    foreach(_t bench_libembedding bench_reranker_compare fair_compare)
+        link_implementation_deps(${_t})
+    endforeach()
 elseif(ONNXRuntime_LIBRARIES)
     set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare
         gguf_gemm_microbench)

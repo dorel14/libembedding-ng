@@ -433,6 +433,21 @@ if(WIN32)
 
     # Copy runtime DLLs next to libembedding.dll
     copy_runtime_dlls(libembedding)
+
+    # For executables that define LIBEMBEDDING_IMPLEMENTATION themselves (the
+    # examples and benchmarks): the DLL keeps its dependencies PRIVATE, so the
+    # implementation compiled into the executable links them directly. On
+    # Linux/macOS the INTERFACE target already carries them.
+    function(link_implementation_deps target_name)
+        target_link_libraries(${target_name} PRIVATE
+            llama ggml cjson ONNXRuntime::ONNXRuntime)
+        if(TARGET libembedding_stb)
+            target_link_libraries(${target_name} PRIVATE libembedding_stb)
+        endif()
+        if(NOT LIBEMBEDDING_NO_DOWNLOAD AND CURL_LIBRARY)
+            target_link_libraries(${target_name} PRIVATE ${CURL_LIBRARY})
+        endif()
+    endfunction()
 endif()
 
 # =========================================================================
