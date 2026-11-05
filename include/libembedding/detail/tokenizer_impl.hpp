@@ -416,22 +416,28 @@ public:
     }
 
     EncodingBatch encode_batch(const std::vector<std::string>& texts) const {
+        std::vector<std::vector<int>> all_ids;
+        all_ids.reserve(texts.size());
+        for (const auto& text : texts) {
+            all_ids.push_back(encode_single(text));
+        }
+        return encode_batch(all_ids);
+    }
+
+    EncodingBatch encode_batch(
+        const std::vector<std::vector<int>>& all_ids) const {
         EncodingBatch result;
         result.seq_length = 0;
-
-        std::vector<std::vector<int>> all_ids;
-        for (const auto& text : texts) {
-            auto ids = encode_single(text);
+        for (const auto& ids : all_ids) {
             if ((int)ids.size() > result.seq_length)
                 result.seq_length = (int)ids.size();
-            all_ids.push_back(std::move(ids));
         }
 
         /* Cap at max_length */
         if (result.seq_length > max_length_)
             result.seq_length = max_length_;
 
-        int batch_size = (int)texts.size();
+        const int batch_size = (int)all_ids.size();
         result.input_ids.resize(batch_size);
         result.attention_mask.resize(batch_size);
         result.token_type_ids.resize(batch_size);
@@ -691,7 +697,4 @@ private:
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_TOKENIZER_IMPL_HPP */
-
-
-
 

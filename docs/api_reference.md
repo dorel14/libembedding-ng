@@ -104,6 +104,10 @@ best_idx = scores.argmax()
 ### SparseTextEmbedding
 
 Génère des embeddings **sparse** (vecteurs creux avec indices de tokens et poids).
+`batch_size=None` utilise le défaut du backend : 256 pour ONNX et 16 pour GGUF.
+Le réglage GGUF est un compromis mesuré entre débit, stabilité et nombre de
+lots ; batch 2 peut réduire davantage le padding et la mémoire à débit similaire.
+Les deux réglages peuvent être surchargés par l'appelant.
 
 #### Constructeur
 
@@ -115,7 +119,7 @@ SparseTextEmbedding(
     cache_dir=None,
     max_length=0,
     threads=0,
-    batch_size=256,
+    batch_size=None,
     offline=False,
     show_download_progress=True,
     top_terms=0,

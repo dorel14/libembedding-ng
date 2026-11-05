@@ -46,6 +46,7 @@
 
 /* Default configuration values */
 #define LEMBED_DEFAULT_BATCH_SIZE    256
+#define LEMBED_GGUF_DEFAULT_BATCH_SIZE 16
 #define LEMBED_DEFAULT_MAX_LENGTH    512
 #define LEMBED_DEFAULT_CACHE_SUBDIR  "libembedding_cache"
 #define LEMBED_MAX_DIM               4096
@@ -106,7 +107,3 @@ const char* lembed_execution_provider_name(int provider) {
 #endif /* LIBEMBEDDING_IMPLEMENTATION */
 
 #endif /* LIBEMBEDDING_CONFIG_H */
-
-
-
-

@@ -27,7 +27,7 @@ struct SparseEmbeddingOptions {
      * when the model argument is omitted, mirroring SparseTextEmbedding(). */
     std::string                  model_path = "prithivida/Splade_PP_en_v1";
     int                          threads = 0;
-    int                          batch_size = LEMBED_DEFAULT_BATCH_SIZE;
+    int                          batch_size = 0; /* backend-specific default */
     bool                         offline = false;
     std::string                  cache_dir;
     std::string                  provider = "cpu";

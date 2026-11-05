@@ -18,6 +18,7 @@
 extern "C" {
 #endif
 
+/* A zero batch_size selects the backend default (ONNX: 256, GGUF: 16). */
 lembed_sparse_options_t lembed_sparse_options_default(void);
 
 
@@ -110,6 +111,7 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
 #include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/tokenizer_impl.hpp"
+#include "detail/sparse_batching.hpp"
 #include "detail/sparse_postprocess.hpp"
 #include "detail/batch.hpp"
 #include "detail/gguf/gguf_sparse_session.hpp"
@@ -122,7 +124,6 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
 #include <vector>
 #include <chrono>
 #include <thread>
-
 
 struct lembed_sparse_embedding {
     lembed::detail::OnnxSession session;
@@ -198,7 +199,9 @@ lembed_status_t lembed_sparse_text_embedding_create(
         std::string model_dir(model_dir_cstr);
         lembed_free_string(model_dir_cstr);
 
-        auto* ctx = new lembed_sparse_embedding();
+        std::unique_ptr<lembed_sparse_embedding_ctx_t,
+                        decltype(&lembed_sparse_text_embedding_free)>
+            ctx(new lembed_sparse_embedding(), &lembed_sparse_text_embedding_free);
         ctx->model = options->model;
         ctx->max_length = (options->max_length > 0) ? options->max_length : info.max_tokens;
         ctx->model_name_str = info.model_name;
@@ -228,7 +231,7 @@ lembed_status_t lembed_sparse_text_embedding_create(
         ctx->min_weight = options->min_weight;
         ctx->storage_format = options->storage_format;
 
-        *out = ctx;
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -270,7 +273,9 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
                          (options->max_length > 0) ? options->max_length
                                                      : LEMBED_DEFAULT_MAX_LENGTH;
 
-        auto* ctx = new lembed_sparse_embedding();
+        std::unique_ptr<lembed_sparse_embedding_ctx_t,
+                        decltype(&lembed_sparse_text_embedding_free)>
+            ctx(new lembed_sparse_embedding(), &lembed_sparse_text_embedding_free);
         ctx->model = LEMBED_SPARSE_MODEL_COUNT; /* sentinel: local model */
         ctx->max_length = max_length;
         ctx->model_name_str = dir_path;
@@ -300,7 +305,7 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
         ctx->min_weight = options->min_weight;
         ctx->storage_format = options->storage_format;
 
-        *out = ctx;
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -333,18 +338,34 @@ lembed_status_t lembed_sparse_text_embedding_embed(
         if (!result->items) return LEMBED_ERROR_OUT_OF_MEMORY;
 
         auto t_start = std::chrono::high_resolution_clock::now();
-        int out_offset = 0;
-        int num_batches = lembed::detail::batch_count(num_texts, batch_size);
 
-        for (int bi = 0; bi < num_batches; bi++) {
-            auto range = lembed::detail::get_batch(bi, num_texts, batch_size);
-            int bsz = range.end - range.start;
+        /* Tokenised once, then processed longest first in batches bounded by
+         * both batch_size and the token budget; results go back to their input
+         * slot. Same policy as the GGUF runtime (detail/sparse_batching.hpp).
+         * The budget is what bounds memory: the output is [batch, seq_len,
+         * vocab] F32, ~120 KB per token column on a BERT vocabulary, and the
+         * old uncapped batch of 256 documents of 512 tokens asked ONNX Runtime
+         * for 16 GB. */
+        std::vector<std::vector<int>> token_ids((size_t)num_texts);
+        for (int i = 0; i < num_texts; i++)
+            token_ids[(size_t)i] = ctx->tokenizer.encode(texts[i] ? texts[i] : "");
+        const std::vector<size_t> order =
+            lembed::detail::sparse_batch_order(token_ids, batch_size);
 
-            std::vector<std::string> batch_texts;
-            for (int i = range.start; i < range.end; i++)
-                batch_texts.push_back(texts[i]);
+        int num_batches = 0;
+        for (size_t start = 0; start < order.size();) {
+            const size_t end = lembed::detail::sparse_batch_end(
+                start, order.size(), token_ids[order[start]].size(), batch_size,
+                lembed::detail::kSparseMaxBatchTokens);
+            const int bsz = (int)(end - start);
+            num_batches++;
 
-            auto enc = ctx->tokenizer.encode_batch(batch_texts);
+            std::vector<std::vector<int>> batch_ids;
+            batch_ids.reserve((size_t)bsz);
+            for (size_t i = start; i < end; i++)
+                batch_ids.push_back(std::move(token_ids[order[i]]));
+
+            auto enc = ctx->tokenizer.encode_batch(batch_ids);
             int seq_len = enc.seq_length;
 
             std::vector<int64_t> ids_flat(bsz * seq_len);
@@ -388,11 +409,10 @@ lembed_status_t lembed_sparse_text_embedding_embed(
 
                 lembed::detail::sparse_prune_and_sort(sr, top_k, min_weight,
                                                       storage_format);
-
-                int idx = out_offset + i;
-                lembed::detail::sparse_result_store(result, idx, sr);
+                lembed::detail::sparse_result_store(
+                    result, (int)order[start + (size_t)i], sr);
             }
-            out_offset += bsz;
+            start = end;
         }
 
         auto t_end = std::chrono::high_resolution_clock::now();
@@ -578,7 +598,4 @@ lembed_status_t lembed_sparse_best_config(
 #endif /* LIBEMBEDDING_IMPLEMENTATION */
 
 #endif /* LIBEMBEDDING_SPARSE_TEXT_EMBEDDING_H */
-
-
-
 

@@ -103,6 +103,10 @@ best_idx = scores.argmax()
 ### SparseTextEmbedding
 
 Generates **sparse** embeddings (sparse vectors with token indices and weights).
+`batch_size=None` uses the backend default: 256 for ONNX and 16 for GGUF. The
+GGUF default is a measured compromise between throughput, stability and number
+of batches; batch 2 can further reduce padding and memory at similar throughput.
+Callers can override either setting.
 
 #### Constructor
 
@@ -114,7 +118,7 @@ SparseTextEmbedding(
     cache_dir=None,
     max_length=0,
     threads=0,
-    batch_size=256,
+    batch_size=None,
     offline=False,
     show_download_progress=True,
     top_terms=0,
