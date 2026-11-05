@@ -76,7 +76,7 @@ refuse.
 ## 3. Recognised heads
 
 Names are the ones observed in the files examined in
-`benchmarks/sparse/LE-9.4-validation.md`.
+`docs/archive/LE-9.4-validation.md`.
 
 | Tensors | Capability | Meaning |
 |---|---|---|
@@ -250,7 +250,7 @@ requested is the failure this page is written to prevent.
 
 ## 11. Related
 
-- `benchmarks/sparse/LE-9.4-validation.md` — the investigation that produced this
+- `docs/archive/LE-9.4-validation.md` — the investigation that produced this
   convention, including the llama.cpp blocker and the CrispEmbed architecture
   reading
 - `roadmap-2.md` § P1.5b (this item), § P1.5c (the runtime that consumes it)
