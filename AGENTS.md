@@ -247,6 +247,8 @@ Exemple d’en-tête standard :
 - Les tests unitaires doivent pouvoir compiler avec `LIBEMBEDDING_NO_DOWNLOAD=ON` quand cela est possible.
 - Les tests d’intégration sont désactivés par défaut (`LIBEMBEDDING_INTEGRATION_TESTS=OFF`).
 - Sur Windows, les DLLs runtime sont copiées automatiquement à côté des exécutables de test.
+- les builds doivent  obligatoirement  faits dans /build et  jamais aileurs
+- Les artefacts de build doivent  être  nettoyés dès qu'ils n'int  plsu  d'intêret afin de laisser un  dossier de projet  propre
 
 ---
 

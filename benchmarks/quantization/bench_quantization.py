@@ -49,6 +49,7 @@ import json
 import os
 import platform
 import socket
+import statistics
 import subprocess
 import sys
 import time
@@ -902,6 +903,13 @@ def main() -> int:
         action="store_true",
         help=argparse.SUPPRESS,  # internal: measure one configuration
     )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=5,
+        help="Number of independent repetitions per configuration (default: 5). "
+        "Each repetition runs in its own process; the median is reported.",
+    )
     args = parser.parse_args()
 
     if args.worker:
@@ -946,16 +954,30 @@ def main() -> int:
             end=" ",
             flush=True,
         )
-        result = benchmark_configuration(variant, timed_texts, batch)
-        report.results.append(result)
-        if result.success:
+        samples = []
+        last = None
+        for _ in range(max(1, args.repeats)):
+            result = benchmark_configuration(variant, timed_texts, batch)
+            last = result
+            if result.success:
+                samples.append(result)
+        if samples:
+            med_tps = statistics.median(r.texts_per_second for r in samples)
+            med_lat = statistics.median(r.latency_ms_per_doc for r in samples)
+            med_peak = statistics.median(r.process_peak_mb for r in samples)
+            result = samples[0]
+            result.texts_per_second = med_tps
+            result.latency_ms_per_doc = med_lat
+            result.process_peak_mb = med_peak
+            report.results.append(result)
             print(
-                f"{result.texts_per_second:.1f} docs/s | "
+                f"{result.texts_per_second:.1f} docs/s (median of {len(samples)}) | "
                 f"{result.latency_ms_per_doc:.2f} ms/doc | "
                 f"{result.weights_mb:.1f} MB weights"
             )
         else:
-            print(f"FAILED: {result.error}")
+            report.results.append(last)
+            print(f"FAILED: {last.error}")
 
     report.skipped = skipped
     print("-" * 80)
