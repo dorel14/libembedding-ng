@@ -4,6 +4,7 @@ Auteur: David Orel
 Version: 1.11.0
 """
 
+import os
 import platform
 from pathlib import Path
 
@@ -16,6 +17,15 @@ ffi.cdef(_cdefs_path.read_text(encoding="utf-8"))
 
 
 def _find_library() -> str:
+    # An explicit path wins: in a source checkout the copy inside the package
+    # directory goes stale as soon as the tree is rebuilt, and a benchmark run
+    # against it silently measures old code.
+    override = os.environ.get("LIBEMBEDDING_LIBRARY")
+    if override:
+        if not Path(override).is_file():
+            raise OSError(f"LIBEMBEDDING_LIBRARY points to a missing file: {override}")
+        return str(Path(override).resolve())
+
     ext = {"Darwin": ".dylib", "Linux": ".so", "Windows": ".dll"}.get(
         platform.system(), ".so"
     )
@@ -78,7 +88,6 @@ def _runtime_dirs(lib_path: Path) -> list[Path]:
 
 if platform.system() == "Windows":
     import ctypes
-    import os
 
     _lib_path_str = _find_library()
     _lib_path = Path(_lib_path_str)
@@ -97,8 +106,6 @@ if platform.system() == "Windows":
             os.environ["PATH"] = str(_dir) + os.pathsep + os.environ.get("PATH", "")
     lib = ffi.dlopen(_lib_path_str)
 else:
-    import os
-
     _lib_path_str = _find_library()
     _lib_path = Path(_lib_path_str)
     if _lib_path.exists():
