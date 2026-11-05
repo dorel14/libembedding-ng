@@ -374,7 +374,9 @@ uses twelve built-in texts. `--batch`, `--threads`, `--warmups`,
 threads, untimed warmups, timed passes, pruning and maximum sequence length.
 `--max-batch-tokens` overrides the per-batch token budget (0 disables it);
 `--workers` sets the number of graphs (0 = auto) and `--threads` the total
-thread budget (0 = every logical CPU).
+thread budget (0 = every logical CPU). `--mode per-text` makes one `embed()`
+call per line instead of one per corpus pass, so the statistics are query
+latencies; feed it one query per line.
 
 For each timed pass, the stage table reports median, mean, minimum, empirical
 nearest-rank p95, maximum and standard deviation for tokenisation, input

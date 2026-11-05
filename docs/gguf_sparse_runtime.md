@@ -391,7 +391,9 @@ profileur utilise douze textes intégrés. `--batch`, `--threads`, `--warmups`,
 les passes non chronométrées, les passes mesurées, le pruning et la longueur
 maximale. `--max-batch-tokens` remplace le budget de tokens par lot (0 le
 désactive) ; `--workers` fixe le nombre de graphes (0 = auto) et `--threads` le
-budget total de threads (0 = tous les cœurs logiques).
+budget total de threads (0 = tous les cœurs logiques). `--mode per-text` fait
+un appel à `embed()` par ligne au lieu d'un par passe sur le corpus : les
+statistiques sont alors des latences de requête (une requête par ligne).
 
 Pour chaque passe mesurée, le tableau rapporte médiane, moyenne, minimum,
 p95 empirique nearest-rank, maximum et écart-type des étapes : tokenisation,

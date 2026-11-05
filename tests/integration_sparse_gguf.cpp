@@ -50,6 +50,7 @@ struct Options {
     int max_length = 0;
     int max_batch_tokens = -1; /* -1 keeps the session default */
     int workers = 0;           /* 0 = session default (threads / 2) */
+    bool per_text = false;     /* one embed() call per text: query latency */
 };
 
 struct Statistics {
@@ -211,7 +212,9 @@ void print_usage(const char* executable) {
         "  --top-k <n>           Terms retained after pooling; 0 keeps all (default: 50)\n"
         "  --max-length <n>      Token limit; 0 uses model limit (default: 0)\n"
         "  --max-batch-tokens <n> Cap on batch * seq_len; 0 disables it (default: session default)\n"
-        "  --workers <n>         Independent graphs sharing --threads; 0 = auto (default: 0)\n",
+        "  --workers <n>         Independent graphs sharing --threads; 0 = auto (default: 0)\n"
+        "  --mode <m>            corpus: one embed() per pass over the corpus (default);\n"
+        "                        per-text: one embed() per text, i.e. query latency\n",
         executable);
 }
 
@@ -240,6 +243,9 @@ bool parse_options(int argc, char** argv, Options& options, bool& show_help) {
         else if (arg == "--max-length" && parse_int(value, 0, parsed)) options.max_length = parsed;
         else if (arg == "--max-batch-tokens" && parse_int(value, 0, parsed)) options.max_batch_tokens = parsed;
         else if (arg == "--workers" && parse_int(value, 0, parsed)) options.workers = parsed;
+        else if (arg == "--mode" && (std::string(value) == "corpus" ||
+                                     std::string(value) == "per-text"))
+            options.per_text = std::string(value) == "per-text";
         else {
             std::fprintf(stderr, "Invalid option or value: %s %s\n",
                          arg.c_str(), value);
@@ -341,13 +347,14 @@ int main(int argc, char** argv) {
     const double load_ms = std::chrono::duration<double, std::milli>(
         Clock::now() - load_start).count();
 
-    std::vector<Sample> warmup_samples;
-    for (int i = 0; i < options.warmups; ++i) {
+    /* One sample = one embed() call: the whole corpus, or a single text in
+     * per-text mode, where the samples are query latencies. */
+    const auto run = [&](const std::vector<std::string>& call_texts) {
         session.reset_profile();
         const double cpu_start = cpu_time_ms();
         const auto wall_start = Clock::now();
         std::vector<lembed::detail::SparseResult> embeddings =
-            session.embed(texts, options.batch);
+            session.embed(call_texts, options.batch);
         const auto prune_start = Clock::now();
         size_t nnz = 0;
         for (auto& embedding : embeddings) {
@@ -363,34 +370,24 @@ int main(int argc, char** argv) {
         sample.process_cpu_ms = cpu_time_ms() - cpu_start;
         sample.nnz = nnz;
         sample.profile = session.profile();
-        warmup_samples.push_back(sample);
-    }
+        return sample;
+    };
+    const auto run_pass = [&](std::vector<Sample>& out) {
+        if (!options.per_text) {
+            out.push_back(run(texts));
+            return;
+        }
+        for (const std::string& text : texts) out.push_back(run({text}));
+    };
+    const size_t texts_per_sample = options.per_text ? 1 : texts.size();
+
+    std::vector<Sample> warmup_samples;
+    for (int i = 0; i < options.warmups; ++i) run_pass(warmup_samples);
 
     std::vector<Sample> samples;
-    samples.reserve((size_t)options.repetitions);
-    for (int i = 0; i < options.repetitions; ++i) {
-        session.reset_profile();
-        const double cpu_start = cpu_time_ms();
-        const auto wall_start = Clock::now();
-        std::vector<lembed::detail::SparseResult> embeddings =
-            session.embed(texts, options.batch);
-        const auto prune_start = Clock::now();
-        size_t nnz = 0;
-        for (auto& embedding : embeddings) {
-            lembed::detail::sparse_prune_and_sort(
-                embedding, options.top_k, 0.0f, LEMBED_SPARSE_FORMAT_DICT);
-            nnz += embedding.indices.size();
-        }
-        Sample sample;
-        sample.wall_ms = std::chrono::duration<double, std::milli>(
-            Clock::now() - wall_start).count();
-        sample.prune_ms = std::chrono::duration<double, std::milli>(
-            Clock::now() - prune_start).count();
-        sample.process_cpu_ms = cpu_time_ms() - cpu_start;
-        sample.nnz = nnz;
-        sample.profile = session.profile();
-        samples.push_back(sample);
-    }
+    samples.reserve((size_t)options.repetitions *
+                    (options.per_text ? texts.size() : 1));
+    for (int i = 0; i < options.repetitions; ++i) run_pass(samples);
 
     const std::vector<double> wall_values = [&samples]() {
         std::vector<double> values;
@@ -400,21 +397,22 @@ int main(int argc, char** argv) {
     }();
     const Statistics wall = statistics(wall_values);
     const double docs_per_sec = wall.median > 0.0
-        ? (double)texts.size() * 1000.0 / wall.median : 0.0;
+        ? (double)texts_per_sample * 1000.0 / wall.median : 0.0;
     const double avg_nnz = std::accumulate(
         samples.begin(), samples.end(), 0.0,
         [](double total, const Sample& sample) {
             return total + (double)sample.nnz;
-        }) / ((double)samples.size() * (double)texts.size());
+        }) / ((double)samples.size() * (double)texts_per_sample);
     const Sample& last_profile = samples.back();
 
     std::printf("=== Sparse GGUF runtime profiler ===\n");
     std::printf("Model: %s (%zu bytes, %.2f MiB)\n", options.model.c_str(),
                 model_file_size(options.model),
                 (double)model_file_size(options.model) / (1024.0 * 1024.0));
-    std::printf("Corpus: %zu texts; batch=%d; max_batch_tokens=%d; workers=%d; "
-                "threads=%d (total); top_k=%d\n",
-                texts.size(), options.batch, session.max_batch_tokens(),
+    std::printf("Corpus: %zu texts; mode=%s; batch=%d; max_batch_tokens=%d; "
+                "workers=%d; threads=%d (total); top_k=%d\n",
+                texts.size(), options.per_text ? "per-text" : "corpus",
+                options.batch, session.max_batch_tokens(),
                 session.workers(), session.total_threads(), options.top_k);
     std::printf("Warmups: %d; repetitions: %d; seq_len(max): %d; vocab: %d\n",
                 options.warmups, options.repetitions,
