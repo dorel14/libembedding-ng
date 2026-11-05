@@ -50,6 +50,7 @@ HEADER_GLOBS = (
     "include/libembedding/*.h",
     "include/libembedding/*.hpp",
     "include/libembedding/detail/*.hpp",
+    "include/libembedding/detail/gguf/*.hpp",
     "include/libembedding/cpp/*.hpp",
 )
 PYTHON_GLOBS = ("python/src/libembedding/*.py",)

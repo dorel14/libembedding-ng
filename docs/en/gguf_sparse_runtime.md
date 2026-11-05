@@ -1,7 +1,7 @@
 # Sparse GGUF runtime
 
 Version: 1.11.0
-Status: implemented, covered by `tests/test_sparse_gguf.cpp` (67 assertions)
+Status: implemented, covered by `tests/test_sparse_gguf.cpp` (96 assertions)
 and `tests/test_sparse_gguf_vs_onnx.cpp` (integration, network required)
 
 Describes **how a sparse GGUF file is executed**. The
@@ -93,13 +93,13 @@ A missing required tensor is fatal: `create_tensor` throws
 `position_embd.weight` match.
 
 Consequently `llama.cpp = n/a` in
-[`benchmarks/sparse/LE-9.6-results.md`](https://github.com/dorel14/libembedding-ng/blob/dev/benchmarks/sparse/LE-9.6-results.md)
+[`LE-9.6-results.md`](../archive/LE-9.6-results.md) (archived)
 is the *correct* result, not a gap to close.
 
 The runtime is therefore ours: a ggml graph on the already-vendored CPU
 backend, reading tensors through `gguf_init_from_file` and computing in
 `ggml_mul_mat`. That is the conclusion of
-[`LE-9.4-validation.md` section 5.3](https://github.com/dorel14/libembedding-ng/blob/dev/benchmarks/sparse/LE-9.4-validation.md).
+[`LE-9.4-validation.md` section 5.3](../archive/LE-9.4-validation.md) (archived).
 
 ---
 
@@ -115,6 +115,28 @@ text
   -> top_k / min_weight / storage_format   sparse_prune_and_sort()
   -> {indices, values}
 ```
+
+Texts in each call are tokenized once, sorted by descending length, then split
+into batches bounded two ways: at most `batch_size` texts, and at most 512
+padded token columns (`batch × seq_len`, see
+`detail/gguf/sparse_batching.hpp`). Results are restored to input order. The
+second bound is the one that caps the cost: the graph and the
+`[vocab, batch × seq_len]` F32 logits grow with the padded width, not with the
+number of texts.
+On `benchmarks/corpus.txt` (392 texts), batch 16 and 4 threads, one pass
+processed 8,256 tokens before bucketing (6,830 real + 1,426 padded, 17.3%
+padding) and 6,928 after (6,830 real + 98 padded, 1.4%). This reduces token
+work by 16.1%. Graph builds per pass fell from 20 to 9. Observed median latency
+went from 27.76 s to 21.11 s, but the before/after repetitions were not paired;
+this throughput result is indicative and needs confirmation with interleaved
+runs.
+Changing graph shapes can also change floating-point rounding slightly. On
+these 392 texts, before/after bucketing at batch 16, full vectors had a maximum
+weight delta of 0.00168 and a minimum cosine of 0.99999984; 12 texts differed
+by one near-zero-score term. With `top_k = 50`, two texts selected a different
+term at the ranking boundary (minimum cosine 0.99759). Bucketing preserves
+output order and typical results remain very close, but exact term identity is
+not guaranteed for these near-ties.
 
 ### 3.1 Encoder - the post-LN order is not negotiable
 
@@ -165,8 +187,24 @@ past `ggml_nbytes` aborts the process).
 
 Every token of a batch forms **a single row**. The [T, T] attention mask is
 block-diagonal by document and -infinity on padding; that mask is what separates
-the documents, not a second graph. A batch of two and a batch of five therefore
-produce the same vector - which `test_sparse_gguf.cpp` checks.
+the documents, not a second graph. The synthetic fixed-weight fixture in
+`test_sparse_gguf.cpp` checks exact equality between batch 1 and batches 2 to 5;
+this does not guarantee bitwise equality for a real quantized model, because GEMM
+shapes change with batch size and padding.
+
+On `splade-pp-en-v1-q8_0.gguf`, compared with embedding each of the 392 texts in
+`benchmarks/corpus.txt` individually (4 threads, batch 16), the full vectors
+have a minimum cosine of 0.99976 without sorting and 0.99986 with sorting. The
+minimum cosine over the top 50 terms alone is 0.99807 and 0.99877, respectively.
+The set of 50 terms differs from the individual reference for 52 texts without
+sorting, versus 9 after length sorting. Sorting therefore reduces the measured
+drift, but does not guarantee identical selected terms.
+
+For example, for the corpus's second text, term 2156 changes from 0.16757 at
+batch 1 to 0.14872 at sorted batch 16, while term 2235 changes from 0.16218 to
+0.16151; the top-50 selection changes. Ranking scores on a query set with
+relevance labels have not been measured. Applications that depend on exact
+top-term selection should validate their own corpus and batch configuration.
 
 ### 3.4 Tokenizer: shared, not duplicated
 
@@ -267,5 +305,115 @@ criterion was fidelity.
   HuggingFace in the same way.
 - **No GPU**: ggml CPU backend only. `provider` is reported as
   `LEMBED_PROVIDER_CPU` and ignored at construction.
-- **No graph cache**: the graph is rebuilt on every call. On a single-text
-  streaming workload that would show; it is not the intended usage profile.
+- **Single-shape graph cache**: the graph and its allocation are reused while
+  sequence length and batch size stay unchanged. A different shape replaces
+  the cache and triggers a rebuild, so variable-length batches can still pay
+  this cost.
+- **Full projection and logits**: `top_k` limits the sparse output, not the MLM
+  projection over the vocabulary. The graph still produces logits for every
+  token and transfers them to the host before pooling.
+- **Batch size**: the GGUF default is 16 texts per batch and remains
+  configurable. On a 392-text corpus measured on an i7-1065G7, batch 2 with
+  4 threads reached 18.0 documents/s, versus 16.7 at batch 16 and 14.2 at
+  batch 64 in an initial sweep. An alternating 16/2/2/16 repeat measured
+  averages of 16.2 and 16.3 documents/s, respectively: comparable throughput
+  within observed variation. Batch 2 used about 252 MiB peak RSS and 5.3 %
+  padding, versus 334 MiB and 17.3 % for batch 16; batch 16 reduces the number
+  of batches and showed slightly lower variation. It remains the default as a
+  compromise, not as the minimum-memory setting or a universal optimum. Results
+  depend on CPU, corpus, and sequence lengths.
+- **Per-batch token budget**: at most 512 padded columns per graph, whatever
+  `batch_size` is. Measured on an i7-1065G7, 4 threads, with the
+  `integration_sparse_gguf` profiler:
+  - 256 short texts (`customers_sample.txt`, ~13 tokens), batch 256: no budget
+    12.6 documents/s and 1,642 MiB peak RSS; budget 128 / 256 / 512 / 1024:
+    25.5 / 26.1 / 26.4 / 24.0 documents/s, 276 / 325 / 415 / 596 MiB.
+  - 96 Reuters stories (`reuters_clean.txt`, long), batch 16: no budget
+    1.51 documents/s and 2,208 MiB; budget 512 / 1024 / 2048: 1.83 / 1.61 /
+    1.63 documents/s, 358 / 481 / 728 MiB.
+
+  512 gives the best throughput on both profiles and bounds memory.
+
+  The same budget (`kSparseMaxBatchTokens`, `detail/sparse_batching.hpp`)
+  applies to the sparse ONNX path, which had neither length sorting nor a cap:
+  its default batch of 256 asked ONNX Runtime for 16 GB on 512-token documents
+  (`bad allocation`). ONNX sweep, batch 256: 128 SciFact abstracts 1.51 / 1.52 /
+  1.50 / 1.49 documents/s and 842 / 839 / 1,084 / 1,478 MiB for 256 / 512 /
+  1024 / 2048 tokens; 256 short texts 38.6 / 41.3 / 37.9 / 33.2 documents/s,
+  versus 22.6 before the fix.
+- **Workers**: a GGUF session runs several independent graphs (`workers`) that
+  share one read-only copy of the weights and split the batches of a call. One
+  graph stops gaining from extra threads (ggml synchronises every thread after
+  each of its ~460 operations); independent graphs do not wait for each other.
+  `num_threads` is the total budget (0 = every logical CPU) and `workers` the
+  number of graphs (0 = `num_threads / 2`, one per physical core on a
+  hyper-threaded CPU). A call that is a single batch, typically a query, runs
+  on one worker with the whole budget. Measured on an i7-1065G7 (profiler,
+  interleaved): 256 short texts 26.1 / 25.1 documents/s at 1 × 4, 23.5 at
+  1 × 8, 34.6 / 31.4 auto (4 × 2), RSS 279 → 320 MiB; 64 SciFact abstracts
+  0.92 / 0.93 at 1 × 4, 0.98 at 1 × 8, 1.24 / 1.22 auto, RSS 298 → 491 MiB.
+  Logits are read in place from the graph buffer, with no per-worker copy.
+
+## 7. GGUF profiler
+
+The manual `integration_sparse_gguf` profiler measures the runtime with a local
+GGUF model. Its opt-in instrumentation is compiled into this executable only;
+the normal DLL and public API are unchanged. Build it with tests enabled:
+
+```powershell
+cmake --build build --config Release --target integration_sparse_gguf
+build\tests\Release\integration_sparse_gguf.exe `
+  --model "$HOME\.cache\libembedding\models--cstr-splade-pp-en-v1-GGUF\splade-pp-en-v1-q8_0.gguf" `
+  --corpus benchmarks\corpus.txt `
+  --batch 4 --threads 4 --warmups 2 --repetitions 30 --top-k 50
+```
+
+`--corpus` expects one non-empty document per line. Without it, the profiler
+uses twelve built-in texts. `--batch`, `--threads`, `--warmups`,
+`--repetitions`, `--top-k` and `--max-length` configure batch size, ggml
+threads, untimed warmups, timed passes, pruning and maximum sequence length.
+`--max-batch-tokens` overrides the per-batch token budget (0 disables it);
+`--workers` sets the number of graphs (0 = auto) and `--threads` the total
+thread budget (0 = every logical CPU).
+
+For each timed pass, the stage table reports median, mean, minimum, empirical
+nearest-rank p95, maximum and standard deviation for tokenisation, input
+packing, graph construction/allocation, attention mask, input upload, ggml
+execution, logits download, pooling, pruning/sorting and unattributed wrapper
+time. The summary also reports document throughput, average nnz, current/peak
+RSS, process CPU/wall time, graph and padding counters, graph shape/node count,
+and an inventory of ggml operations.
+
+Stage durations are aggregated across every batch in a pass; they are not
+per-document latencies or per-operator timings. `GraphExec` times
+`ggml_backend_graph_compute`: it can include CPU planning and workspace
+preparation/allocation, and does not isolate individual kernel times. The final
+operation inventory counts nodes but does not assign time to them. Use at least
+30 repetitions for a more informative tail estimate; with few repetitions, p95
+can equal the maximum. The first warmup builds the graph and reports that cost
+separately from timed passes.
+
+### Q8_0 GEMM microbenchmark
+
+The `gguf_gemm_microbench` target isolates ggml matrix multiplications using
+synthetic Q8_0-quantized weights and F32 activations. It measures the BERT
+shapes `768x768`, `3072x768`, `768x3072` and the vocabulary projection
+`30522x768`, for `N=32, 64, 80, 128, 256, 512`, at 1, 2 and 4 threads. Its
+persistent thread pools are paused outside their measurements so an inactive
+pool does not consume CPU time.
+
+```powershell
+cmake -S . -B build -DLIBEMBEDDING_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --target gguf_gemm_microbench
+build\benchmarks\Release\gguf_gemm_microbench.exe `
+  --warmups 2 --repetitions 5
+```
+
+`--shape-index 0..3` and `--n 32|64|80|128|256|512` restrict a run to one
+shape or column count. `--threads 1|2|4` selects the worker count;
+`--cpumask <mask>` applies a strict affinity mask to the ggml pool, for example
+`--threads 4 --cpumask 0x55`. The latter is for comparing CPU placements in
+this microbenchmark; it does not change libembedding runtime affinity. GFLOPS
+uses `2*M*K*N` operations per product. This benchmark compares shapes and
+thread scaling; its synthetic weights, lack of attention and reduced graph do
+not reproduce full inference or its real weights.
