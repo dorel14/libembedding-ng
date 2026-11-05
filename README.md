@@ -292,6 +292,23 @@ add_subdirectory(path/to/libembedding)
 target_link_libraries(your_app PRIVATE libembedding::libembedding)
 ```
 
+To install the CMake package and consume it from another project:
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Release
+cmake --install build --config Release --prefix C:/path/to/libembedding-install
+```
+
+```cmake
+find_package(libembedding CONFIG REQUIRED)
+target_link_libraries(your_app PRIVATE libembedding::libembedding)
+```
+
+On Linux/macOS, the installed package still uses the header-only implementation:
+define `LIBEMBEDDING_IMPLEMENTATION` in exactly one `.cpp` file. ONNX Runtime
+must be discoverable by CMake, for example through `ONNXRUNTIME_ROOT`.
+
 ### Step 2: Implementation File
 
 Create **exactly one** `.cpp` file in your project that defines the implementation:
@@ -833,7 +850,7 @@ vocabulary; a dense GGUF is refused with a reason rather than accepted.
 Measured against the sparse ONNX model on the same texts, cosine similarity is
 0.9998 (worst case over 12 texts), i.e. Q8_0 quantisation noise rather than an
 implementation divergence. See `docs/gguf_sparse_runtime.md` and
-`benchmarks/sparse/LE-9.6-results.md`.
+`docs/archive/LE-9.6-results.md`.
 
 ---
 

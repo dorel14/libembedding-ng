@@ -6,6 +6,8 @@ project(libembedding
     DESCRIPTION "C/C++ embedding library using ONNX Runtime (header-only INTERFACE on Linux/macOS, shared library/DLL on Windows)"
     LANGUAGES C CXX
 )
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -186,8 +188,21 @@ set(GGML_OPENCL OFF CACHE BOOL "" FORCE)         # ggml-opencl/ (kernels/embed_k
 set(GGML_WEBGPU OFF CACHE BOOL "" FORCE)         # ggml-webgpu/ (wgsl-shaders/embed_wgsl.py)
 set(GGML_VIRTGPU OFF CACHE BOOL "" FORCE)        # ggml-virtgpu/
 
+# llama.cpp's upstream install rules assume the unpruned source tree layout.
+# The parent project installs the vendored targets and headers explicitly.
+set(CMAKE_SKIP_INSTALL_RULES TRUE)
 add_subdirectory(${LLAMA_CPP_DIR} ${CMAKE_BINARY_DIR}/llama.cpp-build EXCLUDE_FROM_ALL)
+unset(CMAKE_SKIP_INSTALL_RULES)
+set_target_properties(llama ggml PROPERTIES PUBLIC_HEADER "")
 
+set_target_properties(llama PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+set_target_properties(ggml ggml-base ggml-cpu PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${LLAMA_CPP_DIR}/ggml/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
 
 # =========================================================================
 # Main library target (Forced as SHARED DLL for Windows/Python cffi)
@@ -256,7 +271,10 @@ if(WIN32)
     # car elle va lier ONNXRuntime et CURL
     set_target_properties(libembedding PROPERTIES LINKER_LANGUAGE CXX)
 
-    target_link_libraries(libembedding PUBLIC llama ggml)
+    target_link_libraries(libembedding PRIVATE
+        $<BUILD_INTERFACE:llama>
+        $<BUILD_INTERFACE:ggml>
+    )
     target_include_directories(libembedding PUBLIC
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/ggml/include>
@@ -264,7 +282,12 @@ if(WIN32)
 else()
     # Header-only INTERFACE pour Linux / macOS
     add_library(libembedding INTERFACE)
-    target_link_libraries(libembedding INTERFACE llama ggml)
+    target_link_libraries(libembedding INTERFACE
+        $<BUILD_INTERFACE:llama>
+        $<BUILD_INTERFACE:ggml>
+        $<INSTALL_INTERFACE:llama>
+        $<INSTALL_INTERFACE:ggml>
+    )
     target_include_directories(libembedding INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>
@@ -315,20 +338,20 @@ if(WIN32)
     target_include_directories(libembedding PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    target_link_libraries(libembedding PUBLIC
+    target_link_libraries(libembedding PRIVATE
         ONNXRuntime::ONNXRuntime
         cjson
     )
 
 if(NOT LIBEMBEDDING_NO_IMAGE)
-        target_link_libraries(libembedding PUBLIC libembedding_stb)
+        target_link_libraries(libembedding PRIVATE libembedding_stb)
     endif()
 
     if(NOT LIBEMBEDDING_NO_DOWNLOAD)
-        target_link_libraries(libembedding PUBLIC ${CURL_LIBRARY})
+        target_link_libraries(libembedding PRIVATE ${CURL_LIBRARY})
     else()
         target_compile_definitions(libembedding PUBLIC LIBEMBEDDING_NO_DOWNLOAD)
     endif()
@@ -341,7 +364,7 @@ else()
     target_include_directories(libembedding INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     target_link_libraries(libembedding INTERFACE
@@ -511,10 +534,17 @@ endif()
 # =========================================================================
 # Install
 # =========================================================================
-include(GNUInstallDirs)
-
 install(DIRECTORY include/libembedding
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(DIRECTORY "${LLAMA_CPP_DIR}/include/"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
+)
+install(DIRECTORY "${LLAMA_CPP_DIR}/ggml/include/"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
 )
 
 install(DIRECTORY third_party/
@@ -522,13 +552,56 @@ install(DIRECTORY third_party/
     FILES_MATCHING PATTERN "*.h"
 )
 
-set(_install_targets libembedding cjson)
+set(_install_targets libembedding cjson llama ggml ggml-base ggml-cpu)
 if(NOT LIBEMBEDDING_NO_IMAGE AND TARGET libembedding_stb)
     list(APPEND _install_targets libembedding_stb)
 endif()
 install(TARGETS ${_install_targets}
     EXPORT libembedding-targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(EXPORT libembedding-targets
+    NAMESPACE libembedding::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libembedding
 )
 
-
-
+if(WIN32 OR LIBEMBEDDING_NO_DOWNLOAD)
+    set(LIBEMBEDDING_PACKAGE_REQUIRES_CURL OFF)
+else()
+    set(LIBEMBEDDING_PACKAGE_REQUIRES_CURL ON)
+endif()
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/libembeddingConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libembedding"
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfigVersion.cmake"
+    VERSION ${LIBEMBEDDING_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libembedding"
+)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libembedding/modules"
+)
+if(WIN32)
+    foreach(_runtime_dll onnxruntime.dll onnxruntime_providers_shared.dll)
+        if(EXISTS "${_LEMBED_ONNX_DIR}/${_runtime_dll}")
+            install(FILES "${_LEMBED_ONNX_DIR}/${_runtime_dll}"
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+            )
+        endif()
+    endforeach()
+    if(LIBEMBEDDING_CURL_RUNTIME_DLL)
+        install(FILES "${LIBEMBEDDING_CURL_RUNTIME_DLL}"
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+endif()
