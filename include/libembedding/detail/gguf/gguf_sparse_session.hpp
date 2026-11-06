@@ -48,7 +48,6 @@
 #include <ggml.h>
 #include <ggml-alloc.h>
 #include <ggml-backend.h>
-#include <ggml-cpu.h>
 
 #include <algorithm>
 #include <atomic>
@@ -69,6 +68,7 @@
 #include <map>
 #endif
 
+#include "../ggml_cpu_backend.hpp"
 #include "../sparse_batching.hpp"
 #include "../sparse_postprocess.hpp"
 #include "../tokenizer_impl.hpp"
@@ -263,9 +263,11 @@ public:
         std::vector<std::unique_ptr<Worker>> pool;
         for (int i = 0; i < workers; i++) {
             std::unique_ptr<Worker> w(new Worker());
-            w->backend = ggml_backend_cpu_init();
+            w->backend = lembed::detail::ggml_cpu_backend_init();
             if (!w->backend) {
-                err = "cannot initialise the ggml CPU backend";
+                err = lembed::detail::ggml_cpu_device()
+                          ? "cannot initialise the ggml CPU backend"
+                          : lembed::detail::ggml_cpu_backend_missing_message();
                 return false;
             }
             pool.push_back(std::move(w));
@@ -337,7 +339,7 @@ public:
         const int threads = (active <= 1) ? total_threads_
                                           : std::max(1, total_threads_ / (int)active);
         for (size_t i = 0; i < active; i++) {
-            ggml_backend_cpu_set_n_threads(workers_[i]->backend, threads);
+            lembed::detail::ggml_cpu_backend_set_n_threads(workers_[i]->backend, threads);
         }
 
         std::atomic<size_t> next{0};

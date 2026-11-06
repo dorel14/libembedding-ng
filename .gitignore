@@ -15,7 +15,9 @@ Makefile
 .vscode/
 .venv/
 .kilo/
+.claude/
 .idea/
+graphify-out/
 *.swp
 *.swo
 *~

@@ -14,13 +14,22 @@ add_executable(fair_compare fair_compare.cpp)
 target_link_libraries(fair_compare PRIVATE libembedding)
 target_compile_definitions(fair_compare PRIVATE LIBEMBEDDING_NO_DOWNLOAD)
 
-add_executable(gguf_gemm_microbench gguf_gemm_microbench.cpp)
-target_link_libraries(gguf_gemm_microbench PRIVATE ggml)
-if(MSVC)
-    target_compile_options(gguf_gemm_microbench PRIVATE
-        $<$<CONFIG:Release>:/O2>
-        $<$<CONFIG:Release>:/arch:AVX2>
-    )
+# The microbenchmark drives ggml-cpu directly (thread pools, graph plans) to
+# time one kernel build in isolation. With CPU dispatch there is no ggml-cpu to
+# link against -- the variants are loadable modules -- so it needs
+# -DLIBEMBEDDING_CPU_DISPATCH=OFF, which also pins the variant it measures to
+# the build machine.
+if(LIBEMBEDDING_CPU_DISPATCH)
+    message(STATUS "gguf_gemm_microbench skipped: it needs -DLIBEMBEDDING_CPU_DISPATCH=OFF")
+else()
+    add_executable(gguf_gemm_microbench gguf_gemm_microbench.cpp)
+    target_link_libraries(gguf_gemm_microbench PRIVATE ggml)
+    if(MSVC)
+        target_compile_options(gguf_gemm_microbench PRIVATE
+            $<$<CONFIG:Release>:/O2>
+            $<$<CONFIG:Release>:/arch:AVX2>
+        )
+    endif()
 endif()
 
 if(WIN32)

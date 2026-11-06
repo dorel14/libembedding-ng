@@ -38,13 +38,13 @@
 #include <ggml.h>
 #include <ggml-alloc.h>
 #include <ggml-backend.h>
-#include <ggml-cpu.h>
 #include <gguf.h>
 
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include "../ggml_cpu_backend.hpp"
 #include "gguf_probe.hpp"
 
 namespace lembed {
@@ -218,8 +218,12 @@ public:
             dst.push_back(copy);
         }
 
-        buf_ = ggml_backend_alloc_ctx_tensors_from_buft(
-            ctx_, ggml_backend_cpu_buffer_type());
+        ggml_backend_buffer_type_t buft = buffer_type();
+        if (!buft) {
+            err = lembed::detail::ggml_cpu_backend_missing_message();
+            return false;
+        }
+        buf_ = ggml_backend_alloc_ctx_tensors_from_buft(ctx_, buft);
         if (!buf_) {
             err = "cannot allocate the weight buffer";
             return false;
@@ -268,7 +272,10 @@ public:
      * BERT vocabulary and 0 on an XLM-R one. */
     const std::vector<int32_t>& special_ids() const { return special_ids_; }
 
-    ggml_backend_buffer_type_t buffer_type() const { return ggml_backend_cpu_buffer_type(); }
+    /* The CPU device's buffer type, through the backend registry so the same
+     * code works with a dynamically loaded CPU variant (ggml_cpu_backend.hpp).
+     * nullptr when no CPU backend could be loaded. */
+    ggml_backend_buffer_type_t buffer_type() const { return lembed::detail::ggml_cpu_buffer_type(); }
 
 private:
     /* Tries each known spelling of a scalar field, first hit wins. Converters

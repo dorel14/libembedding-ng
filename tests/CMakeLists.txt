@@ -74,7 +74,9 @@ add_test(NAME test_gguf_inspect COMMAND test_gguf_inspect)
 # models whose weights come from a fixed seed. Hermetic, and it runs in
 # milliseconds.
 add_executable(test_sparse_gguf test_sparse_gguf.cpp)
-target_link_libraries(test_sparse_gguf PRIVATE libembedding)
+# ggml directly as well: the CPU backend test calls the registry helpers of
+# detail/ggml_cpu_backend.hpp, which the DLL keeps private.
+target_link_libraries(test_sparse_gguf PRIVATE libembedding ggml)
 add_test(NAME test_sparse_gguf COMMAND test_sparse_gguf)
 
 # End-to-end GGUF profiler. It compiles the internal session with opt-in

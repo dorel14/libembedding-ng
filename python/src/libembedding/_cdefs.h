@@ -24,6 +24,7 @@ const char* lembed_last_error(void);
 const char* lembed_version(void);
 const char* lembed_onnxruntime_version(void);
 const char* lembed_execution_provider_name(int provider);
+const char* lembed_ggml_cpu_features(void);
 
 /* ═══ Enums ════════════════════════════════════════════════════════ */
 

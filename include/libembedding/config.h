@@ -71,6 +71,18 @@ const char* lembed_onnxruntime_version(void);
  * is not a lembed_execution_provider_t. Benchmarks record it so a result cannot
  * be read as a CPU number when a GPU provider served it. */
 const char* lembed_execution_provider_name(int provider);
+
+/* Instruction-set features the ggml CPU backend serving GGUF models was built
+ * with, space-separated, e.g. "SSE3 SSSE3 AVX AVX2 F16C FMA BMI2 AVX512
+ * AVX512_VNNI LLAMAFILE REPACK".
+ *
+ * With CPU dispatch (LIBEMBEDDING_CPU_DISPATCH, the default build) ggml loads
+ * the variant that best matches this CPU, and this names it: benchmarks and bug
+ * reports must record it, a GGUF result on AVX2 kernels is not comparable with
+ * one on AVX-512 VNNI kernels. Loads the backend on first call. Returns a static
+ * string; never NULL, "" when no CPU backend could be loaded. Implemented where
+ * ggml is available, like lembed_onnxruntime_version(). */
+const char* lembed_ggml_cpu_features(void);
 #ifdef __cplusplus
 }
 #endif

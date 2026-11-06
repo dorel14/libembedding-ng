@@ -29,6 +29,7 @@
 #define LIBEMBEDDING_IMPLEMENTATION
 #endif
 #include <libembedding/libembedding.h>
+#include <libembedding/detail/ggml_cpu_backend.hpp>
 #include <libembedding/detail/sparse_batching.hpp>
 
 #include <algorithm>
@@ -1105,7 +1106,29 @@ static void test_inspect_agrees_with_runtime(void) {
     if (ctx) lembed_sparse_text_embedding_free(ctx);
 }
 
+/* A CPU backend is reachable through the registry, and the public accessor
+ * names what was loaded. With CPU dispatch this is the proof that a ggml-cpu-*
+ * variant was found next to the binary and scored; every other test here would
+ * fail with "no ggml CPU backend could be loaded" otherwise, but less legibly. */
+static void test_cpu_backend_is_loaded(void) {
+    CHECK(lembed::detail::ggml_cpu_device() != nullptr, "a ggml CPU device is registered");
+    CHECK(lembed::detail::ggml_cpu_buffer_type() != nullptr, "the CPU buffer type resolves");
+
+    ggml_backend_t backend = lembed::detail::ggml_cpu_backend_init();
+    CHECK(backend != nullptr, "a CPU backend instance can be created");
+    CHECK(lembed::detail::ggml_cpu_backend_set_n_threads(backend, 2),
+          "the thread-count setter is exported by the loaded backend");
+    if (backend) ggml_backend_free(backend);
+
+    const char* features = lembed_ggml_cpu_features();
+    CHECK(features != nullptr, "lembed_ggml_cpu_features() never returns NULL");
+    CHECK(features && features[0] != '\0', "the loaded CPU backend reports its features");
+    CHECK(features == lembed_ggml_cpu_features(), "the features string is computed once");
+    if (features) printf("ggml CPU features: %s\n", features);
+}
+
 int main(void) {
+    test_cpu_backend_is_loaded();
     test_output_shape();
     test_top_k_and_min_weight();
     test_storage_format();

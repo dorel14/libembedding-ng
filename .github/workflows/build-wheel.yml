@@ -156,6 +156,22 @@ jobs:
 
           cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
 
+          # ggml CPU variants (CPU dispatch, default ON on Linux). They are
+          # dlopen()ed, never linked, so auditwheel/delocate cannot find them
+          # by following libembedding's dependencies: they must be in the
+          # package already, where auditwheel then repairs them like any other
+          # shared object. macOS builds natively (dispatch OFF) and has none.
+          shopt -s nullglob
+          cpu_variants=(build/bin/libggml-cpu-*${ext})
+          if [ "${{ runner.os }}" = "Linux" ] && [ ${#cpu_variants[@]} -eq 0 ]; then
+            echo "ERROR: no libggml-cpu-*${ext} under build/bin"
+            exit 1
+          fi
+          for lib in "${cpu_variants[@]}"; do
+            cp "$lib" python/src/libembedding/
+            echo "Vendored ggml CPU variant: $(basename "$lib")"
+          done
+
           ls -la python/src/libembedding/
 
       - name: Copy shared library and onnxruntime (Windows)
@@ -212,7 +228,7 @@ jobs:
           }
 
           # Vendor llama.cpp runtime DLLs required by libembedding.dll
-          $llamaDlls = @("llama.dll", "ggml.dll", "ggml-cpu.dll", "ggml-base.dll")
+          $llamaDlls = @("llama.dll", "ggml.dll", "ggml-base.dll")
           foreach ($dll in $llamaDlls) {
             $src = Join-Path "build/bin/Release" $dll
             if (Test-Path $src) {
@@ -221,6 +237,20 @@ jobs:
             } else {
               Write-Host "WARNING: $dll not found under build/bin/Release"
             }
+          }
+
+          # ggml CPU backend: one DLL per instruction-set level (CPU dispatch,
+          # LIBEMBEDDING_CPU_DISPATCH=ON). ggml loads the best one for the
+          # user's CPU from next to libembedding.dll; without any of them no
+          # GGUF model can run, so their absence fails the build.
+          $cpuDlls = Get-ChildItem "build/bin/Release" -Filter "ggml-cpu-*.dll"
+          if (-not $cpuDlls) {
+            Write-Host "ERROR: no ggml-cpu-*.dll under build/bin/Release"
+            exit 1
+          }
+          foreach ($dll in $cpuDlls) {
+            Copy-Item $dll.FullName python/src/libembedding/ -Force
+            Write-Host "Vendored ggml CPU variant: $($dll.Name)"
           }
 
           Get-ChildItem python/src/libembedding/

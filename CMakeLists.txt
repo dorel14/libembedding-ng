@@ -29,6 +29,16 @@ option(LIBEMBEDDING_BUILD_EXAMPLES "Build examples"                           ON
 option(LIBEMBEDDING_BUILD_BENCHMARKS "Build benchmarks"                       OFF)
 option(LIBEMBEDDING_BUILD_SHARED    "Build shared library for bindings"       OFF)
 option(LIBEMBEDDING_CURL_STATIC    "libcurl is linked statically or its runtime is managed by the caller" OFF)
+# One ggml CPU library per instruction-set level, the best one picked at run
+# time (GGML_BACKEND_DL + GGML_CPU_ALL_VARIANTS). OFF builds a single ggml-cpu
+# for the build machine (GGML_NATIVE), which must not be shipped. macOS keeps
+# the native build until the Apple Silicon variants are validated (P2.6).
+if(APPLE)
+    set(_lembed_cpu_dispatch_default OFF)
+else()
+    set(_lembed_cpu_dispatch_default ON)
+endif()
+option(LIBEMBEDDING_CPU_DISPATCH "Build every ggml CPU variant and select one at run time" ${_lembed_cpu_dispatch_default})
 
 # =========================================================================
 # Dependencies
@@ -188,6 +198,20 @@ set(GGML_OPENCL OFF CACHE BOOL "" FORCE)         # ggml-opencl/ (kernels/embed_k
 set(GGML_WEBGPU OFF CACHE BOOL "" FORCE)         # ggml-webgpu/ (wgsl-shaders/embed_wgsl.py)
 set(GGML_VIRTGPU OFF CACHE BOOL "" FORCE)        # ggml-virtgpu/
 
+# CPU instruction set. Without dispatch ggml compiles for the build machine
+# (GGML_NATIVE: /arch:AVX512 on an AVX-512 runner), and the library then dies
+# with an illegal instruction on any CPU that lacks it. With dispatch ggml
+# builds every variant as a loadable module; GGML_NATIVE is incompatible with
+# that mode (ggml-cpu/CMakeLists.txt), and BUILD_SHARED_LIBS is required.
+if(LIBEMBEDDING_CPU_DISPATCH)
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
+else()
+    set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+endif()
+
 # llama.cpp's upstream install rules assume the unpruned source tree layout.
 # The parent project installs the vendored targets and headers explicitly.
 set(CMAKE_SKIP_INSTALL_RULES TRUE)
@@ -199,7 +223,30 @@ set_target_properties(llama PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES
         "$<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
-set_target_properties(ggml ggml-base ggml-cpu PROPERTIES
+# The ggml CPU libraries actually built: ggml-cpu alone, or one
+# ggml-cpu-<variant> module per instruction-set level with CPU dispatch. Read
+# from the build system rather than listed here, since the variant set depends
+# on the compiler (MSVC builds fewer x86 variants than GCC/Clang).
+set(LIBEMBEDDING_GGML_CPU_TARGETS "")
+foreach(_dir "${LLAMA_CPP_DIR}/ggml/src" "${LLAMA_CPP_DIR}/ggml/src/ggml-cpu")
+    get_property(_dir_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_t IN LISTS _dir_targets)
+        if(_t MATCHES "^ggml-cpu(-[A-Za-z0-9_.]+)?$")
+            get_target_property(_t_type ${_t} TYPE)
+            if(_t_type STREQUAL "SHARED_LIBRARY" OR _t_type STREQUAL "MODULE_LIBRARY"
+               OR _t_type STREQUAL "STATIC_LIBRARY")
+                list(APPEND LIBEMBEDDING_GGML_CPU_TARGETS ${_t})
+            endif()
+        endif()
+    endforeach()
+endforeach()
+list(REMOVE_DUPLICATES LIBEMBEDDING_GGML_CPU_TARGETS)
+if(NOT LIBEMBEDDING_GGML_CPU_TARGETS)
+    message(FATAL_ERROR "no ggml CPU backend target was found under ${LLAMA_CPP_DIR}/ggml/src")
+endif()
+message(STATUS "libembedding: CPU dispatch=${LIBEMBEDDING_CPU_DISPATCH}, ggml CPU targets: ${LIBEMBEDDING_GGML_CPU_TARGETS}")
+
+set_target_properties(ggml ggml-base ${LIBEMBEDDING_GGML_CPU_TARGETS} PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES
         "$<BUILD_INTERFACE:${LLAMA_CPP_DIR}/ggml/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
@@ -409,8 +456,9 @@ if(WIN32)
             list(APPEND _dlls "${LIBEMBEDDING_CURL_RUNTIME_DLL}")
         endif()
 
-        # llama.cpp runtime DLLs
-        foreach(_target llama ggml ggml-cpu ggml-base)
+        # llama.cpp runtime DLLs. With CPU dispatch the ggml-cpu-* variants
+        # must sit next to libembedding.dll: that is where it looks for them.
+        foreach(_target llama ggml ggml-base ${LIBEMBEDDING_GGML_CPU_TARGETS})
             if(TARGET ${_target})
                 list(APPEND _dlls "$<TARGET_FILE:${_target}>")
             endif()
@@ -490,6 +538,15 @@ if(NOT WIN32)
             endif()
         endif()
 
+        # CPU dispatch: the header-only build runs inside the executable, so
+        # ggml looks for its ggml-cpu-* modules next to it.
+        if(LIBEMBEDDING_CPU_DISPATCH)
+            foreach(_cpu IN LISTS LIBEMBEDDING_GGML_CPU_TARGETS)
+                list(APPEND _to_copy "$<TARGET_FILE:${_cpu}>")
+                add_dependencies(${target_name} ${_cpu})
+            endforeach()
+        endif()
+
         list(REMOVE_DUPLICATES _to_copy)
 
         foreach(_lib IN LISTS _to_copy)
@@ -567,9 +624,26 @@ install(DIRECTORY third_party/
     FILES_MATCHING PATTERN "*.h"
 )
 
-set(_install_targets libembedding cjson llama ggml ggml-base ggml-cpu)
+set(_install_targets libembedding cjson llama ggml ggml-base)
+if(NOT LIBEMBEDDING_CPU_DISPATCH)
+    list(APPEND _install_targets ${LIBEMBEDDING_GGML_CPU_TARGETS})
+endif()
 if(NOT LIBEMBEDDING_NO_IMAGE AND TARGET libembedding_stb)
     list(APPEND _install_targets libembedding_stb)
+endif()
+if(LIBEMBEDDING_CPU_DISPATCH)
+    # Loadable modules: nothing links them, so they are not part of the export
+    # set. They go where ggml looks for them, next to the library that loads
+    # them (bin/ on Windows, beside libembedding.dll).
+    if(WIN32)
+        set(_lembed_cpu_module_dir ${CMAKE_INSTALL_BINDIR})
+    else()
+        set(_lembed_cpu_module_dir ${CMAKE_INSTALL_LIBDIR})
+    endif()
+    install(TARGETS ${LIBEMBEDDING_GGML_CPU_TARGETS}
+        LIBRARY DESTINATION ${_lembed_cpu_module_dir}
+        RUNTIME DESTINATION ${_lembed_cpu_module_dir}
+    )
 endif()
 install(TARGETS ${_install_targets}
     EXPORT libembedding-targets

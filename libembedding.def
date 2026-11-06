@@ -15,6 +15,7 @@ EXPORTS
     lembed_version
 lembed_onnxruntime_version
 lembed_execution_provider_name
+lembed_ggml_cpu_features
 
     ; ---- Error handling ----
     lembed_status_message

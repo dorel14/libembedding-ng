@@ -92,11 +92,13 @@ def _find_library() -> str:
 # that ships inside the package lives in the package directory, which is not the
 # same directory as libembedding.dll in a source checkout, so both are registered
 # (see _runtime_dirs for the bundled third_party/curl/bin location).
+# ggml's CPU backend is not listed: with CPU dispatch it is one of several
+# ggml-cpu-<variant> modules that ggml scores and loads itself, from the
+# library's directory; preloading one here would pick the variant for it.
 _DEPENDENT_DLLS = (
     "onnxruntime.dll",
     "onnxruntime_providers_shared.dll",
     "ggml.dll",
-    "ggml-cpu.dll",
     "ggml-base.dll",
     "llama.dll",
     "libcurl-x64.dll",

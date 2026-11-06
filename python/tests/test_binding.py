@@ -82,9 +82,25 @@ def test_runtime_dirs_start_with_the_library_dir_and_skip_other_builds(tmp_path)
     assert not any(d.parts[-2:] in (("bin", "Debug"), ("bin", "Release")) for d in dirs)
 
 
+def test_ggml_cpu_features_names_the_loaded_backend():
+    # Loading from the library's own directory is the path a wheel takes: ggml's
+    # default search would look next to python.exe and find nothing.
+    from libembedding import ggml_cpu_features
+
+    features = ggml_cpu_features()
+    assert features, "no ggml CPU backend was loaded next to libembedding"
+    assert all(f and f == f.upper() for f in features)
+    assert ggml_cpu_features() == features
+
+
+def test_ggml_cpu_backend_is_not_preloaded():
+    # ggml scores and loads its own CPU variant; preloading one would choose it.
+    assert not any(name.startswith("ggml-cpu") for name in _DEPENDENT_DLLS)
+
+
 def test_select_dependencies_loads_one_copy_per_name(tmp_path):
     own, fallback = tmp_path / "own", tmp_path / "fallback"
-    for name in ("ggml.dll", "ggml-cpu.dll"):
+    for name in ("ggml.dll", "ggml-base.dll"):
         _touch(own / name)
         _touch(fallback / name)
     _touch(fallback / "libcurl-x64.dll")
@@ -92,7 +108,7 @@ def test_select_dependencies_loads_one_copy_per_name(tmp_path):
     selected = _select_dependencies([own, fallback])
 
     assert own / "ggml.dll" in selected
-    assert own / "ggml-cpu.dll" in selected
+    assert own / "ggml-base.dll" in selected
     assert fallback / "libcurl-x64.dll" in selected  # missing next to the library
     assert len(selected) == len({p.name for p in selected}) == 3
     assert all(p.name in _DEPENDENT_DLLS for p in selected)
