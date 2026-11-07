@@ -33,6 +33,24 @@ namespace detail {
  * from 1.6-4 GB to under 900 MB. */
 constexpr int kSparseMaxBatchTokens = 512;
 
+/* Same cap for the dense ONNX path (all-MiniLM-L6-v2, i7-1065G7, 4 threads, 256
+ * texts, library defaults, sweep 0/256/512/1024/2048, two passes in opposite
+ * order): 512 was the best or tied on mixed (8-160 words, 28.4-29.4 -> 80-83
+ * docs/s), short (352-365 -> 495-503) and long (31 -> 35) corpora. Dense output
+ * is [batch, seq, dim], so unlike the sparse case this is a compute/cache
+ * effect, not a memory one: a 256-text batch used to be padded to the longest
+ * text (47104 padded tokens for 19915 real ones). */
+constexpr int kDenseMaxBatchTokens = 512;
+
+/* Same cap for reranker (query, document) pairs (jina-reranker-v1-turbo-en,
+ * i7-1065G7, library defaults, 1 query x 64 docs of 8-160 words, one process
+ * per point, sweep 0/256/512/1024/2048 in two passes of opposite order): 512
+ * gave 39.0/40.0 docs/s against 17.3/18.2 without the cap; 256 was within noise
+ * (37.9/39.1), 1024 and 2048 slower (33-35, 31). For padding-invariant models
+ * the scores do not depend on the batch composition; padding-sensitive models
+ * (reranker_impl.hpp) are batched without padding instead. */
+constexpr int kRerankMaxBatchTokens = 512;
+
 /* One past the last document of the batch that starts at `start`, out of
  * `count` documents sorted longest first.
  *

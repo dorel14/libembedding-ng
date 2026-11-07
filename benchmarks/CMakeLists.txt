@@ -15,6 +15,11 @@ target_compile_definitions(bench_reranker_compare PRIVATE
 add_executable(bench_autotune bench_autotune.cpp)
 target_link_libraries(bench_autotune PRIVATE libembedding)
 
+# Dense ONNX throughput: library vs bare ORT vs per-stage replay. Compiles the
+# implementation itself (like fair_compare) to reach the tokenizer and ORT wrapper.
+add_executable(bench_text_onnx bench_text_onnx.cpp)
+target_link_libraries(bench_text_onnx PRIVATE libembedding)
+
 add_executable(fair_compare fair_compare.cpp)
 target_link_libraries(fair_compare PRIVATE libembedding)
 target_compile_definitions(fair_compare PRIVATE LIBEMBEDDING_NO_DOWNLOAD)
@@ -39,14 +44,14 @@ endif()
 
 if(WIN32)
     set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare
-        gguf_gemm_microbench bench_autotune)
+        gguf_gemm_microbench bench_autotune bench_text_onnx)
     foreach(_t IN LISTS _benchmark_targets)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
-    # These three compile the implementation themselves (see the root helper).
-    foreach(_t bench_libembedding bench_reranker_compare fair_compare)
+    # These compile the implementation themselves (see the root helper).
+    foreach(_t bench_libembedding bench_reranker_compare fair_compare bench_text_onnx)
         link_implementation_deps(${_t})
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
