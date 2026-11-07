@@ -16,6 +16,7 @@ from .autotune import (
     cleanup_model_cache,
     cleanup_model_cache_except,
     clear_autotune_cache,
+    clear_autotune_cache_unified,
 )
 from .backend import detect_backend
 from .benchmark import (
@@ -186,6 +187,7 @@ __all__ = [
     "cleanup_model_cache",
     "cleanup_model_cache_except",
     "clear_autotune_cache",
+    "clear_autotune_cache_unified",
     "clear_cache",
     "clear_reranker_autotune_cache",
     "cosine_similarity",
