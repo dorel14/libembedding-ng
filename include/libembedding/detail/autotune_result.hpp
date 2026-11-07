@@ -55,6 +55,9 @@ inline lembed_status_t autotune_fail_no_config(const char* label, const std::str
 template <class Body>
 lembed_status_t autotune_guard(const char* label, Body&& body) noexcept {
     char msg[512];
+    /* Start clean: an error message left by an earlier, unrelated call must not
+     * be reported as the cause of this one (autotune_fail_no_config quotes it). */
+    set_error("");
     try {
         return body();
     } catch (const std::bad_alloc&) {

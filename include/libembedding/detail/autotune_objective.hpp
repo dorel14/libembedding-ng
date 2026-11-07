@@ -84,15 +84,20 @@ inline autotune_reference autotune_make_reference(const std::vector<autotune_mea
     return ref;
 }
 
+/* Cost given to an axis that cannot be computed (zero throughput). Finite on
+ * purpose: the library is built with -ffast-math / /fp:fast, under which the
+ * compiler may assume no infinity exists and fold comparisons with one, which
+ * broke selection on macOS (Clang) in both directions. */
+constexpr double kAutotuneWorstCost = 1.0e30;
+
 /* Dimensionless cost of a feasible measurement, lower is better. */
 inline double autotune_cost(const autotune_measurement& m, const autotune_reference& ref,
                             lembed_objective_t objective) {
     const double kMemFloorMb = 16.0;
     double tail = autotune_tail_ms(m);
     double lat_cost = (ref.tail_min > 0.0 && tail > 0.0) ? tail / ref.tail_min : 1.0;
-    double thr_cost = (m.throughput > 0.0 && ref.thr_max > 0.0)
-                          ? ref.thr_max / m.throughput
-                          : std::numeric_limits<double>::infinity();
+    double thr_cost = (m.throughput > 0.0 && ref.thr_max > 0.0) ? ref.thr_max / m.throughput
+                                                                : kAutotuneWorstCost;
     switch (objective) {
         case LEMBED_OBJECTIVE_LATENCY:
             return lat_cost;
@@ -117,19 +122,27 @@ inline int autotune_select_best(const std::vector<autotune_measurement>& ms,
                                 lembed_objective_t objective,
                                 const autotune_constraints& c,
                                 double tie_tolerance = 0.0) {
+    /* Feasibility is tracked explicitly, never through an infinite sentinel
+     * (see kAutotuneWorstCost). */
     autotune_reference ref = autotune_make_reference(ms, c);
-    std::vector<double> costs(ms.size(), std::numeric_limits<double>::infinity());
-    double best_cost = std::numeric_limits<double>::infinity();
+    std::vector<double> costs(ms.size(), 0.0);
+    std::vector<char> feasible(ms.size(), 0);
+    int best = -1;
+    double best_cost = 0.0;
     for (size_t i = 0; i < ms.size(); i++) {
         if (!autotune_satisfies(ms[i], c)) continue;
+        feasible[i] = 1;
         costs[i] = autotune_cost(ms[i], ref, objective);
-        best_cost = std::min(best_cost, costs[i]);
+        if (best < 0 || costs[i] < best_cost) {
+            best = (int)i;
+            best_cost = costs[i];
+        }
     }
-    if (!(best_cost < std::numeric_limits<double>::infinity())) return -1;
+    if (best < 0) return -1;
     double limit = best_cost * (1.0 + std::max(0.0, tie_tolerance));
     for (size_t i = 0; i < ms.size(); i++)
-        if (costs[i] <= limit) return (int)i;
-    return -1;
+        if (feasible[i] && costs[i] <= limit) return (int)i;
+    return best;
 }
 
 inline const char* autotune_objective_name(lembed_objective_t objective) {
