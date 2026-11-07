@@ -6,7 +6,8 @@ name: Version Sync Check
 
 on:
   pull_request:
-    branches: [main]
+    # `dev` too: see build.yml.
+    branches: [main, dev]
   push:
     # `dev` est verifie aussi : c'est la branche que scripts/sync_branch.py
     # met a jour apres chaque publication, et la seule a valider avant d'y

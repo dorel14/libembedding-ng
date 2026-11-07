@@ -2,7 +2,8 @@ name: C++ Unit Tests
 
 on:
   pull_request:
-    branches: [main]
+    # `dev` too: see build.yml.
+    branches: [main, dev]
   push:
     branches: [main]
   workflow_call:

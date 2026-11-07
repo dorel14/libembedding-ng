@@ -2,7 +2,8 @@ name: Encoding Check
 
 on:
   pull_request:
-    branches: [main]
+    # `dev` too: see build.yml.
+    branches: [main, dev]
   push:
     # `dev` est verifie aussi : sans cela, aucun workflow ne se declenche sur un
     # push direct vers `dev`, et une derive d'encodage n'apparaitrait qu'au
