@@ -2,6 +2,15 @@
  * libembedding - detail/autotune_bench_reranker.hpp
  * Reranker auto-tuner
  *
+ * Tunes threads x batch_size x max_tokens for one reranker request: a query
+ * scored against a fixed set of documents. max_tokens truncates documents, so
+ * it trades ranking quality for speed; callers that care set a floor through
+ * the constrained entry point (min_tokens).
+ *
+ * Every entry point -- default, constrained, latency budget, profile, custom
+ * corpus -- runs the same search (autotune_search.hpp) and differs only by its
+ * grid filter, constraints and cache identity.
+ *
  * Auteur: David Orel
  * Version: 1.11.0
  *
@@ -15,64 +24,161 @@
 #include "libembedding/reranker.h"
 #include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
+#include "autotune_corpus.hpp"
+#include "autotune_result.hpp"
+#include "autotune_search.hpp"
+#include "autotune_session.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
-#include <sstream>
+#include <cstring>
 #include <string>
 #include <vector>
 
 namespace lembed { namespace detail {
 
-/* Forward declarations */
-static lembed_status_t lembed_reranker_autotune_impl(
-    const char* model_name,
-    const std::vector<std::string>& docs,
-    const char* query,
-    lembed_autotune_mode_t mode,
-    lembed_objective_t objective,
-    const autotune_cache_identity& id,
-    const char* label,
-    lembed_reranker_tuning_result_t* result);
-void write_reranker_cache(const char* model_name, const autotune_cache_identity& id,
-                          const lembed_reranker_tuning_result_t& result);
-bool read_reranker_cache(const char* model_name, const autotune_cache_identity& id,
-                         lembed_reranker_tuning_result_t* out);
+/* =========================================================================
+ * Workload
+ * ========================================================================= */
 
-/* Generate synthetic documents with target token count */
-inline std::string generate_synthetic_doc(int target_tokens, int seed) {
-    static const char* words[] = {
-        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-        "machine", "learning", "data", "model", "system", "algorithm",
-        "search", "query", "document", "text", "information", "result",
-        "process", "analysis", "method", "approach", "technique",
-        "application", "performance", "evaluation", "research", "study",
-    };
-    int n_words = sizeof(words) / sizeof(words[0]);
+/* Every configuration sees the same 256-token documents; only truncation
+ * varies. A corpus rebuilt per max_tokens would make configurations
+ * incomparable and bias the tuner toward the smallest max_tokens. */
+inline int reranker_bench_corpus_tokens() { return 256; }
+inline int reranker_bench_corpus_docs() { return 20; }
+inline const char* reranker_bench_query() { return "What is deep learning?"; }
 
-    std::string doc;
-    int target_words = std::max(1, (int)(target_tokens * 0.75));
-    for (int i = 0; i < target_words; i++) {
-        if (i > 0) doc += " ";
-        doc += words[(seed + i) % n_words];
+inline std::vector<std::string> generate_synthetic_corpus(int n_docs) {
+    std::vector<std::string> docs;
+    docs.reserve(n_docs > 0 ? (size_t)n_docs : 0);
+    for (int i = 0; i < n_docs; i++)
+        docs.push_back(synthetic_reranker_doc(reranker_bench_corpus_tokens(), i + 1));
+    return docs;
+}
+
+/* =========================================================================
+ * Configuration space
+ * ========================================================================= */
+
+struct reranker_tune_config {
+    int threads;
+    int batch;
+    int max_tokens;
+};
+
+inline std::string describe_reranker_config(const reranker_tune_config& c) {
+    return "threads=" + std::to_string(c.threads) + " batch=" + std::to_string(c.batch) +
+           " tokens=" + std::to_string(c.max_tokens);
+}
+
+/* Thread counts derived from the machine instead of a fixed {1, 4, 8}.
+ * QUICK: every physical core, every logical core. A single request never gets
+ * faster with fewer threads on an idle CPU, and the single-threaded points were
+ * the slowest of the grid (most of the QUICK budget). FULL adds 1, 2 and half
+ * the cores, for hosts that run several rerankers side by side. */
+inline std::vector<int> reranker_thread_options(lembed_autotune_mode_t mode) {
+    int physical = std::max(1, cpu_physical_cores());
+    int logical = std::max(physical, cpu_logical_cores());
+    std::vector<int> t;
+    if (mode == LEMBED_AUTOTUNE_FULL) {
+        t.push_back(1);
+        t.push_back(2);
+        t.push_back(physical / 2);
     }
-    return doc;
+    t.push_back(physical);
+    t.push_back(logical);
+    std::sort(t.begin(), t.end());
+    t.erase(std::unique(t.begin(), t.end()), t.end());
+    t.erase(std::remove_if(t.begin(), t.end(), [](int v) { return v < 1; }), t.end());
+    return t;
 }
 
-/* Get cache directory for reranker autotune */
-inline std::string reranker_autotune_cache_dir() {
-    return autotune_cache_dir() + "/reranker";
-}
-
-/* Identity of a reranker tuning request.
+/* Grid, optionally restricted to max_tokens >= min_tokens. When the floor is
+ * above every candidate, the floor itself becomes the only token setting.
  *
- * Every dimension that changes the optimal configuration is part of it, so a
- * cached tuning can never be served for a request it does not answer: the
- * corpus (custom tunings), the objective and the mode. */
-inline autotune_cache_identity reranker_cache_identity(
-    const char* model_name, const char* variant, const std::string& corpus,
-    lembed_objective_t objective, lembed_autotune_mode_t mode) {
+ * Order matters twice:
+ *   - threads, then tokens, then batch: points sharing (threads, max_tokens)
+ *     are consecutive, so they reuse one session (autotune_session.hpp);
+ *   - tokens from the largest: ties are resolved toward the earliest point, so
+ *     between two statistically equal configurations the one that truncates
+ *     less (better ranking) wins. */
+inline std::vector<reranker_tune_config> reranker_tune_grid(lembed_autotune_mode_t mode,
+                                                            int min_tokens = 0) {
+    std::vector<int> batches = (mode == LEMBED_AUTOTUNE_QUICK) ? std::vector<int>{4, 16}
+                                                               : std::vector<int>{4, 8, 16};
+    std::vector<int> tokens = (mode == LEMBED_AUTOTUNE_QUICK) ? std::vector<int>{256, 64}
+                                                              : std::vector<int>{256, 128, 64, 32};
+    std::vector<int> kept;
+    for (int k : tokens)
+        if (k >= min_tokens) kept.push_back(k);
+    if (kept.empty()) kept.push_back(min_tokens);
+
+    std::vector<reranker_tune_config> grid;
+    for (int t : reranker_thread_options(mode))
+        for (int k : kept)
+            for (int b : batches) grid.push_back({t, b, k});
+    return grid;
+}
+
+/* =========================================================================
+ * Measuring one configuration
+ * ========================================================================= */
+
+/* Session-level settings of a reranker: what cannot change per call. */
+struct reranker_session_key {
+    int threads = 0;
+    int max_tokens = 0;
+    bool operator==(const reranker_session_key& o) const {
+        return threads == o.threads && max_tokens == o.max_tokens;
+    }
+};
+using reranker_session_cache = autotune_session_cache<reranker_session_key, lembed_reranker_t>;
+
+/* Times one configuration; the session comes from `sessions`, so consecutive
+ * points that differ only by batch size share it. */
+inline autotune_measurement bench_reranker_config(lembed_reranker_model_t model,
+                                                  const std::vector<std::string>& docs,
+                                                  const char* query,
+                                                  const reranker_tune_config& c,
+                                                  const autotune_protocol& proto,
+                                                  reranker_session_cache& sessions) {
+    autotune_measurement failed;
+    if (docs.empty()) return failed;
+
+    lembed_reranker_t* ctx = sessions.get({c.threads, c.max_tokens}, [&]() -> lembed_reranker_t* {
+        lembed_reranker_options_t opts = lembed_reranker_options_default();
+        opts.model = model;
+        opts.num_threads = c.threads;
+        opts.batch_size = c.batch;
+        opts.max_length = c.max_tokens;
+        opts.show_download_progress = 0;
+        lembed_reranker_t* created = nullptr;
+        return lembed_reranker_create(&opts, &created) == LEMBED_OK ? created : nullptr;
+    });
+    if (!ctx) return failed;
+
+    std::vector<const char*> c_docs = corpus_c_strings(docs);
+    const int n = (int)c_docs.size();
+    return autotune_measure_calls(proto, n, sessions.rss_before_mb(), [&]() {
+        lembed_rerank_results_t r = {0};
+        bool ok = lembed_reranker_rerank(ctx, query, c_docs.data(), n, c.batch, &r) == LEMBED_OK;
+        if (ok) lembed_rerank_results_free(&r);
+        return ok;
+    });
+}
+
+/* =========================================================================
+ * Cache
+ * ========================================================================= */
+
+inline const char* reranker_cache_subdir() { return "reranker"; }
+
+/* Identity of a reranker tuning request: every dimension that changes the
+ * optimum (corpus, objective, mode, constraints via `variant`). */
+inline autotune_cache_identity reranker_cache_identity(const char* model_name, const char* variant,
+                                                       const std::string& corpus,
+                                                       lembed_objective_t objective,
+                                                       lembed_autotune_mode_t mode) {
     autotune_cache_identity id;
     id.model = model_name ? model_name : "";
     id.variant = variant ? variant : "";
@@ -82,315 +188,18 @@ inline autotune_cache_identity reranker_cache_identity(
     return id;
 }
 
-/* Get cache file path for a reranker tuning request */
-inline std::string get_reranker_cache_path(const autotune_cache_identity& id) {
-    std::string variant = cache_variant_key(id.variant.c_str(), id.corpus, id.objective, id.mode);
-    return get_cache_path(id.model.c_str(), "reranker", variant);
+/* Variant tag of a constrained request, so each (floor, budget) pair has its
+ * own entry. The unconstrained request keeps the historical "default" tag. */
+inline std::string reranker_variant(const char* base, int min_tokens, double max_latency_ms) {
+    if (min_tokens <= 0 && max_latency_ms <= 0.0) return base;
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "%s_tok%d_p95_%.3f", base, min_tokens, max_latency_ms);
+    return buf;
 }
 
-/* Write reranker tune result to cache (atomically) */
-inline void write_reranker_cache(const char* model_name, const autotune_cache_identity& id,
-                                 const lembed_reranker_tuning_result_t& result) {
-    std::ostringstream os;
-    os << "{\n";
-    write_cache_identity(os, id);
-    os << "  \"cores\": " << cpu_logical_cores() << ",\n";
-    os << "  \"threads\": " << result.threads << ",\n";
-    os << "  \"batch_size\": " << result.batch_size << ",\n";
-    os << "  \"max_tokens\": " << result.max_tokens << ",\n";
-    os << "  \"throughput_docs_sec\": " << result.throughput_docs_sec << ",\n";
-    os << "  \"latency_ms\": " << result.latency_ms << ",\n";
-    os << "  \"p95_latency_ms\": " << result.p95_latency_ms << ",\n";
-    os << "  \"memory_mb\": " << result.memory_mb << "\n";
-    os << "}\n";
-    write_file_atomic(get_reranker_cache_path(id), os.str());
-    (void)model_name;
-}
-
-/* Read reranker tune result from cache.
- *
- * Returns false on a miss, on a foreign/legacy entry, and on a partial entry:
- * the caller must be able to trust that *out is fully populated. */
-inline bool read_reranker_cache(const char* model_name, const autotune_cache_identity& id,
-                                lembed_reranker_tuning_result_t* out) {
-    if (!out) return false;
-    std::string path = get_reranker_cache_path(id);
-    if (!cache_identity_matches(path, id)) return false;
-
-    std::ifstream f(path);
-    if (!f.is_open()) return false;
-
-    *out = {0};
-    int found = 0;
-    std::string line;
-    while (std::getline(f, line)) {
-        if (json_number(line, "threads", out->threads)) found++;
-        else if (json_number(line, "batch_size", out->batch_size)) found++;
-        else if (json_number(line, "max_tokens", out->max_tokens)) found++;
-        else if (json_number(line, "throughput_docs_sec", out->throughput_docs_sec)) found++;
-        else if (json_number(line, "latency_ms", out->latency_ms)) found++;
-        else if (json_number(line, "p95_latency_ms", out->p95_latency_ms)) found++;
-        else if (json_number(line, "memory_mb", out->memory_mb)) found++;
-    }
-    (void)model_name;
-
-    /* A configuration field left at 0 would be handed straight to
-     * lembed_reranker_options_t, so require every field to have been read. */
-    static const int kExpectedFields = 7;
-    if (found < kExpectedFields) {
-        *out = {0};
-        return false;
-    }
-    return true;
-}
-
-/* Reference corpus used by every configuration.
- *
- * The corpus must NOT be rebuilt per configuration: document length drives
- * latency, so a corpus that depends on the max_tokens under test would make
- * configurations incomparable and bias the tuner toward the smallest
- * max_tokens. Every configuration now sees the same 256-token documents and
- * only truncation varies. */
-inline int reranker_bench_corpus_tokens() { return 256; }
-
-inline const char* reranker_bench_query() { return "What is deep learning?"; }
-
-inline std::vector<std::string> generate_synthetic_corpus(int n_docs) {
-    int tokens = reranker_bench_corpus_tokens();
-    std::vector<std::string> docs;
-    docs.reserve(n_docs > 0 ? (size_t)n_docs : 0);
-    for (int i = 0; i < n_docs; i++) {
-        /* Seed depends on the document index only, so the corpus is stable
-         * across calls and identical for every configuration. */
-        docs.push_back(generate_synthetic_doc(tokens, i + 1));
-    }
-    return docs;
-}
-
-/* Benchmark a single reranker configuration */
-inline lembed_reranker_tuning_result_t bench_reranker_config(
-    const char* model_name,
-    int threads,
-    int batch_size,
-    int max_tokens,
-    const std::vector<std::string>& docs,
-    const char* query,
-    int warmup_iters,
-    int bench_iters)
-{
-    lembed_reranker_tuning_result_t res = {0};
-    res.threads = threads;
-    res.batch_size = batch_size;
-    res.max_tokens = max_tokens;
-
-    if (docs.empty()) {
-        res.latency_ms = 999999;
-        return res;
-    }
-    int n_docs = (int)docs.size();
-
-    /* Create reranker */
-    lembed_reranker_options_t opts = lembed_reranker_options_default();
-    opts.num_threads = threads;
-    opts.batch_size = batch_size;
-    opts.max_length = max_tokens;
-    opts.show_download_progress = 0;
-
-    /* Resolve model by name or code */
-    int model_idx = -1;
-    {
-        const lembed_model_info_t* models = nullptr;
-        int count = 0;
-        lembed_list_reranker_models(&models, &count);
-        for (int i = 0; i < count; i++) {
-            std::string name = models[i].model_name;
-            std::string code = models[i].model_code;
-            if (model_name == name || model_name == code) {
-                model_idx = i;
-                break;
-            }
-        }
-    }
-    if (model_idx < 0) {
-        /* Unknown model: do not silently benchmark a different one. */
-        res.latency_ms = 999999;
-        return res;
-    }
-    opts.model = static_cast<lembed_reranker_model_t>(model_idx);
-
-    lembed_reranker_t* ctx = nullptr;
-    lembed_status_t s = lembed_reranker_create(&opts, &ctx);
-    if (s != LEMBED_OK) {
-        res.latency_ms = 999999;
-        return res;
-    }
-
-    /* Build C string array */
-    std::vector<const char*> c_docs;
-    for (const auto& d : docs) c_docs.push_back(d.c_str());
-
-    /* Warmup */
-    for (int i = 0; i < warmup_iters; i++) {
-        lembed_rerank_results_t result = {0};
-        if (lembed_reranker_rerank(ctx, query, c_docs.data(), n_docs, batch_size, &result) == LEMBED_OK)
-            lembed_rerank_results_free(&result);
-    }
-
-    /* Benchmark */
-    std::vector<double> times;
-    times.reserve(bench_iters > 0 ? (size_t)bench_iters : 0);
-    for (int i = 0; i < bench_iters; i++) {
-        auto t0 = std::chrono::high_resolution_clock::now();
-        lembed_rerank_results_t result = {0};
-        lembed_status_t rs = lembed_reranker_rerank(ctx, query, c_docs.data(), n_docs,
-                                                    batch_size, &result);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        if (rs != LEMBED_OK) continue;
-        lembed_rerank_results_free(&result);
-        times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
-    }
-
-    lembed_reranker_free(ctx);
-
-    /* Every iteration failed: report the sentinel so this configuration is
-     * never mistaken for a zero-latency winner. */
-    if (times.empty()) {
-        res.latency_ms = 999999;
-        return res;
-    }
-
-    /* Compute stats */
-    std::sort(times.begin(), times.end());
-    double p50 = percentile_sorted(times, 0.50);
-    double p95 = percentile_sorted(times, 0.95);
-
-    res.latency_ms = p50;
-    res.p95_latency_ms = p95;
-    res.throughput_docs_sec = (p50 > 0) ? (1000.0 / p50) * n_docs : 0;
-    res.memory_mb = 0;  /* TODO: measure RSS */
-
-    return res;
-}
-
-/* Score a reranker configuration based on objective (lower is better) */
-inline double score_reranker_config(const lembed_reranker_tuning_result_t& r, lembed_objective_t obj) {
-    switch (obj) {
-        case LEMBED_OBJECTIVE_LATENCY:
-            return r.latency_ms + (r.p95_latency_ms - r.latency_ms) * 0.5;
-        case LEMBED_OBJECTIVE_THROUGHPUT:
-            return r.throughput_docs_sec > 0 ? (1.0 / r.throughput_docs_sec) * 1000000 : 999999;
-        case LEMBED_OBJECTIVE_BALANCED:
-            return r.latency_ms * 0.5 + (1.0 / (r.throughput_docs_sec + 1)) * 1000;
-        case LEMBED_OBJECTIVE_MEMORY:
-            return r.memory_mb > 0 ? r.memory_mb : r.latency_ms;
-        default:
-            return r.latency_ms;
-    }
-}
-
-/* Main reranker auto-tune implementation, shared by the default and the
- * custom-corpus entry points.
- *
- * `docs` is the corpus that is actually benchmarked and `id` must describe it
- * exactly, so a cached tuning is never served for another corpus, objective or
- * mode. `label` prefixes the progress lines so both callers stay traceable. */
-static lembed_status_t lembed_reranker_autotune_impl(
-    const char* model_name,
-    const std::vector<std::string>& docs,
-    const char* query,
-    lembed_autotune_mode_t mode,
-    lembed_objective_t objective,
-    const autotune_cache_identity& id,
-    const char* label,
-    lembed_reranker_tuning_result_t* result)
-{
-    /* Check cache first */
-    lembed_reranker_tuning_result_t cached = {0};
-    if (read_reranker_cache(model_name, id, &cached)) {
-        *result = cached;
-        return LEMBED_OK;
-    }
-
-    int cores = cpu_logical_cores();
-    int warmup = 1;
-    int bench_iters = (mode == LEMBED_AUTOTUNE_QUICK) ? 5 : 15;
-
-    /* Configurations to test */
-    std::vector<int> threads_vec, batch_vec, tokens_vec;
-    if (mode == LEMBED_AUTOTUNE_QUICK) {
-        threads_vec = {1, 4, 8};
-        batch_vec = {4, 16};
-        tokens_vec = {64, 256};
-    } else {
-        threads_vec = {1, 2, 4, 8};
-        batch_vec = {4, 8, 16};
-        tokens_vec = {32, 64, 128, 256};
-    }
-
-    /* Filter threads > cores */
-    std::vector<int> valid_threads;
-    for (int t : threads_vec) {
-        if (t <= cores) valid_threads.push_back(t);
-    }
-    if (valid_threads.empty()) valid_threads.push_back(1);
-
-    lembed_reranker_tuning_result_t best = {0};
-    best.latency_ms = 999999;
-
-    int total_configs = (int)(valid_threads.size() * batch_vec.size() * tokens_vec.size());
-
-    fprintf(stderr, "%s: testing %d configurations (mode=%s, objective=%d, %d docs)...\n",
-            label, total_configs, mode == LEMBED_AUTOTUNE_QUICK ? "QUICK" : "FULL",
-            objective, (int)docs.size());
-
-    for (int t : valid_threads) {
-        for (int b : batch_vec) {
-            for (int k : tokens_vec) {
-                auto r = bench_reranker_config(model_name, t, b, k, docs, query, warmup, bench_iters);
-
-                double score = score_reranker_config(r, objective);
-                double best_score = score_reranker_config(best, objective);
-
-                if (score < best_score) {
-                    best = r;
-                }
-            }
-        }
-    }
-
-    /* Every configuration failed: do not cache the sentinel, and do not report
-     * a tuning the caller would use as if it were valid. */
-    if (best.latency_ms >= 999999) {
-        fprintf(stderr, "%s: no configuration could be benchmarked\n", label);
-        *result = {0};
-        return LEMBED_ERROR_ONNX_RUNTIME;
-    }
-
-    fprintf(stderr, "%s: best config: threads=%d batch=%d tokens=%d (P50=%.1fms, P95=%.1fms)\n",
-            label, best.threads, best.batch_size, best.max_tokens, best.latency_ms,
-            best.p95_latency_ms);
-
-    write_reranker_cache(model_name, id, best);
-
-    *result = best;
-    return LEMBED_OK;
-}
-
-/* Identity of the default (synthetic corpus) tuning. */
-inline autotune_cache_identity default_reranker_identity(
-    const char* model_name, const std::vector<std::string>& docs,
-    lembed_objective_t objective, lembed_autotune_mode_t mode) {
-    return reranker_cache_identity(model_name, "default", corpus_fingerprint(docs),
-                                   objective, mode);
-}
-
-/* Canonical registry code for a reranker named by either form.
- *
- * The benchmark itself resolves model_name or model_code (see
- * bench_reranker_config), but the cache identity was the raw caller string, so
- * a tuning written with the repo was invisible to a clear_cache issued with the
- * canonical name, and the reverse. Keying the identity on the registry code
- * makes both forms interchangeable. Returns an empty string only for NULL. */
+/* Canonical registry code for a reranker named by either form, so the repo
+ * and the canonical name share cache entries and clear_cache() purges both.
+ * Unknown models keep the caller string; NULL gives an empty string. */
 inline std::string canonical_reranker_id(const char* model) {
     if (!model) return std::string();
     int idx = lembed_resolve_reranker_model(model);
@@ -398,203 +207,177 @@ inline std::string canonical_reranker_id(const char* model) {
     return std::string(lembed__reranker_models[idx].model_code);
 }
 
-/* Main reranker auto-tune function */
-extern "C" lembed_status_t lembed_reranker_autotune(
-    const char* model_name,
-    lembed_autotune_mode_t mode,
-    lembed_objective_t objective,
-    lembed_reranker_tuning_result_t* result)
-{
-    if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
+/* =========================================================================
+ * Tuner
+ * ========================================================================= */
 
-    try {
-        std::vector<std::string> docs = generate_synthetic_corpus(20);
-        if (docs.empty()) return LEMBED_ERROR_ONNX_RUNTIME;
-        std::string canon = canonical_reranker_id(model_name);
-        autotune_cache_identity id =
-            default_reranker_identity(canon.c_str(), docs, objective, mode);
-        return lembed_reranker_autotune_impl(canon.c_str(), docs, reranker_bench_query(), mode,
-                                             objective, id, "reranker_autotune", result);
-    } catch (const std::exception& e) {
-        fprintf(stderr, "reranker_autotune: exception: %s\n", e.what());
-        return LEMBED_ERROR_ONNX_RUNTIME;
+/* One reranker tuning request, fully described. */
+struct reranker_tune_request {
+    const char* model_name = nullptr;          /* repo or canonical name */
+    lembed_autotune_mode_t mode = LEMBED_AUTOTUNE_QUICK;
+    lembed_objective_t objective = LEMBED_OBJECTIVE_BALANCED;
+    int min_tokens = 0;                        /* quality floor, 0 = none */
+    double max_latency_ms = 0.0;               /* p95 budget, 0 = none */
+    const std::vector<std::string>* docs = nullptr; /* nullptr = synthetic */
+    const char* query = nullptr;               /* required with docs */
+    const char* label = "reranker_autotune";
+};
+
+/* Runs (or reads from cache) one request. When constraints leave nothing
+ * feasible, the unconstrained optimum of the same measurements is returned, as
+ * the API has always done; p95_latency_ms tells the caller by how much. */
+inline lembed_status_t reranker_autotune_run(const reranker_tune_request& req,
+                                             lembed_unified_tuning_result_t* result) {
+    if (!req.model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = make_unified_result(LEMBED_TASK_RERANKING);
+
+    int idx = lembed_resolve_reranker_model(req.model_name);
+    if (idx < 0)
+        return autotune_fail(LEMBED_ERROR_MODEL_NOT_FOUND,
+                             std::string(req.label) + ": unknown reranker model '" +
+                                 req.model_name + "'");
+    std::string canon = canonical_reranker_id(req.model_name);
+
+    std::vector<std::string> synthetic;
+    const std::vector<std::string>* docs = req.docs;
+    const char* query = req.query;
+    if (!docs) {
+        synthetic = generate_synthetic_corpus(reranker_bench_corpus_docs());
+        docs = &synthetic;
+        query = reranker_bench_query();
     }
+    if (docs->empty() || !query)
+        return autotune_fail(LEMBED_ERROR_INVALID_ARGUMENT,
+                             std::string(req.label) + ": a reranking workload needs a query and documents");
+
+    /* The query is part of the workload, so it is part of the fingerprint. */
+    std::vector<std::string> workload = *docs;
+    workload.push_back(query);
+    std::string variant = reranker_variant(req.docs ? "custom" : "default", req.min_tokens,
+                                           req.max_latency_ms);
+    autotune_cache_identity id = reranker_cache_identity(
+        canon.c_str(), variant.c_str(), corpus_fingerprint(workload), req.objective, req.mode);
+
+    if (read_unified_cache(reranker_cache_subdir(), id, *result)) return LEMBED_OK;
+
+    autotune_search_options sopts;
+    sopts.objective = req.objective;
+    sopts.constraints.max_p95_ms = req.max_latency_ms;
+    sopts.protocol = autotune_protocol_for(req.mode);
+    sopts.label = req.label;
+
+    lembed_reranker_model_t model = (lembed_reranker_model_t)idx;
+    reranker_session_cache sessions(lembed_reranker_free);
+    auto search = autotune_grid_search(
+        reranker_tune_grid(req.mode, req.min_tokens),
+        [&](const reranker_tune_config& c, const autotune_protocol& p) {
+            return bench_reranker_config(model, *docs, query, c, p, sessions);
+        },
+        describe_reranker_config, sopts);
+    sessions.reset();
+
+    if (!search.found()) return autotune_fail_no_config(req.label, canon);
+
+    const reranker_tune_config& best = search.best_config();
+    result->threads = best.threads;
+    result->batch_size = best.batch;
+    result->max_tokens = best.max_tokens;
+    set_result_metrics(*result, search.best_measurement());
+
+    write_unified_cache(reranker_cache_subdir(), id, *result);
+    return LEMBED_OK;
 }
 
-/* Reranker auto-tune with constraints (min_tokens, max_latency) */
+inline lembed_reranker_tuning_result_t to_reranker_result(const lembed_unified_tuning_result_t& u) {
+    lembed_reranker_tuning_result_t r = {0};
+    r.threads = u.threads;
+    r.batch_size = u.batch_size;
+    r.max_tokens = u.max_tokens;
+    r.throughput_docs_sec = u.throughput_docs_sec;
+    r.latency_ms = u.latency_ms;
+    r.memory_mb = u.memory_mb;
+    r.p95_latency_ms = u.p95_latency_ms;
+    return r;
+}
+
+/* Runs a request and converts to the reranker struct; exceptions become a
+ * status (autotune_guard): nothing may unwind through the C ABI. */
+inline lembed_status_t reranker_autotune_legacy(const reranker_tune_request& req,
+                                                lembed_reranker_tuning_result_t* result) {
+    if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = lembed_reranker_tuning_result_t{0};
+    return autotune_guard(req.label, [&]() {
+        lembed_unified_tuning_result_t u;
+        lembed_status_t s = reranker_autotune_run(req, &u);
+        if (s == LEMBED_OK) *result = to_reranker_result(u);
+        return s;
+    });
+}
+
+/* =========================================================================
+ * C entry points (thin facades over reranker_autotune_run)
+ * ========================================================================= */
+
+extern "C" lembed_status_t lembed_reranker_autotune(const char* model_name,
+                                                    lembed_autotune_mode_t mode,
+                                                    lembed_objective_t objective,
+                                                    lembed_reranker_tuning_result_t* result) {
+    reranker_tune_request req;
+    req.model_name = model_name;
+    req.mode = mode;
+    req.objective = objective;
+    return reranker_autotune_legacy(req, result);
+}
+
 extern "C" lembed_status_t lembed_reranker_autotune_constrained(
-    const char* model_name,
-    lembed_autotune_mode_t mode,
-    lembed_objective_t objective,
-    int min_tokens,
-    double max_latency_ms,
-    lembed_reranker_tuning_result_t* result)
-{
-    if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
-
-    int cores = cpu_logical_cores();
-    int warmup = 1;
-    int bench_iters = (mode == LEMBED_AUTOTUNE_QUICK) ? 5 : 15;
-
-    std::vector<std::string> docs = generate_synthetic_corpus(20);
-    if (docs.empty()) return LEMBED_ERROR_ONNX_RUNTIME;
-
-    std::vector<int> threads_vec, batch_vec, tokens_vec;
-    if (mode == LEMBED_AUTOTUNE_QUICK) {
-        threads_vec = {1, 4, 8};
-        batch_vec = {4, 16};
-        tokens_vec = {64, 256};
-    } else {
-        threads_vec = {1, 2, 4, 8};
-        batch_vec = {4, 8, 16};
-        tokens_vec = {32, 64, 128, 256};
-    }
-
-    /* Filter by constraints */
-    std::vector<int> valid_threads;
-    for (int t : threads_vec) {
-        if (t <= cores) valid_threads.push_back(t);
-    }
-    if (valid_threads.empty()) valid_threads.push_back(1);
-    std::vector<int> valid_tokens;
-    for (int k : tokens_vec) {
-        if (k >= min_tokens) valid_tokens.push_back(k);
-    }
-    if (valid_tokens.empty()) {
-        valid_tokens = {min_tokens};
-    }
-
-    lembed_reranker_tuning_result_t best = {0};
-    best.latency_ms = 999999;
-
-    int total_configs = (int)(valid_threads.size() * batch_vec.size() * valid_tokens.size());
-
-    fprintf(stderr, "reranker_autotune: testing %d configurations (mode=%s, objective=%d, min_tokens=%d, max_latency=%.0fms)...\n",
-            total_configs, mode == LEMBED_AUTOTUNE_QUICK ? "QUICK" : "FULL", objective, min_tokens, max_latency_ms);
-
-    for (int t : valid_threads) {
-        for (int b : batch_vec) {
-            for (int k : valid_tokens) {
-                auto r = bench_reranker_config(model_name, t, b, k, docs,
-                                                reranker_bench_query(), warmup, bench_iters);
-
-                /* A configuration that failed to run has no p95; the sentinel
-                 * latency would otherwise pass the constraint test. */
-                if (r.latency_ms >= 999999) continue;
-
-                /* Check latency constraint */
-                if (r.p95_latency_ms > max_latency_ms) continue;
-
-                double score = score_reranker_config(r, objective);
-                double best_score = score_reranker_config(best, objective);
-
-                if (score < best_score) {
-                    best = r;
-                }
-            }
-        }
-    }
-
-    if (best.latency_ms >= 999999) {
-        fprintf(stderr, "reranker_autotune: no config satisfies constraints, falling back...\n");
-        std::string canon = canonical_reranker_id(model_name);
-        autotune_cache_identity id = default_reranker_identity(canon.c_str(), docs, objective, mode);
-        return lembed_reranker_autotune_impl(canon.c_str(), docs, reranker_bench_query(), mode,
-                                             objective, id, "reranker_autotune", result);
-    }
-
-    fprintf(stderr, "reranker_autotune: best config: threads=%d batch=%d tokens=%d (P50=%.1fms, P95=%.1fms)\n",
-            best.threads, best.batch_size, best.max_tokens, best.latency_ms, best.p95_latency_ms);
-
-    *result = best;
-    return LEMBED_OK;
+    const char* model_name, lembed_autotune_mode_t mode, lembed_objective_t objective,
+    int min_tokens, double max_latency_ms, lembed_reranker_tuning_result_t* result) {
+    reranker_tune_request req;
+    req.model_name = model_name;
+    req.mode = mode;
+    req.objective = objective;
+    req.min_tokens = min_tokens;
+    req.max_latency_ms = max_latency_ms;
+    return reranker_autotune_legacy(req, result);
 }
 
-/* Auto-configure reranker for target latency */
-extern "C" lembed_status_t lembed_reranker_auto_config(
-    const char* model_name,
-    double target_latency_ms,
-    lembed_objective_t objective,
-    lembed_reranker_tuning_result_t* result)
-{
-    if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
-
-    lembed_reranker_tuning_result_t best = {0};
-    best.latency_ms = 999999;
-
-    int cores = cpu_logical_cores();
-    int warmup = 2;
-    int bench_iters = 10;
-
-    std::vector<std::string> docs = generate_synthetic_corpus(20);
-    if (docs.empty()) return LEMBED_ERROR_ONNX_RUNTIME;
-
-    std::vector<int> threads_vec = {1, 4, 8};
-    std::vector<int> batch_vec = {4, 16};
-    std::vector<int> tokens_vec = {64, 256};
-
-    for (int t : threads_vec) {
-        if (t > cores) continue;
-        for (int b : batch_vec) {
-            for (int k : tokens_vec) {
-                auto r = bench_reranker_config(model_name, t, b, k, docs,
-                                                reranker_bench_query(), warmup, bench_iters);
-                if (r.latency_ms >= 999999) continue;
-                if (r.p95_latency_ms > target_latency_ms) continue;
-                if (r.throughput_docs_sec > best.throughput_docs_sec) {
-                    best = r;
-                }
-            }
-        }
-    }
-
-    if (best.latency_ms >= 999999) {
-        std::string canon = canonical_reranker_id(model_name);
-        autotune_cache_identity id =
-            default_reranker_identity(canon.c_str(), docs, objective, LEMBED_AUTOTUNE_QUICK);
-        return lembed_reranker_autotune_impl(canon.c_str(), docs, reranker_bench_query(),
-                                             LEMBED_AUTOTUNE_QUICK, objective, id,
-                                             "reranker_autotune", result);
-    }
-
-    *result = best;
-    return LEMBED_OK;
+/* Best configuration whose p95 fits `target_latency_ms`, ranked by `objective`
+ * (QUICK grid). Falls back to the unconstrained tuning when nothing fits. */
+extern "C" lembed_status_t lembed_reranker_auto_config(const char* model_name,
+                                                       double target_latency_ms,
+                                                       lembed_objective_t objective,
+                                                       lembed_reranker_tuning_result_t* result) {
+    return lembed_reranker_autotune_constrained(model_name, LEMBED_AUTOTUNE_QUICK, objective, 0,
+                                                target_latency_ms, result);
 }
 
-/* Profile-based auto-config */
-extern "C" lembed_status_t lembed_reranker_auto_config_profile(
-    const char* model_name,
-    lembed_reranker_profile_t profile,
-    lembed_reranker_tuning_result_t* result)
-{
-    if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
-
-    double target_ms = 300;
+/* Latency budget per profile: interactive 100 ms, balanced 300 ms, quality 1 s. */
+inline double reranker_profile_budget_ms(lembed_reranker_profile_t profile) {
     switch (profile) {
-        case LEMBED_PROFILE_INTERACTIVE: target_ms = 100; break;
-        case LEMBED_PROFILE_BALANCED:    target_ms = 300; break;
-        case LEMBED_PROFILE_QUALITY:     target_ms = 1000; break;
+        case LEMBED_PROFILE_INTERACTIVE: return 100.0;
+        case LEMBED_PROFILE_QUALITY:     return 1000.0;
+        case LEMBED_PROFILE_BALANCED:
+        default:                         return 300.0;
     }
-
-    return lembed_reranker_auto_config(model_name, target_ms, LEMBED_OBJECTIVE_BALANCED, result);
 }
 
-/* Clear reranker autotune cache.
- * NULL clears the whole reranker cache, as before. Any other value is resolved
- * to the registry code the entries are keyed on, so the two name forms purge
- * the same entries. An unknown model purges nothing. */
+extern "C" lembed_status_t lembed_reranker_auto_config_profile(
+    const char* model_name, lembed_reranker_profile_t profile,
+    lembed_reranker_tuning_result_t* result) {
+    return lembed_reranker_auto_config(model_name, reranker_profile_budget_ms(profile),
+                                       LEMBED_OBJECTIVE_BALANCED, result);
+}
+
+/* NULL clears the whole reranker cache; any other value is resolved to the
+ * registry code the entries are keyed on. */
 inline void lembed_reranker_autotune_clear_cache(const char* model_name) {
-    if (!model_name) {
-        clear_autotune_cache(nullptr, "reranker");
-        return;
-    }
-    clear_autotune_cache(canonical_reranker_id(model_name).c_str(), "reranker");
+    autotune_guard("reranker_autotune_clear_cache", [&]() {
+        if (!model_name) clear_autotune_cache(nullptr, reranker_cache_subdir());
+        else clear_autotune_cache(canonical_reranker_id(model_name).c_str(), reranker_cache_subdir());
+        return LEMBED_OK;
+    });
 }
 
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_RERANKER_HPP */
-
-
-
-

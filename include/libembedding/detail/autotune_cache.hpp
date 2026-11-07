@@ -207,25 +207,6 @@ inline std::string get_cache_path(const char* model_name, const std::string& sub
 }
 
 /* =========================================================================
- * Statistics
- * ========================================================================= */
-
-/* Linear-interpolation percentile over a pre-sorted vector.
- * Defined for every sample count (0, 1, n) and never reads out of bounds,
- * unlike an index computed as (size_t)(pct * n) which overflows the vector for
- * small n and silently returns the maximum for the rest. */
-inline double percentile_sorted(const std::vector<double>& sorted, double pct) {
-    if (sorted.empty()) return 0.0;
-    if (sorted.size() == 1) return sorted[0];
-    double rank = pct * (double)(sorted.size() - 1);
-    double lo_f = std::floor(rank);
-    double hi_f = std::ceil(rank);
-    if (lo_f == hi_f) return sorted[(size_t)lo_f];
-    double frac = rank - lo_f;
-    return sorted[(size_t)lo_f] + (sorted[(size_t)hi_f] - sorted[(size_t)lo_f]) * frac;
-}
-
-/* =========================================================================
  * Corpus fingerprint
  *
  * A tuning result is only valid for the corpus it was measured on. The
@@ -447,6 +428,103 @@ inline bool cache_identity_matches(const std::string& path, const autotune_cache
     if (!json_number_in_file(path, "mode", mode)) return false;
     return model == want.model && variant == want.variant && corpus == want.corpus &&
            (int)objective == want.objective && (int)mode == want.mode;
+}
+
+/* =========================================================================
+ * Generic cache entries
+ *
+ * Every tuner stores "identity + a few numbers". Describing those numbers as a
+ * field list lets one reader and one writer serve all of them, instead of one
+ * hand-written read/write pair per task that had to be kept in sync with its
+ * own expected-field count.
+ * ========================================================================= */
+
+/* One numeric field of an entry: its JSON key and the variable that holds it.
+ * Exactly one of the pointers is set. */
+struct cache_field {
+    const char* name = nullptr;
+    int* i = nullptr;
+    float* f = nullptr;
+    double* d = nullptr;
+};
+
+inline cache_field cache_int(const char* name, int& v)       { cache_field c; c.name = name; c.i = &v; return c; }
+inline cache_field cache_float(const char* name, float& v)   { cache_field c; c.name = name; c.f = &v; return c; }
+inline cache_field cache_double(const char* name, double& v) { cache_field c; c.name = name; c.d = &v; return c; }
+
+/* Path of the entry for `id` inside `subdir` ("" = cache root). */
+inline std::string cache_entry_path(const std::string& subdir, const autotune_cache_identity& id) {
+    std::string variant = cache_variant_key(id.variant.c_str(), id.corpus, id.objective, id.mode);
+    return get_cache_path(id.model.c_str(), subdir, variant);
+}
+
+/* Write identity + fields atomically. Returns false when the file could not be
+ * written; a tuning result is still valid without its cache entry. */
+inline bool write_cache_entry(const std::string& subdir, const autotune_cache_identity& id,
+                              const std::vector<cache_field>& fields) {
+    std::ostringstream os;
+    os.precision(10);
+    os << "{\n";
+    write_cache_identity(os, id);
+    for (size_t k = 0; k < fields.size(); k++) {
+        const cache_field& c = fields[k];
+        os << "  \"" << c.name << "\": ";
+        if (c.i) os << *c.i;
+        else if (c.f) os << *c.f;
+        else if (c.d) os << *c.d;
+        else os << 0;
+        os << (k + 1 < fields.size() ? ",\n" : "\n");
+    }
+    os << "}\n";
+    return write_file_atomic(cache_entry_path(subdir, id), os.str());
+}
+
+/* Read an entry into the variables named by `fields`.
+ *
+ * All-or-nothing: the identity must match and every field must be present and
+ * numeric, otherwise the variables are left untouched and false is returned. A
+ * field left at 0 would be applied as a configuration, so a partial entry is a
+ * miss, never a half-filled result. */
+inline bool read_cache_entry(const std::string& subdir, const autotune_cache_identity& id,
+                             const std::vector<cache_field>& fields) {
+    std::string path = cache_entry_path(subdir, id);
+    if (!cache_identity_matches(path, id)) return false;
+
+    std::ifstream f(path);
+    if (!f.is_open()) return false;
+
+    std::vector<double> values(fields.size(), 0.0);
+    std::vector<bool> seen(fields.size(), false);
+    std::string line;
+    while (std::getline(f, line)) {
+        for (size_t k = 0; k < fields.size(); k++) {
+            if (seen[k]) continue;
+            double v = 0.0;
+            if (json_number(line, fields[k].name, v)) {
+                values[k] = v;
+                seen[k] = true;
+                break;
+            }
+        }
+    }
+    for (bool s : seen)
+        if (!s) return false;
+
+    for (size_t k = 0; k < fields.size(); k++) {
+        const cache_field& c = fields[k];
+        if (c.i) {
+            if (values[k] < (double)std::numeric_limits<int>::min() ||
+                values[k] > (double)std::numeric_limits<int>::max())
+                return false;
+        }
+    }
+    for (size_t k = 0; k < fields.size(); k++) {
+        const cache_field& c = fields[k];
+        if (c.i) *c.i = (int)values[k];
+        else if (c.f) *c.f = (float)values[k];
+        else if (c.d) *c.d = values[k];
+    }
+    return true;
 }
 
 /* =========================================================================

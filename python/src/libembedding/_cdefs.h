@@ -638,6 +638,23 @@ lembed_status_t lembed_autotune_unified_config(
 
 void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name);
 
+typedef struct {
+    lembed_task_t task;
+    lembed_autotune_mode_t mode;
+    lembed_objective_t objective;
+    const char* const* texts;
+    int n_texts;
+    double max_latency_ms;
+    int min_tokens;
+} lembed_autotune_options_t;
+
+lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task);
+
+lembed_status_t lembed_autotune_ex(
+    const char* model_name,
+    const lembed_autotune_options_t* options,
+    lembed_unified_tuning_result_t* result);
+
 /* ═══ Sparse Auto-Tuner ════════════════════════════════════════════ */
 
 typedef struct {

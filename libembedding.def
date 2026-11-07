@@ -153,6 +153,8 @@ lembed_resolve_sparse_model
     lembed_autotune_unified
     lembed_autotune_unified_config
     lembed_autotune_unified_clear_cache
+    lembed_autotune_options_default
+    lembed_autotune_ex
 
     ; ---- Sparse / image auto-tuner ----
     lembed_sparse_autotune

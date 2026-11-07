@@ -56,6 +56,7 @@ int main(void) {
     ASSERT_SIZE(lembed_sparse_tuning_result_t, 48);
     ASSERT_SIZE(lembed_reranker_tuning_result_t, 48);
     ASSERT_SIZE(lembed_unified_tuning_result_t, 64);
+    ASSERT_SIZE(lembed_autotune_options_t, 48);
     ASSERT_SIZE(lembed_cache_hardware_info_t, 460);
     ASSERT_SIZE(lembed_tune_config_result_t, 24);
     ASSERT_SIZE(lembed_tune_cache_entry_t, 1104);

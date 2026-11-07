@@ -2,6 +2,21 @@
  * libembedding - detail/autotune_bench_text.hpp
  * Text embedding auto-tuner
  *
+ * Tunes how a dense text model is driven on this machine:
+ *   workers  -- independent sessions embedding disjoint shards in parallel
+ *   threads  -- ORT intra-op threads per session
+ *   batch    -- texts per inference call
+ *
+ * Only the task-specific parts live here (corpus, grid, how one configuration
+ * is measured, cache identity). Timing, scoring and selection come from the
+ * shared engine: autotune_measure.hpp, autotune_objective.hpp,
+ * autotune_search.hpp; the result layout from autotune_result.hpp.
+ *
+ * One timed call embeds the whole tuning corpus across all workers, so
+ * throughput is texts/s of the full configuration, and latency_ms /
+ * p95_latency_ms keep their historical meaning for this task: call time
+ * amortised per text.
+ *
  * Auteur: David Orel
  * Version: 1.11.0
  *
@@ -15,333 +30,263 @@
 #include "libembedding/text_embedding.h"
 #include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
+#include "autotune_corpus.hpp"
+#include "autotune_result.hpp"
+#include "autotune_search.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
-#include <sstream>
+#include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace lembed { namespace detail {
 
 /* =========================================================================
- * Text tuning cache
+ * Configuration space
  * ========================================================================= */
 
-/* Identity of a text tuning request. The corpus fingerprint is part of it, so
- * a custom-corpus tuning can never be served for the synthetic one nor for
- * another custom corpus. */
-inline autotune_cache_identity text_cache_identity(const char* model_code,
-                                                    const char* variant,
-                                                    const std::string& corpus,
-                                                    lembed_autotune_mode_t mode) {
-    autotune_cache_identity id;
-    id.model = model_code ? model_code : "";
-    id.variant = variant ? variant : "";
-    id.corpus = corpus;
-    id.objective = -1; /* the text tuner ranks with score_text_config only */
-    id.mode = (int)mode;
-    return id;
+struct text_tune_config {
+    int workers;
+    int threads;
+    int batch;
+};
+
+inline std::string describe_text_config(const text_tune_config& c) {
+    return "workers=" + std::to_string(c.workers) + " threads=" + std::to_string(c.threads) +
+           " batch=" + std::to_string(c.batch);
 }
 
-inline void write_text_cache(const autotune_cache_identity& id,
-                             const lembed_tuning_result_t& result) {
-    std::ostringstream os;
-    os << "{\n";
-    write_cache_identity(os, id);
-    os << "  \"workers\": " << result.workers << ",\n";
-    os << "  \"threads\": " << result.threads << ",\n";
-    os << "  \"batch_size\": " << result.batch_size << ",\n";
-    os << "  \"throughput_docs_sec\": " << result.throughput_docs_sec << ",\n";
-    os << "  \"latency_ms\": " << result.latency_ms << ",\n";
-    os << "  \"memory_mb\": " << result.memory_mb << "\n";
-    os << "}\n";
-    std::string variant = cache_variant_key(id.variant.c_str(), id.corpus, id.objective, id.mode);
-    write_file_atomic(get_cache_path(id.model.c_str(), "", variant), os.str());
-}
-
-/* Returns false on a miss, on a foreign entry and on a partial entry, so the
- * caller never receives a half-filled result. */
-inline bool read_text_cache(const autotune_cache_identity& id, lembed_tuning_result_t* out) {
-    if (!out) return false;
-    std::string variant = cache_variant_key(id.variant.c_str(), id.corpus, id.objective, id.mode);
-    std::string path = get_cache_path(id.model.c_str(), "", variant);
-    if (!cache_identity_matches(path, id)) return false;
-
-    std::ifstream f(path);
-    if (!f.is_open()) return false;
-
-    *out = {0};
-    int found = 0;
-    std::string line;
-    while (std::getline(f, line)) {
-        if (json_number(line, "workers", out->workers)) found++;
-        else if (json_number(line, "threads", out->threads)) found++;
-        else if (json_number(line, "batch_size", out->batch_size)) found++;
-        else if (json_number(line, "throughput_docs_sec", out->throughput_docs_sec)) found++;
-        else if (json_number(line, "latency_ms", out->latency_ms)) found++;
-        else if (json_number(line, "memory_mb", out->memory_mb)) found++;
-    }
-
-    /* A configuration field left at 0 would be applied as-is, so require every
-     * field to have been read before trusting the entry. */
-    static const int kExpectedFields = 6;
-    if (found < kExpectedFields) {
-        *out = {0};
-        return false;
-    }
-    return true;
-}
-
-
-/* Generate synthetic benchmark corpus with varied lengths */
-inline std::vector<std::string> generate_corpus(int n_samples) {
-    static const char* words[] = {
-        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-        "machine", "learning", "algorithms", "process", "data", "efficiently",
-        "natural", "language", "processing", "enables", "understanding", "semantic",
-        "embeddings", "represent", "meaningful", "vector", "representations",
-        "transformer", "models", "utilize", "attention", "mechanisms",
-        "deep", "neural", "networks", "learn", "patterns", "from", "training",
-        "optimization", "techniques", "improve", "convergence", "accuracy",
-        "inference", "latency", "throughput", "benchmark", "performance",
-        "production", "deployment", "scalable", "reliable", "systems"
+/* Parallel splits of the physical cores between sessions and intra-op threads.
+ *
+ * ORT's intra-op pool scales with physical cores; hyper-threads mostly compete
+ * for the same execution units, so splits are built on physical cores, plus a
+ * single "all logical cores" session (FULL) to let SMT prove itself. */
+inline std::vector<std::pair<int, int>> text_parallel_splits(lembed_autotune_mode_t mode) {
+    int physical = std::max(1, cpu_physical_cores());
+    int logical = std::max(physical, cpu_logical_cores());
+    std::vector<std::pair<int, int>> splits;
+    auto add = [&](int w, int t) {
+        w = std::max(1, w);
+        t = std::max(1, t);
+        for (const auto& s : splits)
+            if (s.first == w && s.second == t) return;
+        splits.push_back({w, t});
     };
-    int nwords = sizeof(words) / sizeof(words[0]);
-
-    /* Distribution: 40% short, 40% medium, 20% long */
-    int lengths[] = {16, 16, 16, 16, 64, 64, 64, 64, 128, 128};
-    int n_lengths = sizeof(lengths) / sizeof(lengths[0]);
-
-    std::vector<std::string> corpus;
-    corpus.reserve(n_samples);
-
-    for (int i = 0; i < n_samples; i++) {
-        int ntok = lengths[i % n_lengths];
-        std::string text;
-        for (int j = 0; j < ntok; j++) {
-            if (j > 0) text += " ";
-            text += words[(i * 7 + j) % nwords];
-        }
-        corpus.push_back(text);
+    add(1, physical);                    /* one session, every core */
+    if (physical >= 4) add(2, physical / 2);
+    add(physical, 1);                    /* one single-threaded session per core */
+    if (mode == LEMBED_AUTOTUNE_FULL) {
+        if (logical > physical) add(1, logical);
+        if (physical >= 8) add(4, physical / 4);
     }
-
-    return corpus;
+    return splits;
 }
 
-/* Benchmark a single text embedding configuration */
-inline double benchmark_text_config(
-        const std::vector<std::string>& corpus,
-        int workers, int threads, int batch_size,
-        double& out_latency_ms) {
+/* QUICK measures the parallel shapes at one batch size; FULL crosses every
+ * shape with the batch sizes that matter on CPU. */
+inline std::vector<text_tune_config> text_tune_grid(lembed_autotune_mode_t mode) {
+    std::vector<int> batches = (mode == LEMBED_AUTOTUNE_QUICK)
+                                   ? std::vector<int>{32}
+                                   : std::vector<int>{16, 32, 64, 128};
+    std::vector<text_tune_config> grid;
+    for (const auto& s : text_parallel_splits(mode))
+        for (int b : batches) grid.push_back({s.first, s.second, b});
+    return grid;
+}
 
-    if (corpus.empty()) return 0.0;
+/* Synthetic corpus size: every worker sees at least a few texts in QUICK and
+ * more than one batch in FULL, while QUICK stays within seconds. */
+inline int text_tune_corpus_size(lembed_autotune_mode_t mode) {
+    return (mode == LEMBED_AUTOTUNE_QUICK) ? 32 : 256;
+}
 
-    /* Create workers */
-    std::vector<lembed_text_embedding_t*> emb(workers);
+/* =========================================================================
+ * Measuring one configuration
+ * ========================================================================= */
+
+/* Creates `c.workers` sessions of `model`, then times one call = every worker
+ * embedding its shard of `corpus` concurrently. Sessions are created before the
+ * clock starts: load time is not what is being tuned. */
+inline autotune_measurement bench_text_config(lembed_text_model_t model,
+                                              const std::vector<std::string>& corpus,
+                                              const text_tune_config& c,
+                                              const autotune_protocol& proto) {
+    autotune_measurement failed;
+    if (corpus.empty() || c.workers <= 0) return failed;
+
     lembed_text_options_t opts = lembed_text_options_default();
-    opts.num_threads = threads;
-    opts.batch_size = batch_size;
+    opts.model = model;
+    opts.num_threads = c.threads;
+    opts.batch_size = c.batch;
     opts.offline = 1;
     opts.show_download_progress = 0;
 
-    for (int i = 0; i < workers; i++) {
-        if (lembed_text_embedding_create(&opts, &emb[i]) != LEMBED_OK) {
-            for (int j = 0; j < i; j++) lembed_text_embedding_free(emb[j]);
-            return 0.0;
-        }
+    /* Owned sessions: freed on every exit path, exceptions included. */
+    struct session_deleter {
+        void operator()(lembed_text_embedding_t* s) const { lembed_text_embedding_free(s); }
+    };
+    using session_ptr = std::unique_ptr<lembed_text_embedding_t, session_deleter>;
+
+    double rss_before = autotune_current_rss_mb();
+    std::vector<session_ptr> sessions;
+    sessions.reserve((size_t)c.workers);
+    for (int i = 0; i < c.workers; i++) {
+        lembed_text_embedding_t* s = nullptr;
+        if (lembed_text_embedding_create(&opts, &s) != LEMBED_OK) return failed;
+        sessions.emplace_back(s);
     }
 
-    int n = (int)corpus.size();
-    int per = n / workers;
+    std::vector<const char*> texts = corpus_c_strings(corpus);
+    const int n = (int)texts.size();
+    const int per = n / c.workers;
 
-    /* Warmup */
-    for (int w = 0; w < 3; w++) {
-        for (int i = 0; i < workers; i++) {
-            std::vector<const char*> ct;
-            int start = i * per;
-            int cnt = (i == workers - 1) ? n - start : per;
-            for (int k = 0; k < cnt; k++)
-                ct.push_back(corpus[start + k].c_str());
-            lembed_embeddings_t r = {0};
-            lembed_text_embedding_embed(emb[i], ct.data(), cnt, cnt, &r);
-            lembed_embeddings_free(&r);
-        }
-    }
+    auto embed_shard = [&](int w) -> bool {
+        int start = w * per;
+        int count = (w == c.workers - 1) ? n - start : per;
+        if (count <= 0) return true;
+        lembed_embeddings_t r = {0};
+        /* batch_size = 0: use the session's configured batch, i.e. c.batch. */
+        bool ok = lembed_text_embedding_embed(sessions[(size_t)w].get(), texts.data() + start,
+                                              count, 0, &r) == LEMBED_OK;
+        lembed_embeddings_free(&r);
+        return ok;
+    };
 
-    /* Measure */
-    auto t0 = std::chrono::high_resolution_clock::now();
-    int n_batches = 3;
+    auto one_call = [&]() -> bool {
+        if (c.workers == 1) return embed_shard(0);
+        std::vector<char> ok((size_t)c.workers, 0);
+        std::vector<std::thread> pool;
+        pool.reserve((size_t)c.workers);
+        /* Joins whatever was started, even if a later emplace_back throws:
+         * destroying a joinable std::thread would call std::terminate. */
+        struct joiner {
+            std::vector<std::thread>& threads;
+            ~joiner() {
+                for (auto& t : threads)
+                    if (t.joinable()) t.join();
+            }
+        } join_all{pool};
+        for (int w = 0; w < c.workers; w++)
+            pool.emplace_back([&, w]() { ok[(size_t)w] = embed_shard(w) ? 1 : 0; });
+        for (auto& t : pool) t.join();
+        return std::all_of(ok.begin(), ok.end(), [](char v) { return v != 0; });
+    };
 
-    for (int b = 0; b < n_batches; b++) {
-        std::vector<std::thread> th;
-        for (int i = 0; i < workers; i++) {
-            th.emplace_back([&emb, i, &corpus, per, n, workers]() {
-                std::vector<const char*> ct;
-                int start = i * per;
-                int cnt = (i == workers - 1) ? n - start : per;
-                for (int k = 0; k < cnt; k++)
-                    ct.push_back(corpus[start + k].c_str());
-                lembed_embeddings_t r = {0};
-                lembed_text_embedding_embed(emb[i], ct.data(), cnt, cnt, &r);
-                lembed_embeddings_free(&r);
-            });
-        }
-        for (auto& t : th) t.join();
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-    double total_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-    double total_texts = (double)n_batches * (double)corpus.size();
-    if (total_texts <= 0.0 || total_ms <= 0.0) {
-        for (int i = 0; i < workers; i++)
-            lembed_text_embedding_free(emb[i]);
-        out_latency_ms = 0.0;
-        return 0.0;
-    }
-    double docs_per_sec = total_texts / (total_ms / 1000.0);
-    out_latency_ms = total_ms / total_texts;
-
-    for (int i = 0; i < workers; i++)
-        lembed_text_embedding_free(emb[i]);
-
-    return docs_per_sec;
+    return autotune_measure_calls(proto, n, rss_before, one_call);
 }
 
-/* Scoring function: higher is better */
-inline double score_text_config(double throughput, double latency_ms, double memory_mb) {
-    double mem_penalty = 0.0;
-    if (memory_mb > 500.0) {
-        mem_penalty = (memory_mb - 500.0) / 100.0;
-    }
-    double lat_penalty = 0.0;
-    if (latency_ms > 20.0) {
-        lat_penalty = (latency_ms - 20.0) / 5.0;
-    }
-    return throughput - mem_penalty - lat_penalty;
-}
+/* =========================================================================
+ * Tuner
+ * ========================================================================= */
 
-/* Main text autotune implementation */
-inline lembed_status_t autotune_text_impl(
-        lembed_text_model_t model,
-        const std::vector<std::string>& corpus,
-        lembed_autotune_mode_t mode,
-        lembed_tuning_result_t* result) {
+/* Text entries stay at the cache root, where earlier releases put them. */
+inline const char* text_cache_subdir() { return ""; }
 
-    /* Get model code for cache key */
+/* Embedding is a batch workload: throughput is what the legacy entry points
+ * optimised, and remains the default. */
+inline lembed_objective_t text_default_objective() { return LEMBED_OBJECTIVE_THROUGHPUT; }
+
+/* One text tuning request. An empty corpus selects the synthetic one.
+ * max_latency_ms bounds the p95 of one call over the corpus (0 = none). */
+inline lembed_status_t text_autotune_run(lembed_text_model_t model,
+                                         const std::vector<std::string>& corpus,
+                                         lembed_autotune_mode_t mode,
+                                         lembed_objective_t objective,
+                                         double max_latency_ms,
+                                         lembed_unified_tuning_result_t* result) {
+    if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = make_unified_result(LEMBED_TASK_EMBEDDING);
+
     lembed_model_info_t info;
-    if (lembed_get_text_model_info(model, &info) != LEMBED_OK) {
-        return LEMBED_ERROR_MODEL_NOT_FOUND;
-    }
+    if (lembed_get_text_model_info(model, &info) != LEMBED_OK)
+        return autotune_fail(LEMBED_ERROR_MODEL_NOT_FOUND, "autotune: unknown text model index");
     const char* model_code = info.model_code;
 
-    int cores = cpu_logical_cores();
-    int n_samples = (mode == LEMBED_AUTOTUNE_QUICK) ? 16 : 64;
+    std::vector<std::string> bench_corpus =
+        corpus.empty() ? synthetic_text_corpus(text_tune_corpus_size(mode)) : corpus;
 
-    /* Generate corpus if not provided */
-    std::vector<std::string> bench_corpus;
-    if (corpus.empty()) {
-        bench_corpus = generate_corpus(n_samples);
-    } else {
-        bench_corpus = corpus;
+    /* The benchmarked corpus, the objective and the budget are all part of the
+     * identity: a tuning is never served for a request it does not answer. */
+    std::string variant = corpus.empty() ? "synthetic" : "custom";
+    if (max_latency_ms > 0.0) {
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "_p95_%.3f", max_latency_ms);
+        variant += buf;
     }
-    if (bench_corpus.empty()) return LEMBED_ERROR_INVALID_ARGUMENT;
+    autotune_cache_identity id;
+    id.model = model_code ? model_code : "";
+    id.variant = variant;
+    id.corpus = corpus_fingerprint(bench_corpus);
+    id.objective = (int)objective;
+    id.mode = (int)mode;
 
-    /* The corpus that is actually benchmarked is part of the cache identity,
-     * so the synthetic and custom tunings never share an entry. */
-    autotune_cache_identity id =
-        text_cache_identity(model_code, corpus.empty() ? "synthetic" : "custom",
-                            corpus_fingerprint(bench_corpus), mode);
+    if (read_unified_cache(text_cache_subdir(), id, *result)) return LEMBED_OK;
 
-    /* Check cache first */
-    lembed_tuning_result_t cached = {0};
-    if (read_text_cache(id, &cached)) {
-        if (result) *result = cached;
-        return LEMBED_OK;
-    }
+    std::fprintf(stderr, "autotune: cache miss for %s, running benchmark...\n", model_code);
 
-    fprintf(stderr, "autotune: cache miss for %s, running benchmark...\n", model_code);
+    autotune_search_options sopts;
+    sopts.objective = objective;
+    sopts.constraints.max_p95_ms = max_latency_ms;
+    sopts.protocol = autotune_protocol_for(mode);
+    sopts.label = "autotune";
 
-    /* Configurations to test */
-    struct Config { int workers; int threads; int batch; };
-    std::vector<Config> configs;
+    auto search = autotune_grid_search(
+        text_tune_grid(mode),
+        [&](const text_tune_config& c, const autotune_protocol& p) {
+            return bench_text_config(model, bench_corpus, c, p);
+        },
+        describe_text_config, sopts);
 
-    if (mode == LEMBED_AUTOTUNE_QUICK) {
-        int worker_opts[] = {1, std::min(4, cores), std::min(8, cores)};
-        for (int w : worker_opts) {
-            if (w > cores) continue;
-            configs.push_back({w, 1, 32});
-        }
-    } else {
-        int worker_opts[] = {1, 2, 4, 8, 16};
-        int thread_opts[] = {1, 2, 4};
-        int batch_opts[] = {16, 32, 64, 128, 256};
+    /* Nothing could be measured: report the failure, never an unmeasured default. */
+    if (!search.found()) return autotune_fail_no_config("autotune", id.model);
 
-        for (int w : worker_opts) {
-            if (w > cores) continue;
-            for (int t : thread_opts) {
-                if (w * t > cores) continue;
-                for (int b : batch_opts) {
-                    configs.push_back({w, t, b});
-                }
-            }
-        }
+    const text_tune_config& best = search.best_config();
+    const autotune_measurement& m = search.best_measurement();
+    result->workers = best.workers;
+    result->threads = best.threads;
+    result->batch_size = best.batch;
+    set_result_metrics(*result, m);
+    if (m.items_per_call > 0) {
+        result->latency_ms /= m.items_per_call;
+        result->p95_latency_ms /= m.items_per_call;
     }
 
-    /* Benchmark each config */
-    double best_score = -1e18;
-    int benchmarked = 0;
-    lembed_tuning_result_t best = {1, 1, 64, 0, 0, 0};
-
-    for (const auto& cfg : configs) {
-        double latency = 0.0;
-        double throughput = benchmark_text_config(bench_corpus, cfg.workers, cfg.threads, cfg.batch, latency);
-        if (throughput <= 0.0) {
-            /* Configuration failed to run (model load error, etc.) */
-            fprintf(stderr, "  autotune: workers=%d threads=%d batch=%d -> FAILED\n",
-                    cfg.workers, cfg.threads, cfg.batch);
-            continue;
-        }
-        benchmarked++;
-        double memory = cfg.workers * 100.0;
-        double score = score_text_config(throughput, latency, memory);
-
-        fprintf(stderr, "  autotune: workers=%d threads=%d batch=%d -> %.1f docs/s\n",
-                cfg.workers, cfg.threads, cfg.batch, throughput);
-
-        if (score > best_score) {
-            best_score = score;
-            best.workers = cfg.workers;
-            best.threads = cfg.threads;
-            best.batch_size = cfg.batch;
-            best.throughput_docs_sec = throughput;
-            best.latency_ms = latency;
-            best.memory_mb = memory;
-        }
-    }
-
-    /* No configuration could be benchmarked: do not cache a default that was
-     * never measured, and do not report it as a tuning result. */
-    if (benchmarked == 0) {
-        if (result) memset(result, 0, sizeof(*result));
-        return LEMBED_ERROR_ONNX_RUNTIME;
-    }
-
-    if (result) *result = best;
-
-    write_text_cache(id, best);
-
+    write_unified_cache(text_cache_subdir(), id, *result);
     return LEMBED_OK;
+}
+
+inline lembed_tuning_result_t to_text_result(const lembed_unified_tuning_result_t& u) {
+    lembed_tuning_result_t r = {0};
+    r.workers = u.workers;
+    r.threads = u.threads;
+    r.batch_size = u.batch_size;
+    r.throughput_docs_sec = u.throughput_docs_sec;
+    r.latency_ms = u.latency_ms;
+    r.memory_mb = u.memory_mb;
+    return r;
+}
+
+/* Legacy entry used by lembed_autotune / lembed_autotune_custom: default
+ * objective, no latency budget. */
+inline lembed_status_t autotune_text_impl(lembed_text_model_t model,
+                                          const std::vector<std::string>& corpus,
+                                          lembed_autotune_mode_t mode,
+                                          lembed_tuning_result_t* result) {
+    if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = lembed_tuning_result_t{0};
+    return autotune_guard("autotune", [&]() {
+        lembed_unified_tuning_result_t u;
+        lembed_status_t s =
+            text_autotune_run(model, corpus, mode, text_default_objective(), 0.0, &u);
+        if (s == LEMBED_OK) *result = to_text_result(u);
+        return s;
+    });
 }
 
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_TEXT_HPP */
-
-
-
-

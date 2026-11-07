@@ -57,6 +57,15 @@ if(WIN32)
 endif()
 add_test(NAME test_quantization_auto COMMAND test_quantization_auto)
 
+# Shared auto-tuning engine (measurement, objectives, grid search, cache
+# entries). No model and no network: runs in well under a second.
+add_executable(test_autotune_core test_autotune_core.cpp)
+target_link_libraries(test_autotune_core PRIVATE libembedding)
+if(WIN32)
+    target_link_libraries(test_autotune_core PRIVATE ONNXRuntime::ONNXRuntime)
+endif()
+add_test(NAME test_autotune_core COMMAND test_autotune_core)
+
 # HuggingFace parity for the BERT normaliser (no network): the expectations are
 # HF's, and the vocabulary is synthetic, so this runs in milliseconds.
 add_executable(test_tokenizer test_tokenizer.cpp)
@@ -100,13 +109,13 @@ endif()
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
