@@ -25,8 +25,12 @@
  * SPDX-License-Identifier: MIT
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/libembedding.h>
+#include <libembedding/detail/ggml_cpu_backend.hpp>
+#include <libembedding/detail/sparse_batching.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -508,6 +512,18 @@ bool well_formed(const lembed_sparse_embedding_t& e, int vocab) {
     return true;
 }
 
+bool same_embedding(const lembed_sparse_embedding_t& a,
+                    const lembed_sparse_embedding_t& b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+        if (a.indices[i] != b.indices[i] ||
+            std::fabs(a.values[i] - b.values[i]) > 1e-5f) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool descending(const lembed_sparse_embedding_t& e) {
     for (int i = 1; i < e.length; i++) {
         if (e.values[i - 1] < e.values[i]) return false;
@@ -565,21 +581,71 @@ static void test_output_shape(void) {
         lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx);
     if (!expect_ok(s, "a SPLADE GGUF loads")) return;
 
-    const char* texts[] = {"hello world", "the quick brown fox", "sparse embedding"};
+    const lembed_model_desc_t* desc = lembed_sparse_text_embedding_desc(ctx);
+    CHECK(desc && desc->batch_size == LEMBED_GGUF_DEFAULT_BATCH_SIZE,
+          "GGUF uses its measured default batch size");
+
+    const char* texts[] = {
+        "hello world",
+        "the quick brown fox",
+        "sparse embedding",
+        "a",
+        "machine learning models need lots of data",
+        "",
+        "hello world",
+    };
     lembed_sparse_embeddings_t out;
     memset(&out, 0, sizeof(out));
-    CHECK(lembed_sparse_text_embedding_embed(ctx, texts, 3, 4, nullptr, &out) == LEMBED_OK,
-          "three texts embed");
-    CHECK(out.count == 3, "one vector per text");
+    CHECK(lembed_sparse_text_embedding_embed(ctx, texts, 7, 4, nullptr, &out) == LEMBED_OK,
+          "texts embed in multiple length-bucketed batches");
+    CHECK(out.count == 7, "one vector per text");
     for (int i = 0; i < out.count; i++) {
         CHECK(well_formed(out.items[i], kVocab), "vector is well formed");
     }
+    lembed_sparse_embeddings_t individual;
+    memset(&individual, 0, sizeof(individual));
+    CHECK(lembed_sparse_text_embedding_embed(
+              ctx, texts, 7, 1, nullptr, &individual) == LEMBED_OK,
+          "individual sparse embeddings run");
+    if (individual.count == 7 && out.count == 7) {
+        for (int i = 0; i < 7; i++) {
+            CHECK(same_embedding(individual.items[i], out.items[i]),
+                  "length-bucketed batches preserve input result order");
+        }
+        CHECK(same_embedding(individual.items[0], individual.items[6]),
+              "duplicate texts have identical sparse results");
+    }
+    lembed_sparse_embeddings_t single_batch;
+    memset(&single_batch, 0, sizeof(single_batch));
+    CHECK(lembed_sparse_text_embedding_embed(
+              ctx, texts, 7, 7, nullptr, &single_batch) == LEMBED_OK,
+          "a single batch runs without sorting");
+    if (individual.count == 7 && single_batch.count == 7) {
+        for (int i = 0; i < 7; i++) {
+            CHECK(same_embedding(individual.items[i], single_batch.items[i]),
+                  "single-batch results match individual inference");
+        }
+    }
+    lembed_sparse_embeddings_free(&single_batch);
+    lembed_sparse_embeddings_free(&individual);
     CHECK(lembed_sparse_text_embedding_model_name(ctx) != nullptr,
           "the model reports a name");
     CHECK(lembed_sparse_text_embedding_max_length(ctx) == kPos,
           "the sequence is capped at the position table");
     lembed_sparse_embeddings_free(&out);
     lembed_sparse_text_embedding_free(ctx);
+
+    opts.batch_size = 7;
+    ctx = nullptr;
+    CHECK(lembed_sparse_text_embedding_create_from_gguf_path(
+              path.c_str(), &opts, &ctx) == LEMBED_OK,
+          "an explicit GGUF batch size loads");
+    if (ctx) {
+        desc = lembed_sparse_text_embedding_desc(ctx);
+        CHECK(desc && desc->batch_size == 7,
+              "an explicit GGUF batch size is preserved");
+        lembed_sparse_text_embedding_free(ctx);
+    }
 }
 
 /* top_k bounds the output, and keeps the heaviest terms. */
@@ -758,6 +824,106 @@ lembed_sparse_embeddings_t singles;
 
     lembed_sparse_embeddings_free(&singles);
     lembed_sparse_text_embedding_free(ctx);
+}
+
+/* The batch split: a pure function of the lengths, tested without a model
+ * because the fixture's 16 positions never reach a realistic token budget.
+ * The vectors themselves cannot depend on it -- test_batching_is_stable pins
+ * that -- so what is checked here is the cost bound and the progress. */
+static void test_token_budget_splits_batches(void) {
+    using lembed::detail::sparse_batch_end;
+
+    CHECK(sparse_batch_end(0, 10, 50, 4, 0) == 4,
+          "without a budget, batch_size alone bounds the batch");
+    CHECK(sparse_batch_end(8, 10, 50, 4, 0) == 10,
+          "the last batch stops at the end of the corpus");
+    CHECK(sparse_batch_end(0, 100, 100, 256, 512) == 5,
+          "the budget caps batch * padded width");
+    CHECK(sparse_batch_end(0, 100, 10, 16, 512) == 16,
+          "short documents are bounded by batch_size, not the budget");
+    CHECK(sparse_batch_end(3, 10, 2000, 16, 512) == 4,
+          "a document wider than the budget gets a batch of its own");
+    CHECK(sparse_batch_end(0, 10, 0, 0, 512) == 1,
+          "degenerate lengths and batch sizes still make progress");
+    CHECK(sparse_batch_end(10, 10, 5, 4, 512) == 10,
+          "a start past the corpus is the end");
+
+    /* Walk a length-sorted corpus the way the session does: every document
+     * is covered once, and no batch exceeds the budget unless it is a single
+     * oversized document. */
+    const size_t lengths[] = {700, 300, 260, 120, 64, 64, 30, 12, 12, 3};
+    const size_t n = sizeof(lengths) / sizeof(lengths[0]);
+    const int budget = 512;
+    size_t covered = 0;
+    bool within_budget = true;
+    for (size_t start = 0; start < n;) {
+        const size_t end = sparse_batch_end(start, n, lengths[start], 8, budget);
+        const size_t padded = (end - start) * lengths[start];
+        if (end - start > 1 && padded > (size_t)budget) within_budget = false;
+        covered += end - start;
+        start = end;
+    }
+    CHECK(covered == n, "the batches cover every document exactly once");
+    CHECK(within_budget, "no multi-document batch exceeds the token budget");
+}
+
+/* Several workers share one copy of the weights and split the batches of a
+ * call between them. They must give the same vectors, in the same order, as a
+ * single worker: each batch is still computed by one graph, only which graph
+ * computes it changes. Batches of two over eleven texts are six batches, so all
+ * three workers get work and the hand-out order is exercised. */
+static void test_workers_match_single_worker(void) {
+    const std::string path = fixture("plain", VARIANT_PLAIN);
+    if (path.empty()) return;
+
+    const char* texts[] = {
+        "hello", "the quick brown fox jumps over the lazy dog", "sparse",
+        "gguf model", "a b c d e f", "", "machine learning models need data",
+        "x", "batching must not change the numbers", "workers", "z y",
+    };
+    const int n = (int)(sizeof(texts) / sizeof(texts[0]));
+
+    lembed_sparse_options_t opts = lembed_sparse_options_default();
+    opts.top_k = 0;
+    opts.num_threads = 1;
+    opts.workers = 1;
+    lembed_sparse_embedding_ctx_t* single = nullptr;
+    if (!expect_ok(lembed_sparse_text_embedding_create_from_gguf_path(
+                       path.c_str(), &opts, &single),
+                   "a one-worker session loads")) {
+        return;
+    }
+
+    opts.num_threads = 3;
+    opts.workers = 3;
+    lembed_sparse_embedding_ctx_t* pooled = nullptr;
+    if (!expect_ok(lembed_sparse_text_embedding_create_from_gguf_path(
+                       path.c_str(), &opts, &pooled),
+                   "a three-worker session loads")) {
+        lembed_sparse_text_embedding_free(single);
+        return;
+    }
+    const lembed_model_desc_t* desc = lembed_sparse_text_embedding_desc(pooled);
+    CHECK(desc && desc->num_threads == 3, "the resolved thread budget is reported");
+
+    lembed_sparse_embeddings_t a, b;
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    CHECK(lembed_sparse_text_embedding_embed(single, texts, n, 2, nullptr, &a) ==
+              LEMBED_OK && a.count == n,
+          "one worker embeds every text");
+    CHECK(lembed_sparse_text_embedding_embed(pooled, texts, n, 2, nullptr, &b) ==
+              LEMBED_OK && b.count == n,
+          "three workers embed every text");
+    for (int i = 0; i < a.count && i < b.count; i++) {
+        CHECK(same_vector(a.items[i], b.items[i]),
+              "three workers give the same vector, in the same slot, as one");
+    }
+
+    lembed_sparse_embeddings_free(&a);
+    lembed_sparse_embeddings_free(&b);
+    lembed_sparse_text_embedding_free(single);
+    lembed_sparse_text_embedding_free(pooled);
 }
 
 /* Special tokens are dropped by id, and the ids come from the metadata. */
@@ -940,11 +1106,35 @@ static void test_inspect_agrees_with_runtime(void) {
     if (ctx) lembed_sparse_text_embedding_free(ctx);
 }
 
+/* A CPU backend is reachable through the registry, and the public accessor
+ * names what was loaded. With CPU dispatch this is the proof that a ggml-cpu-*
+ * variant was found next to the binary and scored; every other test here would
+ * fail with "no ggml CPU backend could be loaded" otherwise, but less legibly. */
+static void test_cpu_backend_is_loaded(void) {
+    CHECK(lembed::detail::ggml_cpu_device() != nullptr, "a ggml CPU device is registered");
+    CHECK(lembed::detail::ggml_cpu_buffer_type() != nullptr, "the CPU buffer type resolves");
+
+    ggml_backend_t backend = lembed::detail::ggml_cpu_backend_init();
+    CHECK(backend != nullptr, "a CPU backend instance can be created");
+    CHECK(lembed::detail::ggml_cpu_backend_set_n_threads(backend, 2),
+          "the thread-count setter is exported by the loaded backend");
+    if (backend) ggml_backend_free(backend);
+
+    const char* features = lembed_ggml_cpu_features();
+    CHECK(features != nullptr, "lembed_ggml_cpu_features() never returns NULL");
+    CHECK(features && features[0] != '\0', "the loaded CPU backend reports its features");
+    CHECK(features == lembed_ggml_cpu_features(), "the features string is computed once");
+    if (features) printf("ggml CPU features: %s\n", features);
+}
+
 int main(void) {
+    test_cpu_backend_is_loaded();
     test_output_shape();
     test_top_k_and_min_weight();
     test_storage_format();
     test_batching_is_stable();
+    test_token_budget_splits_batches();
+    test_workers_match_single_worker();
     test_special_tokens_are_removed();
     test_headless_file_is_refused();
     test_missing_vocab_size_is_refused();

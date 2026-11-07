@@ -224,7 +224,7 @@ def image_autotune(
 
     Args:
         model_name: Model name (e.g. "openai/clip-vit-base-patch32-quantized")
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        full: If True, run the FULL grid, else the QUICK one
 
     Returns:
         ImageTuningResult with optimal threads, batch_size.

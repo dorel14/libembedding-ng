@@ -1,6 +1,14 @@
 /*
  * libembedding - detail/autotune_bench_sparse.hpp
- * Sparse embedding auto-tuner
+ * Sparse (SPLADE-style) embedding auto-tuner
+ *
+ * Tunes the performance knobs of a sparse model: threads x batch_size.
+ *
+ * top_k, min_weight and storage_format are deliberately NOT tuned. They change
+ * the vectors that come out (how many terms survive, in which layout), so
+ * choosing them for speed would silently trade recall for throughput; their
+ * post-processing cost is also negligible next to the transformer itself. The
+ * result reports the values the caller would get by default, unchanged.
  *
  * Auteur: David Orel
  * Version: 1.11.0
@@ -15,170 +23,216 @@
 #include "libembedding/sparse_text_embedding.h"
 #include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
+#include "autotune_corpus.hpp"
+#include "autotune_result.hpp"
+#include "autotune_search.hpp"
+#include "autotune_session.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 namespace lembed { namespace detail {
 
-/* Benchmark a single sparse configuration */
-inline lembed_sparse_tuning_result_t bench_sparse_config(
-    const char* model_name,
-    int top_k,
-    float min_weight,
-    int storage_format,
-    int threads,
-    int batch_size,
-    const std::vector<std::string>& texts,
-    int warmup_iters,
-    int bench_iters)
-{
-    lembed_sparse_tuning_result_t res = {0};
-    res.top_k = top_k;
-    res.min_weight = min_weight;
-    res.storage_format = storage_format;
-    res.threads = threads;
-    res.batch_size = batch_size;
+/* =========================================================================
+ * Configuration space
+ * ========================================================================= */
 
-    /* Create sparse model */
-    lembed_sparse_options_t opts = lembed_sparse_options_default();
-    opts.num_threads = threads;
-    opts.batch_size = batch_size;
-    opts.top_k = top_k;
-    opts.min_weight = min_weight;
-    opts.storage_format = storage_format;
-    opts.show_download_progress = 0;
+struct sparse_tune_config {
+    int threads;
+    int batch;
+};
 
-    /* Resolve model */
-    int model_idx = lembed_find_sparse_model_by_code(model_name);
-    if (model_idx < 0) {
-        /* Unknown model: do not silently benchmark a different one. */
-        res.latency_ms = 999999;
-        return res;
-    }
-    opts.model = static_cast<lembed_sparse_model_t>(model_idx);
-
-    lembed_sparse_embedding_ctx_t* ctx = nullptr;
-    lembed_status_t s = lembed_sparse_text_embedding_create(&opts, &ctx);
-    if (s != LEMBED_OK) {
-        res.latency_ms = 999999;
-        return res;
-    }
-
-    /* Prepare texts */
-    std::vector<const char*> c_texts(texts.size());
-    for (size_t i = 0; i < texts.size(); i++) {
-        c_texts[i] = texts[i].c_str();
-    }
-
-    /* Warmup */
-    for (int i = 0; i < warmup_iters; i++) {
-        lembed_sparse_embeddings_t result = {0};
-        if (lembed_sparse_text_embedding_embed(ctx, c_texts.data(), (int)texts.size(), batch_size, &opts, &result) == LEMBED_OK)
-            lembed_sparse_embeddings_free(&result);
-    }
-
-    /* Benchmark */
-    std::vector<double> times;
-    times.reserve(bench_iters > 0 ? (size_t)bench_iters : 0);
-    for (int i = 0; i < bench_iters; i++) {
-        auto t0 = std::chrono::high_resolution_clock::now();
-        lembed_sparse_embeddings_t result = {0};
-        lembed_status_t es = lembed_sparse_text_embedding_embed(ctx, c_texts.data(), (int)texts.size(), batch_size, &opts, &result);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        if (es != LEMBED_OK) continue;
-        lembed_sparse_embeddings_free(&result);
-        times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
-    }
-
-    lembed_sparse_text_embedding_free(ctx);
-
-    /* Every iteration failed: report the sentinel so this configuration is
-     * never mistaken for the best one. */
-    if (times.empty()) {
-        res.latency_ms = 999999;
-        return res;
-    }
-
-    /* Compute stats */
-    std::sort(times.begin(), times.end());
-    double p50 = percentile_sorted(times, 0.50);
-
-    res.latency_ms = p50;
-    res.throughput_docs_sec = (p50 > 0) ? (1000.0 / p50) * texts.size() : 0;
-
-    return res;
+inline std::string describe_sparse_config(const sparse_tune_config& c) {
+    return "threads=" + std::to_string(c.threads) + " batch=" + std::to_string(c.batch);
 }
 
-/* Main sparse auto-tune function */
-extern "C" lembed_status_t lembed_sparse_autotune(
-    const char* model_name,
-    lembed_autotune_mode_t mode,
-    lembed_sparse_tuning_result_t* result)
-{
+/* Sparse models are BERT-base sized: single-threaded runs are never
+ * competitive, so the grid starts at half the physical cores. */
+inline std::vector<sparse_tune_config> sparse_tune_grid(lembed_autotune_mode_t mode) {
+    int physical = std::max(1, cpu_physical_cores());
+    int logical = std::max(physical, cpu_logical_cores());
+    std::vector<int> threads = {physical, logical};
+    if (mode == LEMBED_AUTOTUNE_FULL) threads.push_back(std::max(1, physical / 2));
+    std::sort(threads.begin(), threads.end());
+    threads.erase(std::unique(threads.begin(), threads.end()), threads.end());
+
+    std::vector<int> batches = (mode == LEMBED_AUTOTUNE_QUICK) ? std::vector<int>{4, 16}
+                                                               : std::vector<int>{4, 8, 16, 32};
+    std::vector<sparse_tune_config> grid;
+    for (int t : threads)
+        for (int b : batches) grid.push_back({t, b});
+    return grid;
+}
+
+inline int sparse_tune_corpus_size(lembed_autotune_mode_t mode) {
+    return (mode == LEMBED_AUTOTUNE_QUICK) ? 16 : 64;
+}
+
+/* =========================================================================
+ * Measuring one configuration
+ * ========================================================================= */
+
+/* The batch size is a per-call argument: one session per thread count. */
+using sparse_session_cache = autotune_session_cache<int, lembed_sparse_embedding_ctx_t>;
+
+inline lembed_sparse_options_t sparse_tune_options(lembed_sparse_model_t model, int threads) {
+    lembed_sparse_options_t opts = lembed_sparse_options_default();
+    opts.model = model;
+    opts.num_threads = threads;
+    opts.offline = 1;
+    opts.show_download_progress = 0;
+    return opts;
+}
+
+inline autotune_measurement bench_sparse_config(lembed_sparse_model_t model,
+                                                const std::vector<std::string>& texts,
+                                                const sparse_tune_config& c,
+                                                const autotune_protocol& proto,
+                                                sparse_session_cache& sessions) {
+    autotune_measurement failed;
+    if (texts.empty()) return failed;
+
+    lembed_sparse_options_t opts = sparse_tune_options(model, c.threads);
+    lembed_sparse_embedding_ctx_t* ctx =
+        sessions.get(c.threads, [&]() -> lembed_sparse_embedding_ctx_t* {
+            lembed_sparse_embedding_ctx_t* created = nullptr;
+            return lembed_sparse_text_embedding_create(&opts, &created) == LEMBED_OK ? created
+                                                                                    : nullptr;
+        });
+    if (!ctx) return failed;
+
+    std::vector<const char*> c_texts = corpus_c_strings(texts);
+    const int n = (int)c_texts.size();
+    return autotune_measure_calls(proto, n, sessions.rss_before_mb(), [&]() {
+        lembed_sparse_embeddings_t r = {0};
+        bool ok = lembed_sparse_text_embedding_embed(ctx, c_texts.data(), n, c.batch, &opts, &r) ==
+                  LEMBED_OK;
+        if (ok) lembed_sparse_embeddings_free(&r);
+        return ok;
+    });
+}
+
+/* =========================================================================
+ * Cache
+ * ========================================================================= */
+
+inline const char* sparse_cache_subdir() { return "sparse"; }
+
+/* Canonical registry code, so both name forms share entries and purges. */
+inline std::string canonical_sparse_id(const char* model) {
+    if (!model) return std::string();
+    int idx = lembed_resolve_sparse_model(model);
+    if (idx < 0) return std::string(model);
+    return std::string(lembed__sparse_models[idx].model_code);
+}
+
+/* =========================================================================
+ * Tuner
+ * ========================================================================= */
+
+inline lembed_objective_t sparse_default_objective() { return LEMBED_OBJECTIVE_THROUGHPUT; }
+
+/* `corpus` empty = synthetic corpus. max_latency_ms bounds the p95 of one call
+ * over the corpus (0 = none). */
+inline lembed_status_t sparse_autotune_run(const char* model_name,
+                                           const std::vector<std::string>& corpus,
+                                           lembed_autotune_mode_t mode,
+                                           lembed_objective_t objective,
+                                           double max_latency_ms,
+                                           lembed_unified_tuning_result_t* result) {
     if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = make_unified_result(LEMBED_TASK_SPARSE);
 
-    int threads = 4;
-    int batch_size = 256;
-    int n_docs = 20;
-    int warmup = 2;
-    int bench_iters = (mode == LEMBED_AUTOTUNE_QUICK) ? 5 : 15;
+    int idx = lembed_resolve_sparse_model(model_name);
+    if (idx < 0)
+        return autotune_fail(LEMBED_ERROR_MODEL_NOT_FOUND,
+                             std::string("sparse_autotune: unknown sparse model '") + model_name +
+                                 "'");
+    std::string canon = canonical_sparse_id(model_name);
 
-    /* Generate synthetic texts */
-    std::vector<std::string> texts;
-    for (int i = 0; i < n_docs; i++) {
-        texts.push_back("Machine learning is a branch of artificial intelligence that enables systems to learn from data.");
-    }
+    std::vector<std::string> texts =
+        corpus.empty() ? synthetic_text_corpus(sparse_tune_corpus_size(mode)) : corpus;
 
-    /* Configurations to test */
-    int top_k_options[] = {32, 64, 128};
-    float min_weight_options[] = {0.0f, 0.01f, 0.05f};
-    int storage_options[] = {0, 1}; /* dict, CSR */
+    char variant[64];
+    std::snprintf(variant, sizeof(variant), "%s_p95_%.3f", corpus.empty() ? "synthetic" : "custom",
+                  max_latency_ms);
+    autotune_cache_identity id;
+    id.model = canon;
+    id.variant = variant;
+    id.corpus = corpus_fingerprint(texts);
+    id.objective = (int)objective;
+    id.mode = (int)mode;
 
-    lembed_sparse_tuning_result_t best = {0};
-    best.latency_ms = 999999;
+    if (read_unified_cache(sparse_cache_subdir(), id, *result)) return LEMBED_OK;
 
-    int total = (int)(sizeof(top_k_options) / sizeof(int) *
-                      sizeof(min_weight_options) / sizeof(float) *
-                      sizeof(storage_options) / sizeof(int));
+    autotune_search_options sopts;
+    sopts.objective = objective;
+    sopts.constraints.max_p95_ms = max_latency_ms;
+    sopts.protocol = autotune_protocol_for(mode);
+    sopts.label = "sparse_autotune";
 
-    fprintf(stderr, "sparse_autotune: testing %d configurations (mode=%s)...\n",
-            total, mode == LEMBED_AUTOTUNE_QUICK ? "QUICK" : "FULL");
+    lembed_sparse_model_t model = (lembed_sparse_model_t)idx;
+    sparse_session_cache sessions(lembed_sparse_text_embedding_free);
+    auto search = autotune_grid_search(
+        sparse_tune_grid(mode),
+        [&](const sparse_tune_config& c, const autotune_protocol& p) {
+            return bench_sparse_config(model, texts, c, p, sessions);
+        },
+        describe_sparse_config, sopts);
+    sessions.reset();
+    if (!search.found()) return autotune_fail_no_config("sparse_autotune", canon);
 
-    for (int t : top_k_options) {
-        for (float w : min_weight_options) {
-            for (int s : storage_options) {
-                auto r = bench_sparse_config(model_name, t, w, s, threads, batch_size, texts, warmup, bench_iters);
+    lembed_sparse_options_t defaults = lembed_sparse_options_default();
+    result->threads = search.best_config().threads;
+    result->batch_size = search.best_config().batch;
+    result->top_k = defaults.top_k;
+    result->min_weight = defaults.min_weight;
+    result->storage_format = defaults.storage_format;
+    set_result_metrics(*result, search.best_measurement());
 
-                if (r.latency_ms >= 999999) continue;
-                if (r.throughput_docs_sec > best.throughput_docs_sec) {
-                    best = r;
-                }
-            }
-        }
-    }
-
-    /* No configuration could be benchmarked: do not report the sentinel as a
-     * tuning result. */
-    if (best.latency_ms >= 999999) {
-        *result = {0};
-        return LEMBED_ERROR_ONNX_RUNTIME;
-    }
-
-    fprintf(stderr, "sparse_autotune: best config: top_k=%d min_weight=%.2f storage=%d (%.1f docs/s)\n",
-            best.top_k, best.min_weight, best.storage_format, best.throughput_docs_sec);
-
-    *result = best;
+    write_unified_cache(sparse_cache_subdir(), id, *result);
     return LEMBED_OK;
+}
+
+inline lembed_sparse_tuning_result_t to_sparse_result(const lembed_unified_tuning_result_t& u) {
+    lembed_sparse_tuning_result_t r = {0};
+    r.top_k = u.top_k;
+    r.min_weight = u.min_weight;
+    r.storage_format = u.storage_format;
+    r.threads = u.threads;
+    r.batch_size = u.batch_size;
+    r.throughput_docs_sec = u.throughput_docs_sec;
+    r.latency_ms = u.latency_ms;
+    r.memory_mb = u.memory_mb;
+    return r;
+}
+
+extern "C" lembed_status_t lembed_sparse_autotune(const char* model_name,
+                                                  lembed_autotune_mode_t mode,
+                                                  lembed_sparse_tuning_result_t* result) {
+    if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = lembed_sparse_tuning_result_t{0};
+    return autotune_guard("sparse_autotune", [&]() {
+        lembed_unified_tuning_result_t u;
+        lembed_status_t s =
+            sparse_autotune_run(model_name, {}, mode, sparse_default_objective(), 0.0, &u);
+        if (s == LEMBED_OK) *result = to_sparse_result(u);
+        return s;
+    });
+}
+
+/* NULL clears every sparse entry; otherwise the model's entries only. */
+inline void lembed_sparse_autotune_clear_cache(const char* model_name) {
+    autotune_guard("sparse_autotune_clear_cache", [&]() {
+        if (!model_name) clear_autotune_cache(nullptr, sparse_cache_subdir());
+        else clear_autotune_cache(canonical_sparse_id(model_name).c_str(), sparse_cache_subdir());
+        return LEMBED_OK;
+    });
 }
 
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_SPARSE_HPP */
-
-
-
-

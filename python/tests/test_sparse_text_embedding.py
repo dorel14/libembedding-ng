@@ -110,13 +110,54 @@ def test_sparse_info(sparse_model):
     info = model.info()
     # Sparse models have dimension 0 (variable dimension)
     assert info.max_length > 0
-    assert info.batch_size > 0
+    assert info.batch_size == 256
     model.close()
 
 
 def test_sparse_name(sparse_model):
     model = sparse_model()
     assert "SPLADE" in model.name or "splade" in model.name.lower()
+    model.close()
+
+
+def _cosine(a, b) -> float:
+    da = dict(zip(a.indices.tolist(), a.values.tolist()))
+    db = dict(zip(b.indices.tolist(), b.values.tolist()))
+    dot = sum(w * db[t] for t, w in da.items() if t in db)
+    na = sum(w * w for w in da.values()) ** 0.5
+    nb = sum(w * w for w in db.values()) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def test_sparse_long_texts_are_split_by_token_budget(sparse_model):
+    """Six 512-token texts must not go to ONNX Runtime as one batch.
+
+    The SPLADE output is [batch, seq_len, vocab] F32: one batch of 256 such
+    texts asked for 16 GB and failed with ``bad allocation``. The token budget
+    caps batch * seq_len whatever batch_size says.
+    """
+    model = sparse_model(max_length=512)
+    long_text = " ".join(["sparse retrieval with learned term weights"] * 120)
+    results = model.embed([long_text] * 6, batch_size=256)
+    assert len(results) == 6
+    assert model.stats().batches_run > 1
+    model.close()
+
+
+def test_sparse_length_sorting_keeps_input_order(sparse_model):
+    """Texts are processed longest first; results must come back in input order."""
+    model = sparse_model()
+    texts = [
+        "short",
+        "a considerably longer sentence about sparse vectors and inverted indexes",
+        "medium length text here",
+        "x",
+        "another fairly long sentence, this one about tokenizers and padding masks",
+    ]
+    singles = [model.embed([t], batch_size=1)[0] for t in texts]
+    batched = model.embed(texts, batch_size=4)
+    for s, b in zip(singles, batched):
+        assert _cosine(s, b) > 0.9999
     model.close()
 
 

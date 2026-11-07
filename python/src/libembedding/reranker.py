@@ -238,7 +238,7 @@ def reranker_autotune(
 
     Args:
         model_name: Model name (e.g. "jinaai/jina-reranker-v1-turbo-en-quantized")
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        full: If True, run the FULL grid, else the QUICK one
         objective: "latency", "throughput", "balanced", or "memory"
 
     Returns:
@@ -303,7 +303,7 @@ def reranker_autotune_constrained(
 
     Args:
         model_name: Model name
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        full: If True, run the FULL grid, else the QUICK one
         objective: "latency", "throughput", "balanced", or "memory"
         min_tokens: Minimum acceptable max_tokens (quality constraint)
         max_latency_ms: Maximum acceptable latency in ms
@@ -550,7 +550,7 @@ def reranker_autotune_custom(
     Args:
         model_name: Model name (e.g. "jinaai/jina-reranker-v1-turbo-en-quantized")
         texts: Custom document corpus for benchmarking.
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        full: If True, run the FULL grid, else the QUICK one
         objective: "latency", "throughput", "balanced", or "memory"
 
     Returns:

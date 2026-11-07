@@ -3,12 +3,16 @@
  * Requires network access for model download.
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/libembedding.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string>
+#include <vector>
 
 #define ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -84,6 +88,49 @@ int main(void) {
     }
 
     lembed_embeddings_free(&result);
+
+    /* Batching must not change the vectors. Mixed lengths (2 to ~400 tokens) make
+     * the length-sorted batches split by token budget; each text is compared with
+     * the same text embedded alone, and must land in its own input slot. */
+    {
+        const int n = 24;
+        std::vector<std::string> store;
+        for (int i = 0; i < n; i++) {
+            std::string t;
+            int words = (i % 4 == 0) ? 2 : (i % 4 == 1) ? 30 : (i % 4 == 2) ? 120 : 380;
+            for (int w = 0; w < words; w++) t += (w ? " alpha" : "topic") + std::to_string((i * 7 + w) % 13);
+            store.push_back(t);
+        }
+        std::vector<const char*> ptrs;
+        for (auto& t : store) ptrs.push_back(t.c_str());
+
+        lembed_stats_t before = {0}, after = {0};
+        lembed_text_embedding_stats(ctx, &before);
+        lembed_embeddings_t batched = {0};
+        s = lembed_text_embedding_embed(ctx, ptrs.data(), n, 0, &batched);
+        ASSERT(s == LEMBED_OK, "embed mixed-length corpus in default batches");
+        lembed_text_embedding_stats(ctx, &after);
+        /* The 380-word texts alone exceed the budget: more than one batch. */
+        ASSERT(after.batches_run - before.batches_run > 1, "token budget splits the corpus");
+
+        if (s == LEMBED_OK) {
+            float worst = 1.0f;
+            for (int i = 0; i < n; i++) {
+                lembed_embeddings_t single = {0};
+                if (lembed_text_embedding_embed(ctx, &ptrs[i], 1, 0, &single) != LEMBED_OK) {
+                    ASSERT(0, "embed one text alone");
+                    continue;
+                }
+                float c = cosine_similarity(batched.data + (size_t)i * dim, single.data, dim);
+                if (c < worst) worst = c;
+                lembed_embeddings_free(&single);
+            }
+            printf("Worst batched-vs-alone cosine: %.6f\n", worst);
+            ASSERT(worst >= 0.9999f, "batched embeddings match single-text embeddings");
+        }
+        lembed_embeddings_free(&batched);
+    }
+
     lembed_text_embedding_free(ctx);
 
     printf("\n%d passed, %d failed\n", passes, failures);

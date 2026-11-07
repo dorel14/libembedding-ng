@@ -17,10 +17,7 @@
 #include "autotune_cache.hpp"
 #include "autotune_bench_reranker.hpp"
 
-#include <algorithm>
-#include <chrono>
 #include <cstdio>
-#include <cstring>
 #include <string>
 #include <vector>
 
@@ -51,9 +48,9 @@ inline bool split_query_and_documents(const std::vector<std::string>& texts,
 
 /* C API: reranker autotune with custom corpus
  *
- * Shares the tuning loop, the scoring and the cache with the default entry
- * point; only the corpus and the cache identity differ. The fingerprint of the
- * corpus is part of the identity, so a tuning measured on one corpus is never
+ * Shares the search, the scoring and the cache with the default entry point;
+ * only the workload differs. The fingerprint of the documents and the query is
+ * part of the cache identity, so a tuning measured on one corpus is never
  * served for another. */
 inline lembed_status_t lembed_reranker_autotune_custom_impl(
     const char* model_name,
@@ -66,7 +63,7 @@ inline lembed_status_t lembed_reranker_autotune_custom_impl(
     if (!model_name || !texts || n_texts <= 0 || !result)
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    try {
+    return autotune_guard("reranker_autotune(custom)", [&]() -> lembed_status_t {
         std::vector<std::string> corpus;
         corpus.reserve((size_t)n_texts);
         for (int i = 0; i < n_texts; i++)
@@ -77,16 +74,15 @@ inline lembed_status_t lembed_reranker_autotune_custom_impl(
         if (!split_query_and_documents(corpus, query, docs))
             return LEMBED_ERROR_INVALID_ARGUMENT;
 
-        std::string canon = canonical_reranker_id(model_name);
-        autotune_cache_identity id =
-            reranker_cache_identity(canon.c_str(), "custom", corpus_fingerprint(docs),
-                                    objective, mode);
-        return lembed_reranker_autotune_impl(canon.c_str(), docs, query.c_str(), mode, objective,
-                                             id, "reranker_autotune(custom)", result);
-    } catch (const std::exception& e) {
-        fprintf(stderr, "reranker_autotune_custom: exception: %s\n", e.what());
-        return LEMBED_ERROR_ONNX_RUNTIME;
-    }
+        reranker_tune_request req;
+        req.model_name = model_name;
+        req.mode = mode;
+        req.objective = objective;
+        req.docs = &docs;
+        req.query = query.c_str();
+        req.label = "reranker_autotune(custom)";
+        return reranker_autotune_legacy(req, result);
+    });
 }
 
 }} /* namespace lembed::detail */

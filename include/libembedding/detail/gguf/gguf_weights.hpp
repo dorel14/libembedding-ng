@@ -38,13 +38,13 @@
 #include <ggml.h>
 #include <ggml-alloc.h>
 #include <ggml-backend.h>
-#include <ggml-cpu.h>
 #include <gguf.h>
 
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include "../ggml_cpu_backend.hpp"
 #include "gguf_probe.hpp"
 
 namespace lembed {
@@ -107,7 +107,13 @@ struct HeadWeights {
     ggml_tensor* mlm_bias = nullptr;
 };
 
-/* Owns a CPU backend, the model weights and the parsed header.
+/* Owns the model weights and the parsed header -- and no backend.
+ *
+ * The weights live in a plain CPU buffer that nothing writes after loading,
+ * so one Weights can be shared, read-only, by several sessions running at the
+ * same time; each session brings its own backend and its own thread count.
+ * That is what lets the sparse runtime run N workers for the memory of one
+ * model.
  *
  * Non-copyable and non-movable: it holds raw ggml and gguf pointers, and a
  * silent double free in a destructor is not a trade worth making for a
@@ -120,7 +126,6 @@ public:
         if (ctx_) ggml_free(ctx_);
         /* ctx_ is freed before buf_ on purpose: the tensors point into buf_. */
         if (buf_) ggml_backend_buffer_free(buf_);
-        if (backend_) ggml_backend_free(backend_);
     }
 
     Weights(const Weights&) = delete;
@@ -165,7 +170,7 @@ public:
      * open(), and only if the file is one this runtime will accept: reporting
      * "no sparse head" costs nothing, reporting it after allocating a hundred
      * megabytes of weights costs a lot. */
-    bool load_tensors(int n_threads, std::string& err) {
+    bool load_tensors(std::string& err) {
         if (ctx_) {
             err = "weights are already loaded";
             return false;
@@ -177,13 +182,6 @@ public:
             err = "missing tensor '" + missing_ + "'";
             return false;
         }
-
-        backend_ = ggml_backend_cpu_init();
-        if (!backend_) {
-            err = "cannot initialise the ggml CPU backend";
-            return false;
-        }
-        if (n_threads > 0) ggml_backend_cpu_set_n_threads(backend_, n_threads);
 
         /* Two spare object slots of headroom: ggml_new_tensor can fail, and a
          * half-built context would leak whatever it already holds. */
@@ -220,8 +218,12 @@ public:
             dst.push_back(copy);
         }
 
-        buf_ = ggml_backend_alloc_ctx_tensors_from_buft(
-            ctx_, ggml_backend_cpu_buffer_type());
+        ggml_backend_buffer_type_t buft = buffer_type();
+        if (!buft) {
+            err = lembed::detail::ggml_cpu_backend_missing_message();
+            return false;
+        }
+        buf_ = ggml_backend_alloc_ctx_tensors_from_buft(ctx_, buft);
         if (!buf_) {
             err = "cannot allocate the weight buffer";
             return false;
@@ -252,8 +254,8 @@ public:
 
     /* Convenience for callers that have no reason to look at the header between
      * the two steps. */
-    bool load(const char* path, int n_threads, std::string& err) {
-        return open(path, err) && load_tensors(n_threads, err);
+    bool load(const char* path, std::string& err) {
+        return open(path, err) && load_tensors(err);
     }
 
     /* Drops the parsed header and with it the whole GGUF blob, which
@@ -270,8 +272,10 @@ public:
      * BERT vocabulary and 0 on an XLM-R one. */
     const std::vector<int32_t>& special_ids() const { return special_ids_; }
 
-    ggml_backend_t backend() const { return backend_; }
-    ggml_backend_buffer_type_t buffer_type() const { return ggml_backend_cpu_buffer_type(); }
+    /* The CPU device's buffer type, through the backend registry so the same
+     * code works with a dynamically loaded CPU variant (ggml_cpu_backend.hpp).
+     * nullptr when no CPU backend could be loaded. */
+    ggml_backend_buffer_type_t buffer_type() const { return lembed::detail::ggml_cpu_buffer_type(); }
 
 private:
     /* Tries each known spelling of a scalar field, first hit wins. Converters
@@ -482,7 +486,6 @@ private:
     std::vector<int32_t> special_ids_;
     std::string missing_;
 
-    ggml_backend_t backend_ = nullptr;
     ggml_backend_buffer_t buf_ = nullptr;
     ggml_context* ctx_ = nullptr;
     /* The gguf_context owns this: gguf_free() frees it. Never free it here. */

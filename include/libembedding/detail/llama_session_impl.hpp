@@ -25,6 +25,7 @@
 #include <thread>
 #include <vector>
 
+#include "ggml_cpu_backend.hpp"
 #include "worker_autotune_impl.hpp"
 #include "llama_scheduler_impl.hpp"
 
@@ -74,6 +75,9 @@ public:
         static std::once_flag backend_init;
         std::call_once(backend_init, [verbose]() {
             llama_ensure_log_callback();
+            /* With CPU dispatch llama.cpp has no device until the CPU variant
+             * is loaded; a no-op with a statically linked CPU backend. */
+            ggml_cpu_backend_ensure_loaded();
             llama_backend_init();
         });
 
@@ -281,6 +285,7 @@ public:
         static std::once_flag backend_init;
         std::call_once(backend_init, [verbose]() {
             llama_ensure_log_callback();
+            ggml_cpu_backend_ensure_loaded();  // see LlamaSession::load_from_file
             llama_backend_init();
         });
 

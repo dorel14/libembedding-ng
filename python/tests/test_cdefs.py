@@ -31,6 +31,7 @@ EXPECTED_SIZES_64 = {
     "lembed_sparse_tuning_result_t": 48,
     "lembed_reranker_tuning_result_t": 48,
     "lembed_unified_tuning_result_t": 64,
+    "lembed_autotune_options_t": 48,
     "lembed_cache_hardware_info_t": 460,
     "lembed_tune_config_result_t": 24,
     "lembed_tune_cache_entry_t": 1104,

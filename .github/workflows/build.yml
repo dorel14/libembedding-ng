@@ -2,7 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # `dev` too: feature branches are merged into `dev` first, and a PR there
+    # would otherwise run no CI at all until the later PR to `main`.
+    branches: [main, dev]
 
 jobs:
   all:

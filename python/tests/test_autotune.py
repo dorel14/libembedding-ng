@@ -11,11 +11,13 @@ import pytest
 from libembedding.autotune import (
     _do_autotune,
     _run_autotune,
+    _sample_workload,
     _to_c_string_array,
     auto_select_model,
     autotune,
     autotune_unified,
     clear_autotune_cache,
+    clear_autotune_cache_unified,
 )
 from libembedding.exceptions import LembedError, ModelNotFoundError
 from libembedding.sampling import _sample_corpus
@@ -176,3 +178,90 @@ def test_do_autotune_with_custom_corpus(require_cached_model):
     result = _do_autotune("BAAI/bge-small-en-v1.5", texts=["short text", "another one"])
     assert result.workers >= 1
     assert result.batch_size >= 1
+
+
+class TestUnifiedOptions:
+    """autotune_unified validates its options before reaching the C layer, and
+    the C layer rejects what Python cannot check (unknown models)."""
+
+    def test_unknown_objective(self):
+        with pytest.raises(ValueError, match="Unknown objective"):
+            autotune_unified("embedding", "BAAI/bge-small-en-v1.5", objective="speed")
+
+    def test_image_rejects_custom_workload(self):
+        with pytest.raises(ValueError, match="not supported for task 'image'"):
+            autotune_unified("image", "Qdrant/clip-ViT-B-32-vision", texts=["x"])
+
+    def test_min_tokens_is_reranking_only(self):
+        with pytest.raises(ValueError, match="min_tokens"):
+            autotune_unified("embedding", "BAAI/bge-small-en-v1.5", min_tokens=64)
+
+    def test_negative_budget(self):
+        with pytest.raises(ValueError, match=">= 0"):
+            autotune_unified("reranking", max_latency_ms=-1.0)
+
+    def test_non_str_workload(self):
+        with pytest.raises(TypeError, match="texts must contain str"):
+            autotune_unified("sparse", "Qdrant/Splade_PP_en_v1", texts=["ok", 3])
+
+    @pytest.mark.parametrize("task", ["embedding", "reranking", "sparse", "image"])
+    def test_unknown_model_is_reported(self, task):
+        """Resolved before any benchmark, so this needs no model and no network."""
+        with pytest.raises(LembedError):
+            autotune_unified(task, "no-such-org/no-such-model")
+
+    def test_reranking_sample_keeps_query_last(self):
+        docs = [f"document {i}" for i in range(500)]
+        sampled = _sample_workload("reranking", [*docs, "the query"], 50)
+        assert sampled[-1] == "the query"
+        assert len(sampled) <= 50
+
+    def test_options_defaults_follow_the_task(self):
+        from libembedding._binding import lib
+
+        assert lib.lembed_autotune_options_default(0).objective == lib.LEMBED_OBJECTIVE_THROUGHPUT
+        assert lib.lembed_autotune_options_default(1).objective == lib.LEMBED_OBJECTIVE_BALANCED
+        opts = lib.lembed_autotune_options_default(3)
+        assert opts.mode == lib.LEMBED_AUTOTUNE_QUICK
+        assert opts.n_texts == 0 and opts.max_latency_ms == 0.0 and opts.min_tokens == 0
+
+
+class TestUnifiedCacheClear:
+    @pytest.mark.parametrize("task", ["embedding", "reranking", "sparse", "image"])
+    def test_clear_is_idempotent_for_every_task(self, task):
+        assert clear_autotune_cache_unified(task, "no-such-org/no-such-model") is None
+        assert clear_autotune_cache_unified(task, "no-such-org/no-such-model") is None
+
+    def test_unknown_task(self):
+        with pytest.raises(ValueError, match="Unknown task"):
+            clear_autotune_cache_unified("video")
+
+
+@pytest.mark.network
+@pytest.mark.parametrize(
+    ("task", "model", "objective"),
+    [
+        ("sparse", "Qdrant/Splade_PP_en_v1", "throughput"),
+        ("reranking", "jinaai/jina-reranker-v1-turbo-en", "latency"),
+    ],
+)
+def test_autotune_unified_is_cached(task, model, objective):
+    """Second call is a cache hit returning the same configuration.
+
+    The tuners never download: a model missing from the local cache makes every
+    configuration fail, which lembed_last_error() reports as "could run".
+    """
+    try:
+        first = autotune_unified(task, model, objective=objective)
+    except LembedError as exc:
+        if "could run" in str(exc):
+            pytest.skip(f"{model} is not in the local cache ({exc})")
+        raise
+    again = autotune_unified(task, model, objective=objective)
+    assert first.threads >= 1 and first.batch_size >= 1
+    assert first.throughput_docs_sec > 0 and first.p95_latency_ms >= first.latency_ms
+    assert (again.threads, again.batch_size, again.max_tokens) == (
+        first.threads,
+        first.batch_size,
+        first.max_tokens,
+    )

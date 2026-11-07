@@ -3,7 +3,9 @@
  * No model downloads required.
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/libembedding.h>
 
 #include <stdio.h>
@@ -115,6 +117,10 @@ int main(void) {
         ASSERT(opts.batch_size == LEMBED_DEFAULT_BATCH_SIZE, "default batch_size 256");
         ASSERT(opts.offline == 0, "default offline false");
         ASSERT(opts.pooling == LEMBED_POOLING_MEAN, "default pooling MEAN");
+
+        lembed_sparse_options_t sparse_opts = lembed_sparse_options_default();
+        ASSERT(sparse_opts.batch_size == 0,
+               "sparse batch size uses backend-specific default");
     }
 
     /* Test: model_desc_t is available */
@@ -253,20 +259,26 @@ int main(void) {
         /* External data sits next to the graph; without the additional-files
          * entry the downloader fetches 414 KB of graph and the session cannot
          * load the 33 MB of weights. */
-        ASSERT(strcmp(info.model_code, lembed__text_models[LEMBED_TEXT_BGE_SMALL_EN_V15].model_code)
-                   != 0,
+        lembed_model_info_t fp32;
+        ASSERT(lembed_get_text_model_info(LEMBED_TEXT_BGE_SMALL_EN_V15, &fp32) == LEMBED_OK,
+               "BGE FP32 sibling is readable");
+        ASSERT(strcmp(info.model_code, fp32.model_code) != 0,
                "INT8 entry is a different repo from its FP32 sibling");
     }
 
     /* Guard the enum/table alignment.
      *
-     * lembed__text_models is indexed directly by lembed_text_model_t, so the
-     * table and the enum must stay in the same order. Adding a registry entry
+     * the registry is indexed directly by lembed_text_model_t, so the returned
+     * entries and the enum must stay in the same order. Adding a registry entry
      * in the middle of the table while appending its enum value at the end
      * compiles, passes the count check, and silently shifts every later model by
      * one: an enum that used to name Snowflake Arctic now loads BGE. Pin the
      * order with a few anchors spread across the table, including the last entry. */
     {
+        const lembed_model_info_t* models = NULL;
+        int model_count = 0;
+        ASSERT(lembed_list_text_models(&models, &model_count) == LEMBED_OK,
+               "text model table is readable");
         struct { int expected; const char* code; } anchors[] = {
             { LEMBED_TEXT_ALL_MINILM_L6_V2,           "Qdrant/all-MiniLM-L6-v2-onnx" },
             { LEMBED_TEXT_ALL_MINILM_L6_V2_Q,         "Xenova/all-MiniLM-L6-v2" },
@@ -278,11 +290,13 @@ int main(void) {
         for (size_t i = 0; i < sizeof(anchors) / sizeof(anchors[0]); i++) {
             int idx = anchors[i].expected;
             ASSERT(idx >= 0 && idx < LEMBED_TEXT_MODEL_COUNT, "anchor index in range");
-            ASSERT(strcmp(lembed__text_models[idx].model_code, anchors[i].code) == 0,
+            ASSERT(idx < model_count &&
+                       strcmp(models[idx].model_code, anchors[i].code) == 0,
                    "enum index selects the model it names");
         }
         /* The appended enum value must be the last table slot. */
-        ASSERT(strcmp(lembed__text_models[LEMBED_TEXT_MODEL_COUNT - 1].model_code,
+        ASSERT(model_count == LEMBED_TEXT_MODEL_COUNT &&
+                      strcmp(models[LEMBED_TEXT_MODEL_COUNT - 1].model_code,
                       "onnx-community/bge-small-en-v1.5-ONNX") == 0,
                "last table slot is the appended BGE INT8 entry");
     }

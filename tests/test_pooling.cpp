@@ -1,10 +1,13 @@
 /*
  * test_pooling.cpp - Unit tests for pooling and normalization
  * No model downloads required.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 #include <libembedding/detail/pooling.hpp>
 #include <libembedding/detail/normalize.hpp>
+#include <libembedding/detail/sparse_postprocess.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -127,6 +130,69 @@ int main() {
         lembed::detail::pool_mean(tensor, mask, 1, 1, 2, 2, out);
         ASSERT_NEAR(out[0], 1.0f, 1e-6f, "Mean 2D passthrough 0");
         ASSERT_NEAR(out[1], 2.0f, 1e-6f, "Mean 2D passthrough 1");
+    }
+
+    /* SPLADE max pooling should log once per vocabulary term and reuse scratch. */
+    {
+        const float logits[] = {
+            -2.0f, 0.5f, 0.0f,
+             1.0f, 0.25f, 0.0f,
+             4.0f, 0.1f, -1.0f
+        };
+        const int64_t first_mask[] = { 1, 1, 0 };
+        const int64_t second_mask[] = { 0, 0, 1 };
+        std::vector<float> scores(3, -1.0f);
+        const float* scratch_data = scores.data();
+        lembed::detail::SparseResult sparse;
+
+        lembed::detail::splade_pool(logits, 3, first_mask, 3, sparse, scores);
+        ASSERT(sparse.indices.size() == 2, "SPLADE drops zero and masked terms");
+        ASSERT(sparse.indices[0] == 0 && sparse.indices[1] == 1,
+               "SPLADE preserves vocabulary indices");
+        ASSERT_NEAR(sparse.values[0], std::log(2.0f), 1e-6f,
+                    "SPLADE logs the maximum positive logit");
+        ASSERT_NEAR(sparse.values[1], std::log(1.5f), 1e-6f,
+                    "SPLADE applies log after max pooling");
+        ASSERT(scores.data() == scratch_data,
+               "SPLADE reuses the caller-provided score buffer");
+
+        lembed::detail::splade_pool(logits, 3, second_mask, 3, sparse, scores);
+        ASSERT(sparse.indices.size() == 2,
+               "SPLADE resets the sparse result and scratch between documents");
+        ASSERT(sparse.indices[0] == 0 && sparse.indices[1] == 1,
+               "SPLADE returns only terms from the current document");
+        ASSERT_NEAR(sparse.values[0], std::log(5.0f), 1e-6f,
+                    "SPLADE pools only unmasked token logits");
+        ASSERT_NEAR(sparse.values[1], std::log(1.1f), 1e-6f,
+                    "SPLADE recomputes each term after scratch reuse");
+    }
+
+    /* Sparse pruning compacts in place and does not sort top-k results twice. */
+    {
+        lembed::detail::SparseResult sparse;
+        sparse.indices = { 4, 1, 3, 2, 0 };
+        sparse.values = { 0.8f, 0.7f, 0.6f, 0.1f, 0.4f };
+        lembed::detail::sparse_prune_and_sort(
+            sparse, 2, 0.3f, LEMBED_SPARSE_FORMAT_DICT);
+        ASSERT(sparse.indices.size() == 2, "Sparse pruning applies top-k");
+        ASSERT(sparse.indices[0] == 4 && sparse.indices[1] == 1,
+               "Sparse top-k stays sorted by descending weight");
+        ASSERT_NEAR(sparse.values[0], 0.8f, 1e-6f,
+                    "Sparse top-k keeps the highest weight");
+        ASSERT_NEAR(sparse.values[1], 0.7f, 1e-6f,
+                    "Sparse top-k keeps the second-highest weight");
+
+        sparse.indices = { 4, 1, 3, 2, 0 };
+        sparse.values = { 0.8f, 0.7f, 0.6f, 0.1f, 0.4f };
+        lembed::detail::sparse_prune_and_sort(
+            sparse, 2, 0.3f, LEMBED_SPARSE_FORMAT_INDEX_ORDER);
+        ASSERT(sparse.indices.size() == 2, "Index-order format keeps top-k");
+        ASSERT(sparse.indices[0] == 1 && sparse.indices[1] == 4,
+               "Index-order format sorts selected terms by index");
+        ASSERT_NEAR(sparse.values[0], 0.7f, 1e-6f,
+                    "Index-order format preserves the selected weight");
+        ASSERT_NEAR(sparse.values[1], 0.8f, 1e-6f,
+                    "Index-order format keeps index-weight associations");
     }
 
     printf("\n%d passed, %d failed\n", passes, failures);

@@ -197,4 +197,4 @@ def _is_local_path(model_name: str) -> bool:
 
 def _is_gguf_model(model_name: str) -> bool:
     """True if the model name looks like a GGUF file path."""
-    return model_name.endswith((".gguf", ".GGUF"))
+    return model_name.lower().endswith(".gguf")

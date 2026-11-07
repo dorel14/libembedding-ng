@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -37,6 +38,12 @@ struct SparseResult {
  * log(1 + relu)" would be free to drift, and the drift would only show up as a
  * fidelity number nobody could explain.
  *
+ * Equivalence (by monotonicity of g(x)=log(1+x) on x>=0 and relu):
+ *   max_t log(1 + relu(z_t)) == log(1 + max( max_t relu(z_t), 0 ))
+ * and max_t relu(z_t) == max( max_t z_t, 0 ) in effect for the positive maximum;
+ * taking max of raw logits and applying log(1+x) only when x>0 yields the same
+ * result while avoiding per-token relu+log and allocations in the hot path.
+ *
  * `logits` points at the first token of one document and is laid out
  * [num_tokens, vocab_size] row-major, which is both what an ONNX output buffer
  * looks like and what a ggml [vocab_size, n_tokens] tensor looks like in memory
@@ -47,32 +54,36 @@ struct SparseResult {
  */
 inline void splade_pool(const float* logits, int vocab_size,
                         const int64_t* token_mask, int num_tokens,
-                        SparseResult& out) {
+                        SparseResult& out, std::vector<float>& scores) {
     out.indices.clear();
     out.values.clear();
     if (vocab_size <= 0 || num_tokens <= 0 || !logits) return;
 
-    std::vector<float> scores((size_t)vocab_size, 0.0f);
+    scores.assign((size_t)vocab_size, 0.0f);
 
     for (int s = 0; s < num_tokens; s++) {
         if (token_mask && token_mask[s] == 0) continue;
 
         const float* tok = logits + (size_t)s * (size_t)vocab_size;
         for (int v = 0; v < vocab_size; v++) {
-            /* relu then log(1 + x) */
             const float x = tok[v];
-            if (x <= 0.0f) continue;
-            const float val = std::log(1.0f + x);
-            if (val > scores[v]) scores[v] = val;
+            if (x > scores[v]) scores[v] = x;
         }
     }
 
     for (int v = 0; v < vocab_size; v++) {
         if (scores[v] > 0.0f) {
             out.indices.push_back((int32_t)v);
-            out.values.push_back(scores[v]);
+            out.values.push_back(std::log(1.0f + scores[v]));
         }
     }
+}
+
+inline void splade_pool(const float* logits, int vocab_size,
+                        const int64_t* token_mask, int num_tokens,
+                        SparseResult& out) {
+    std::vector<float> scores;
+    splade_pool(logits, vocab_size, token_mask, num_tokens, out, scores);
 }
 
 /*
@@ -139,21 +150,20 @@ inline void sparse_prune_and_sort(SparseResult& sr, int top_k, float min_weight,
                                   int storage_format) {
     /* Apply min_weight pruning */
     if (min_weight > 0.0f) {
-        std::vector<int32_t> filt_idx;
-        std::vector<float> filt_val;
-        filt_idx.reserve(sr.indices.size());
-        filt_val.reserve(sr.values.size());
-        for (size_t j = 0; j < sr.indices.size(); j++) {
-            if (sr.values[j] >= min_weight) {
-                filt_idx.push_back(sr.indices[j]);
-                filt_val.push_back(sr.values[j]);
+        size_t keep = 0;
+        for (size_t read = 0; read < sr.indices.size(); read++) {
+            if (sr.values[read] >= min_weight) {
+                sr.indices[keep] = sr.indices[read];
+                sr.values[keep] = sr.values[read];
+                keep++;
             }
         }
-        sr.indices = std::move(filt_idx);
-        sr.values = std::move(filt_val);
+        sr.indices.resize(keep);
+        sr.values.resize(keep);
     }
 
     /* Apply top_k selection */
+    bool top_k_sorted = false;
     if (top_k > 0 && (int)sr.indices.size() > top_k) {
         std::vector<std::pair<float, int32_t>> val_idx;
         val_idx.reserve(sr.indices.size());
@@ -167,14 +177,13 @@ inline void sparse_prune_and_sort(SparseResult& sr, int top_k, float min_weight,
             [](const auto& a, const auto& b) {
                 return a.first > b.first;
             });
-        std::vector<int32_t> filt_idx(top_k);
-        std::vector<float> filt_val(top_k);
         for (int k = 0; k < top_k; k++) {
-            filt_idx[k] = val_idx[k].second;
-            filt_val[k] = val_idx[k].first;
+            sr.indices[(size_t)k] = val_idx[(size_t)k].second;
+            sr.values[(size_t)k] = val_idx[(size_t)k].first;
         }
-        sr.indices = std::move(filt_idx);
-        sr.values = std::move(filt_val);
+        sr.indices.resize((size_t)top_k);
+        sr.values.resize((size_t)top_k);
+        top_k_sorted = true;
     }
 
     /* Apply storage format: DICT (default) sorts by weight descending,
@@ -193,7 +202,7 @@ inline void sparse_prune_and_sort(SparseResult& sr, int top_k, float min_weight,
             sr.indices[j] = idx_val[j].first;
             sr.values[j] = idx_val[j].second;
         }
-    } else {
+    } else if (!top_k_sorted) {
         /* LEMBED_SPARSE_FORMAT_DICT (0) or unknown: sort by weight descending */
         std::vector<std::pair<float, int32_t>> val_idx;
         val_idx.reserve(sr.indices.size());
@@ -234,7 +243,7 @@ inline void sparse_result_store(lembed_sparse_embeddings_t* result, int index,
         free(result->items[index].values);
         result->items[index].indices = nullptr;
         result->items[index].values = nullptr;
-        return;
+        throw std::bad_alloc();
     }
     result->items[index].length = (int)sr.indices.size();
     memcpy(result->items[index].indices, sr.indices.data(),
@@ -246,7 +255,3 @@ inline void sparse_result_store(lembed_sparse_embeddings_t* result, int index,
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_SPARSE_POSTPROCESS_HPP */
-
-
-
-

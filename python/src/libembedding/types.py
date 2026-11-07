@@ -118,7 +118,14 @@ class ImageTuningResult:
 
 @dataclass(frozen=True)
 class UnifiedTuningResult:
-    """Result of unified auto-tuning for any task type."""
+    """Result of unified auto-tuning for any task type.
+
+    ``workers`` is set for "embedding", ``max_tokens`` for "reranking", and
+    ``top_k`` / ``min_weight`` / ``storage_format`` for "sparse" (the defaults a
+    sparse model uses: they shape the output, so they are reported, not tuned).
+    Latencies are per tuning call, except "embedding" where they are amortised
+    per text.
+    """
 
     task: str
     threads: int
@@ -129,6 +136,9 @@ class UnifiedTuningResult:
     latency_ms: float
     p95_latency_ms: float
     memory_mb: float
+    top_k: int = 0
+    min_weight: float = 0.0
+    storage_format: int = 0
 
 
 @dataclass(frozen=True)
