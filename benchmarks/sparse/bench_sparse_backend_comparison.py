@@ -16,7 +16,7 @@ Three rules drive the implementation, all inherited from
 
 2. **A missing backend is a result, not an error.** ``Sparse GGUF`` is reported
    as ``unavailable`` with the reason recorded in
-   ``benchmarks/sparse/LE-9.4-validation.md``: llama.cpp v0.3.0 loads a BERT GGUF
+   ``docs/archive/LE-9.4-validation.md``: llama.cpp v0.3.0 loads a BERT GGUF
    but never loads or executes the ``mlm_*`` projection head that SPLADE needs,
    so no ``[seq_len, vocab_size]`` logits tensor exists to post-process. The
    GGUF files themselves *do* carry the head, so a different runtime may well
@@ -82,7 +82,7 @@ The runtime is libembedding's own ggml graph, not llama.cpp: llama.cpp v0.3.0
 cannot load these files at all, because their tensor names (`enc.N.attn.q.weight`)
 and metadata keys (`bert.hidden_size`) are not the ones it looks for
 (`blk.N.attn_q.weight`, `%s.embedding_length`). See
-benchmarks/sparse/LE-9.4-validation.md section 3(d).
+docs/archive/LE-9.4-validation.md section 3(d).
 
 Kept as a named constant rather than deleted so that the reason the cell used to
 be unavailable stays greppable next to the code that changed its mind.
@@ -625,7 +625,7 @@ def write_report(
         "- The **Sparse GGUF** row is libembedding's own ggml runtime, not "
         "llama.cpp: llama.cpp v0.3.0 cannot load these files at all, their tensor "
         "names and metadata keys being the ones it does not look for "
-        "(`benchmarks/sparse/LE-9.4-validation.md` §3(d)). Fidelity against the "
+        "(`docs/archive/LE-9.4-validation.md` §3(d)). Fidelity against the "
         "sparse ONNX model is measured by "
         "`tests/test_sparse_gguf_vs_onnx.cpp`, not here."
     )

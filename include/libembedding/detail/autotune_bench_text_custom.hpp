@@ -17,12 +17,8 @@
 #include "autotune_cache.hpp"
 #include "autotune_bench_text.hpp"
 
-#include <algorithm>
-#include <chrono>
 #include <cstring>
-#include <fstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace lembed { namespace detail {

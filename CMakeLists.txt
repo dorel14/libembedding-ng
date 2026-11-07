@@ -6,6 +6,8 @@ project(libembedding
     DESCRIPTION "C/C++ embedding library using ONNX Runtime (header-only INTERFACE on Linux/macOS, shared library/DLL on Windows)"
     LANGUAGES C CXX
 )
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +29,16 @@ option(LIBEMBEDDING_BUILD_EXAMPLES "Build examples"                           ON
 option(LIBEMBEDDING_BUILD_BENCHMARKS "Build benchmarks"                       OFF)
 option(LIBEMBEDDING_BUILD_SHARED    "Build shared library for bindings"       OFF)
 option(LIBEMBEDDING_CURL_STATIC    "libcurl is linked statically or its runtime is managed by the caller" OFF)
+# One ggml CPU library per instruction-set level, the best one picked at run
+# time (GGML_BACKEND_DL + GGML_CPU_ALL_VARIANTS). OFF builds a single ggml-cpu
+# for the build machine (GGML_NATIVE), which must not be shipped. macOS keeps
+# the native build until the Apple Silicon variants are validated (P2.6).
+if(APPLE)
+    set(_lembed_cpu_dispatch_default OFF)
+else()
+    set(_lembed_cpu_dispatch_default ON)
+endif()
+option(LIBEMBEDDING_CPU_DISPATCH "Build every ggml CPU variant and select one at run time" ${_lembed_cpu_dispatch_default})
 
 # =========================================================================
 # Dependencies
@@ -186,8 +198,58 @@ set(GGML_OPENCL OFF CACHE BOOL "" FORCE)         # ggml-opencl/ (kernels/embed_k
 set(GGML_WEBGPU OFF CACHE BOOL "" FORCE)         # ggml-webgpu/ (wgsl-shaders/embed_wgsl.py)
 set(GGML_VIRTGPU OFF CACHE BOOL "" FORCE)        # ggml-virtgpu/
 
-add_subdirectory(${LLAMA_CPP_DIR} ${CMAKE_BINARY_DIR}/llama.cpp-build EXCLUDE_FROM_ALL)
+# CPU instruction set. Without dispatch ggml compiles for the build machine
+# (GGML_NATIVE: /arch:AVX512 on an AVX-512 runner), and the library then dies
+# with an illegal instruction on any CPU that lacks it. With dispatch ggml
+# builds every variant as a loadable module; GGML_NATIVE is incompatible with
+# that mode (ggml-cpu/CMakeLists.txt), and BUILD_SHARED_LIBS is required.
+if(LIBEMBEDDING_CPU_DISPATCH)
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
+else()
+    set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+endif()
 
+# llama.cpp's upstream install rules assume the unpruned source tree layout.
+# The parent project installs the vendored targets and headers explicitly.
+set(CMAKE_SKIP_INSTALL_RULES TRUE)
+add_subdirectory(${LLAMA_CPP_DIR} ${CMAKE_BINARY_DIR}/llama.cpp-build EXCLUDE_FROM_ALL)
+unset(CMAKE_SKIP_INSTALL_RULES)
+set_target_properties(llama ggml PROPERTIES PUBLIC_HEADER "")
+
+set_target_properties(llama PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+# The ggml CPU libraries actually built: ggml-cpu alone, or one
+# ggml-cpu-<variant> module per instruction-set level with CPU dispatch. Read
+# from the build system rather than listed here, since the variant set depends
+# on the compiler (MSVC builds fewer x86 variants than GCC/Clang).
+set(LIBEMBEDDING_GGML_CPU_TARGETS "")
+foreach(_dir "${LLAMA_CPP_DIR}/ggml/src" "${LLAMA_CPP_DIR}/ggml/src/ggml-cpu")
+    get_property(_dir_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_t IN LISTS _dir_targets)
+        if(_t MATCHES "^ggml-cpu(-[A-Za-z0-9_.]+)?$")
+            get_target_property(_t_type ${_t} TYPE)
+            if(_t_type STREQUAL "SHARED_LIBRARY" OR _t_type STREQUAL "MODULE_LIBRARY"
+               OR _t_type STREQUAL "STATIC_LIBRARY")
+                list(APPEND LIBEMBEDDING_GGML_CPU_TARGETS ${_t})
+            endif()
+        endif()
+    endforeach()
+endforeach()
+list(REMOVE_DUPLICATES LIBEMBEDDING_GGML_CPU_TARGETS)
+if(NOT LIBEMBEDDING_GGML_CPU_TARGETS)
+    message(FATAL_ERROR "no ggml CPU backend target was found under ${LLAMA_CPP_DIR}/ggml/src")
+endif()
+message(STATUS "libembedding: CPU dispatch=${LIBEMBEDDING_CPU_DISPATCH}, ggml CPU targets: ${LIBEMBEDDING_GGML_CPU_TARGETS}")
+
+set_target_properties(ggml ggml-base ${LIBEMBEDDING_GGML_CPU_TARGETS} PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${LLAMA_CPP_DIR}/ggml/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
 
 # =========================================================================
 # Main library target (Forced as SHARED DLL for Windows/Python cffi)
@@ -256,7 +318,10 @@ if(WIN32)
     # car elle va lier ONNXRuntime et CURL
     set_target_properties(libembedding PROPERTIES LINKER_LANGUAGE CXX)
 
-    target_link_libraries(libembedding PUBLIC llama ggml)
+    target_link_libraries(libembedding PRIVATE
+        $<BUILD_INTERFACE:llama>
+        $<BUILD_INTERFACE:ggml>
+    )
     target_include_directories(libembedding PUBLIC
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/ggml/include>
@@ -264,7 +329,12 @@ if(WIN32)
 else()
     # Header-only INTERFACE pour Linux / macOS
     add_library(libembedding INTERFACE)
-    target_link_libraries(libembedding INTERFACE llama ggml)
+    target_link_libraries(libembedding INTERFACE
+        $<BUILD_INTERFACE:llama>
+        $<BUILD_INTERFACE:ggml>
+        $<INSTALL_INTERFACE:llama>
+        $<INSTALL_INTERFACE:ggml>
+    )
     target_include_directories(libembedding INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${LLAMA_CPP_DIR}/include>
@@ -315,20 +385,20 @@ if(WIN32)
     target_include_directories(libembedding PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    target_link_libraries(libembedding PUBLIC
+    target_link_libraries(libembedding PRIVATE
         ONNXRuntime::ONNXRuntime
         cjson
     )
 
 if(NOT LIBEMBEDDING_NO_IMAGE)
-        target_link_libraries(libembedding PUBLIC libembedding_stb)
+        target_link_libraries(libembedding PRIVATE libembedding_stb)
     endif()
 
     if(NOT LIBEMBEDDING_NO_DOWNLOAD)
-        target_link_libraries(libembedding PUBLIC ${CURL_LIBRARY})
+        target_link_libraries(libembedding PRIVATE ${CURL_LIBRARY})
     else()
         target_compile_definitions(libembedding PUBLIC LIBEMBEDDING_NO_DOWNLOAD)
     endif()
@@ -341,7 +411,7 @@ else()
     target_include_directories(libembedding INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     target_link_libraries(libembedding INTERFACE
@@ -386,8 +456,9 @@ if(WIN32)
             list(APPEND _dlls "${LIBEMBEDDING_CURL_RUNTIME_DLL}")
         endif()
 
-        # llama.cpp runtime DLLs
-        foreach(_target llama ggml ggml-cpu ggml-base)
+        # llama.cpp runtime DLLs. With CPU dispatch the ggml-cpu-* variants
+        # must sit next to libembedding.dll: that is where it looks for them.
+        foreach(_target llama ggml ggml-base ${LIBEMBEDDING_GGML_CPU_TARGETS})
             if(TARGET ${_target})
                 list(APPEND _dlls "$<TARGET_FILE:${_target}>")
             endif()
@@ -410,6 +481,21 @@ if(WIN32)
 
     # Copy runtime DLLs next to libembedding.dll
     copy_runtime_dlls(libembedding)
+
+    # For executables that define LIBEMBEDDING_IMPLEMENTATION themselves (the
+    # examples and benchmarks): the DLL keeps its dependencies PRIVATE, so the
+    # implementation compiled into the executable links them directly. On
+    # Linux/macOS the INTERFACE target already carries them.
+    function(link_implementation_deps target_name)
+        target_link_libraries(${target_name} PRIVATE
+            llama ggml cjson ONNXRuntime::ONNXRuntime)
+        if(TARGET libembedding_stb)
+            target_link_libraries(${target_name} PRIVATE libembedding_stb)
+        endif()
+        if(NOT LIBEMBEDDING_NO_DOWNLOAD AND CURL_LIBRARY)
+            target_link_libraries(${target_name} PRIVATE ${CURL_LIBRARY})
+        endif()
+    endfunction()
 endif()
 
 # =========================================================================
@@ -450,6 +536,15 @@ if(NOT WIN32)
                     list(APPEND _to_copy "${CURL_LIBRARIES}")
                 endif()
             endif()
+        endif()
+
+        # CPU dispatch: the header-only build runs inside the executable, so
+        # ggml looks for its ggml-cpu-* modules next to it.
+        if(LIBEMBEDDING_CPU_DISPATCH)
+            foreach(_cpu IN LISTS LIBEMBEDDING_GGML_CPU_TARGETS)
+                list(APPEND _to_copy "$<TARGET_FILE:${_cpu}>")
+                add_dependencies(${target_name} ${_cpu})
+            endforeach()
         endif()
 
         list(REMOVE_DUPLICATES _to_copy)
@@ -503,7 +598,12 @@ if(LIBEMBEDDING_BUILD_SHARED)
     elseif(UNIX)
         set_target_properties(embedding_shared PROPERTIES INSTALL_RPATH "$ORIGIN")
     endif()
-    if(NOT WIN32 AND ONNXRuntime_LIBRARIES)
+    if(WIN32)
+        # libembedding.dll keeps its dependencies PRIVATE, and this target
+        # compiles the implementation again (libembedding_shlib.cpp), so it
+        # must link ORT, ggml/llama, cJSON and curl itself, like the examples.
+        link_implementation_deps(embedding_shared)
+    elseif(ONNXRuntime_LIBRARIES)
         copy_runtime_libs(embedding_shared)
     endif()
 endif()
@@ -511,10 +611,17 @@ endif()
 # =========================================================================
 # Install
 # =========================================================================
-include(GNUInstallDirs)
-
 install(DIRECTORY include/libembedding
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(DIRECTORY "${LLAMA_CPP_DIR}/include/"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
+)
+install(DIRECTORY "${LLAMA_CPP_DIR}/ggml/include/"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
 )
 
 install(DIRECTORY third_party/
@@ -522,13 +629,81 @@ install(DIRECTORY third_party/
     FILES_MATCHING PATTERN "*.h"
 )
 
-set(_install_targets libembedding cjson)
+set(_install_targets libembedding cjson llama ggml ggml-base)
+if(NOT LIBEMBEDDING_CPU_DISPATCH)
+    list(APPEND _install_targets ${LIBEMBEDDING_GGML_CPU_TARGETS})
+    # Without dynamic backend loading, ggml links every backend it enabled, so
+    # each one must be in the same export set. On macOS ggml enables BLAS
+    # (Accelerate) and Metal by default; elsewhere these targets do not exist.
+    foreach(_backend ggml-blas ggml-metal)
+        if(TARGET ${_backend})
+            list(APPEND _install_targets ${_backend})
+        endif()
+    endforeach()
+endif()
 if(NOT LIBEMBEDDING_NO_IMAGE AND TARGET libembedding_stb)
     list(APPEND _install_targets libembedding_stb)
 endif()
+if(LIBEMBEDDING_CPU_DISPATCH)
+    # Loadable modules: nothing links them, so they are not part of the export
+    # set. They go where ggml looks for them, next to the library that loads
+    # them (bin/ on Windows, beside libembedding.dll).
+    if(WIN32)
+        set(_lembed_cpu_module_dir ${CMAKE_INSTALL_BINDIR})
+    else()
+        set(_lembed_cpu_module_dir ${CMAKE_INSTALL_LIBDIR})
+    endif()
+    install(TARGETS ${LIBEMBEDDING_GGML_CPU_TARGETS}
+        LIBRARY DESTINATION ${_lembed_cpu_module_dir}
+        RUNTIME DESTINATION ${_lembed_cpu_module_dir}
+    )
+endif()
 install(TARGETS ${_install_targets}
     EXPORT libembedding-targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(EXPORT libembedding-targets
+    NAMESPACE libembedding::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libembedding
 )
 
-
-
+if(WIN32 OR LIBEMBEDDING_NO_DOWNLOAD)
+    set(LIBEMBEDDING_PACKAGE_REQUIRES_CURL OFF)
+else()
+    set(LIBEMBEDDING_PACKAGE_REQUIRES_CURL ON)
+endif()
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/libembeddingConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libembedding"
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfigVersion.cmake"
+    VERSION ${LIBEMBEDDING_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/libembeddingConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libembedding"
+)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindONNXRuntime.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libembedding/modules"
+)
+if(WIN32)
+    foreach(_runtime_dll onnxruntime.dll onnxruntime_providers_shared.dll)
+        if(EXISTS "${_LEMBED_ONNX_DIR}/${_runtime_dll}")
+            install(FILES "${_LEMBED_ONNX_DIR}/${_runtime_dll}"
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+            )
+        endif()
+    endforeach()
+    if(LIBEMBEDDING_CURL_RUNTIME_DLL)
+        install(FILES "${LIBEMBEDDING_CURL_RUNTIME_DLL}"
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+endif()

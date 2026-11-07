@@ -45,12 +45,13 @@ def _build_options(
     cache_dir,
     max_length: int,
     threads: int,
-    batch_size: int,
+    batch_size: int | None,
     offline: bool,
     show_download_progress: bool,
     top_terms: int,
     min_weight: float,
     storage_format: str,
+    workers: int = 0,
 ):
     """Fill a C options struct, returning it together with the cache_dir buffer.
 
@@ -65,12 +66,13 @@ def _build_options(
     opts.cache_dir = cache_buf
     opts.max_length = max_length
     opts.num_threads = threads
-    opts.batch_size = batch_size
+    opts.batch_size = 0 if batch_size is None else batch_size
     opts.offline = int(offline)
     opts.show_download_progress = int(show_download_progress)
     opts.top_k = top_terms
     opts.min_weight = min_weight
     opts.storage_format = _storage_format(storage_format)
+    opts.workers = workers
     return opts, cache_buf
 
 
@@ -87,13 +89,16 @@ class SparseTextEmbedding:
         cache_dir: Model cache directory.
         max_length: Max token length (0 = model default).
         threads: Number of threads (0 = auto).
-        batch_size: Internal batch size (default 256).
+        batch_size: Internal batch size (default is backend-specific: 256 for
+            ONNX and 16 for GGUF).
         offline: If True, use cached models only (default False).
         show_download_progress: Show download progress bar.
         top_terms: Max number of terms to keep per document (0 = all).
         min_weight: Minimum weight threshold for pruning (0.0 = no pruning).
         storage_format: Output format - "dict" (default, sorted by weight desc),
             "index_order" (sorted by index asc).
+        workers: GGUF only -- independent graphs sharing ``threads``
+            (0 = auto, half the threads). Ignored by ONNX Runtime.
         num_threads: Deprecated; use ``threads``.
     """
 
@@ -106,12 +111,13 @@ class SparseTextEmbedding:
         cache_dir: str | None = None,
         max_length: int = 0,
         threads: int = 0,
-        batch_size: int = 256,
+        batch_size: int | None = None,
         offline: bool = False,
         show_download_progress: bool = True,
         top_terms: int = 0,
         min_weight: float = 0.0,
         storage_format: str = "dict",
+        workers: int = 0,
         num_threads: int | None = None,
     ):
         if num_threads is not None:
@@ -134,6 +140,7 @@ class SparseTextEmbedding:
             top_terms=top_terms,
             min_weight=min_weight,
             storage_format=storage_format,
+            workers=workers,
         )
 
         ctx_ptr = ffi.new("lembed_sparse_embedding_ctx_t **")
@@ -155,7 +162,7 @@ class SparseTextEmbedding:
             else:
                 raise
 
-        self._finish(ctx_ptr, batch_size, opts)
+        self._finish(ctx_ptr, opts)
 
     @classmethod
     def from_gguf(
@@ -164,10 +171,11 @@ class SparseTextEmbedding:
         *,
         max_length: int = 0,
         threads: int = 0,
-        batch_size: int = 256,
+        batch_size: int | None = None,
         top_terms: int = 0,
         min_weight: float = 0.0,
         storage_format: str = "dict",
+        workers: int = 0,
         **kwargs,
     ) -> SparseTextEmbedding:
         """Load a SPLADE model from a local ``.gguf`` file.
@@ -179,11 +187,13 @@ class SparseTextEmbedding:
         Args:
             path: Path to the GGUF file.
             max_length: Max token length (0 = the model's own context length).
-            threads: Number of threads (0 = auto).
-            batch_size: Internal batch size (default 256).
+            threads: Total thread budget (0 = every logical CPU).
+            batch_size: Internal batch size (default 16 for GGUF).
             top_terms: Max number of terms to keep per document (0 = all).
             min_weight: Minimum weight threshold for pruning (0.0 = no pruning).
             storage_format: "dict" or "index_order".
+            workers: Independent graphs sharing ``threads`` (0 = auto, half the
+                threads: one per physical core on a hyper-threaded CPU).
             **kwargs: ``provider``, ``device_id``, ``cache_dir``, ``offline``,
                 ``show_download_progress`` -- accepted for signature symmetry.
 
@@ -202,6 +212,7 @@ class SparseTextEmbedding:
             top_terms=top_terms,
             min_weight=min_weight,
             storage_format=storage_format,
+            workers=workers,
         )
         if kwargs:
             raise TypeError(f"Unexpected keyword arguments: {sorted(kwargs)}")
@@ -214,7 +225,7 @@ class SparseTextEmbedding:
         )
         obj = cls.__new__(cls)
         obj._cache_dir_buf = cache_buf
-        obj._finish(ctx_ptr, batch_size, opts)
+        obj._finish(ctx_ptr, opts)
         return obj
 
     @classmethod
@@ -225,10 +236,11 @@ class SparseTextEmbedding:
         *,
         max_length: int = 0,
         threads: int = 0,
-        batch_size: int = 256,
+        batch_size: int | None = None,
         top_terms: int = 0,
         min_weight: float = 0.0,
         storage_format: str = "dict",
+        workers: int = 0,
         **kwargs,
     ) -> SparseTextEmbedding:
         """Download a GGUF sparse model from HuggingFace and load it.
@@ -238,11 +250,13 @@ class SparseTextEmbedding:
             filename: File name inside the repository, e.g.
                 "splade-pp-en-v1-q8_0.gguf".
             max_length: Max token length (0 = the model's own context length).
-            threads: Number of threads (0 = auto).
-            batch_size: Internal batch size (default 256).
+            threads: Total thread budget (0 = every logical CPU).
+            batch_size: Internal batch size (default 16 for GGUF).
             top_terms: Max number of terms to keep per document (0 = all).
             min_weight: Minimum weight threshold for pruning (0.0 = no pruning).
             storage_format: "dict" or "index_order".
+            workers: Independent graphs sharing ``threads`` (0 = auto, half the
+                threads: one per physical core on a hyper-threaded CPU).
             **kwargs: ``provider``, ``device_id``, ``cache_dir``, ``offline``,
                 ``show_download_progress``.
 
@@ -261,6 +275,7 @@ class SparseTextEmbedding:
             top_terms=top_terms,
             min_weight=min_weight,
             storage_format=storage_format,
+            workers=workers,
         )
         if kwargs:
             raise TypeError(f"Unexpected keyword arguments: {sorted(kwargs)}")
@@ -276,13 +291,15 @@ class SparseTextEmbedding:
         )
         obj = cls.__new__(cls)
         obj._cache_dir_buf = cache_buf
-        obj._finish(ctx_ptr, batch_size, opts)
+        obj._finish(ctx_ptr, opts)
         return obj
 
-    def _finish(self, ctx_ptr, batch_size: int, opts) -> None:
+    def _finish(self, ctx_ptr, opts) -> None:
         """Adopt a freshly created context. Shared by the three constructors."""
         self._ctx = ctx_ptr[0]
-        self._batch_size = batch_size
+        self._batch_size = lib.lembed_sparse_text_embedding_desc(
+            self._ctx
+        ).batch_size
         self._sparse_opts = opts
 
     @staticmethod
@@ -346,12 +363,12 @@ class SparseTextEmbedding:
                 sparse_opts.storage_format = _storage_format(storage_format)
 
         result = ffi.new("lembed_sparse_embeddings_t *")
+        # cffi releases the GIL for the duration of the C call on its own.
         check_status(
             lib.lembed_sparse_text_embedding_embed(
                 self._ctx, c_texts, n, bs, sparse_opts_ptr, result
             )
         )
-
         try:
             embeddings = []
             for i in range(result.count):
@@ -413,14 +430,16 @@ def sparse_autotune(
 
     Args:
         model_name: Model name (e.g. "prithivida/Splade_PP_en_v1")
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        full: If True, run the FULL grid, else the QUICK one
 
     Returns:
-        SparseTuningResult with optimal top_k, min_weight, storage_format.
+        SparseTuningResult with the optimal threads and batch_size. top_k,
+        min_weight and storage_format change the output vectors, so they are
+        not tuned: they report the model defaults.
 
     Example:
         >>> result = sparse_autotune("prithivida/Splade_PP_en_v1")
-        >>> print(f"Optimal: top_k={result.top_k}, storage={result.storage_format}")
+        >>> print(f"Optimal: threads={result.threads}, batch={result.batch_size}")
     """
     mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
     result = ffi.new("lembed_sparse_tuning_result_t *")
@@ -495,3 +514,11 @@ def sparse_best_config(
         latency_ms=result.latency_ms,
         memory_mb=result.memory_mb,
     )
+
+
+
+
+
+
+
+

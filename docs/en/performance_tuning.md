@@ -74,7 +74,8 @@ pool = TextEmbeddingPool(
     autotune=True,           # enable auto-tuning
     offline=True,
 )
-# → benchmark ~5-15s first time, then instant cache
+# → benchmark on the first call (~13 s in QUICK on an i7-1065G7 4C/8T,
+#   indicative: depends on the CPU and the model), then instant cache
 ```
 
 ### Autotune with your corpus (recommended)
@@ -96,25 +97,28 @@ pool = TextEmbeddingPool(
 
 ### Autotune cache
 
-Results are cached by machine + model:
-
-```
-    %LOCALAPPDATA%\libembedding\autotune\8x4_Intel_i7-1065G7_model_ort1.29_v1.4.0.json
-```
+Results are cached by machine + model, in a **single store** shared by the four
+tasks: `%LOCALAPPDATA%\libembedding\autotune` (`~/.cache/libembedding/autotune`
+outside Windows). Text sits at the root; `reranker/`, `sparse/` and `image/` have
+their own subdirectory. The file name encodes the hardware fingerprint and a
+short hash of the variant (workload, objective, mode).
 
 | Event | Behavior |
 |-------|----------|
 | First call | Benchmark + save cache |
-| Same machine + model | Cache hit (< 1ms) |
-| Change CPU/ORT/model | Cache miss → re-benchmark |
-| Same model, different corpus | Cache miss (the corpus fingerprint is part of the key) |
-| Same corpus, different objective or mode | Cache miss |
+| Same machine + model + workload | Cache hit (a few ms) |
+| Change CPU/ORT/library version/model | Cache miss → re-benchmark |
+| Same model, different workload | Cache miss (the workload fingerprint is part of the key) |
+| Same workload, different objective, mode or constraint | Cache miss |
 
 A cache entry is reused only when **every** identity dimension matches: model,
-variant (`synthetic` / `custom`), corpus fingerprint, objective and mode. A
-corrupt or truncated file is treated as a miss, never as a result. Writes are
-atomic (temporary file then rename), so an interruption cannot leave a partial
-result behind.
+hardware and software fingerprint, workload fingerprint, objective, mode and
+constraints (p95 budget, `min_tokens`). A corrupt or truncated file is treated as
+a miss, never as a result. Writes are atomic (temporary file then rename), so an
+interruption cannot leave a partial result behind. Sparse, image and constrained
+results are now cached too (previously a repeated sparse or image call re-ran a
+95 to 170 s tuning). Older text-tuner entries are invalidated: they had been
+measured on the default model whatever model was requested.
 
 Tune on your own corpus:
 
@@ -161,27 +165,134 @@ pool = TextEmbeddingPool(
 
 ### Unified Auto-Tuning API
 
-The unified auto-tuner provides a single entry point for all task types. It routes to the appropriate backend implementation and caches results using a hardware fingerprint.
+`autotune_unified()` is the single entry point for the four tasks
+(`"embedding"`, `"reranking"`, `"sparse"`, `"image"`). It runs on
+`lembed_autotune_ex()` on the C side ([C reference](c_api/autotuner.html)).
 
 ```python
-from libembedding import (
-    autotune_unified,
-    LEMBED_TASK_EMBEDDING,    # text embedding
-    LEMBED_TASK_SPARSE,      # sparse embedding
-    LEMBED_TASK_IMAGE,       # image embedding
-    LEMBED_TASK_RERANKING,   # reranking
-    LEMBED_AUTOTUNE_QUICK,   # 5-15s
-    LEMBED_AUTOTUNE_FULL,    # 30-120s
-)
+from libembedding import autotune_unified, clear_autotune_cache_unified
 
-# Tune a reranker model
+# Defaults: QUICK, synthetic corpus, objective "throughput"
+# (embedding, sparse, image) or "balanced" (reranking)
+result = autotune_unified("embedding", "BAAI/bge-small-en-v1.5")
+
+# Reranker on your real data: the LAST text is the query.
+# p95 budget of 300 ms for one whole request, never truncate below 128 tokens.
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",
+    texts=[*candidate_documents, user_query],
+    max_latency_ms=300.0,
+    min_tokens=128,
 )
-# result: UnifiedTuningResult with threads, batch_size, max_tokens, latency, etc.
+print(result.threads, result.batch_size, result.max_tokens)
+if result.p95_latency_ms > 300.0:
+    print("budget not reachable: best unconstrained configuration returned")
+
+# Purge one task's cache for a model (None = every model of that task)
+clear_autotune_cache_unified("reranking", "jinaai/jina-reranker-v1-turbo-en-quantized")
 ```
+
+Parameters: `full=False` (QUICK) or `True` (FULL); `objective` (`"latency"`,
+`"throughput"`, `"balanced"`, `"memory"`, `None` = task default); `texts`
+(custom workload, sampled down to `max_sample_size=100`; rejected for `"image"`);
+`max_latency_ms` (p95 budget per tuning call, `0` = none); `min_tokens`
+(reranking only). `model_name` has a default only for `"embedding"` and
+`"reranking"`.
+
+**Objectives.** `latency` minimizes the tail cost P50 + ½(P95 − P50);
+`throughput` maximizes throughput; `balanced` averages the two normalized costs;
+`memory` minimizes the RSS delta (16 MB floor).
+
+**Budget and fallback.** Only configurations whose p95 fits in `max_latency_ms`
+are eligible. When none fits, the best **unconstrained** configuration is returned
+(no error): compare `result.p95_latency_ms` with the budget. For the reranker the
+fallback keeps the `min_tokens` floor. A tuning call is one request over the whole
+workload (the documents of a reranking query, or the full batch); the latencies in
+the result are **per call**, except for `"embedding"` where they are amortised
+**per text**.
+
+**`min_tokens` and truncation.** The reranker tuner chooses `max_tokens`
+(256/64 in QUICK; 256/128/64/32 in FULL), which **truncates documents**: this is a
+quality/speed trade-off, not a pure optimization. `min_tokens` sets the acceptable
+floor. On equal performance (within 5 %), the configuration that truncates least
+wins.
+
+**What the tuner deliberately does not set.** For sparse, `top_k`, `min_weight`
+and `storage_format` change the vectors produced, not only the speed: they are no
+longer chosen by the tuner (only threads × batch are). `UnifiedTuningResult` still
+exposes those three fields, filled with the model defaults, for information.
+
+**Grids.** Text: splits of the *P* physical cores between workers and threads
+(1×P, 2×P/2, P×1 in QUICK; + 1×logical and 4×P/4 in FULL) × batch (32 in QUICK;
+16/32/64/128 in FULL), on a synthetic corpus of 32 (QUICK) or 256 (FULL) texts.
+Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
+`max_tokens` × batch. Sparse and image: threads × batch.
+
+### Measurement methodology
+
+The four tuners share one engine:
+
+- **Protocol.** QUICK: 1 warmup + 3 timed calls per configuration; FULL: 2 warmups
+  + 10 calls. Every call is timed individually (monotonic clock); P50 and P95 are
+  derived from them.
+- **Racing.** A configuration whose **first two** timed calls both exceed 2.5 × the
+  best P50 seen so far is stopped without finishing its calls (except for the
+  `memory` objective, which does not rely on latency).
+- **Session reuse.** Grid points that differ only by batch size share one ONNX
+  Runtime session instead of rebuilding it.
+- **Unit-free costs.** Every term is divided by the best value observed among the
+  eligible configurations; a cost is "how many times worse than the best" (lower
+  is better). Constraints (p95 budget, `min_tokens`) filter *before* normalization,
+  so an ineligible configuration cannot distort the references.
+- **5 % tie rule.** Costs within 5 % of the best are treated as a tie, resolved
+  toward the preferred configuration (first grid point: fewer sessions, less
+  truncation, smaller batch). The choice therefore does not flip on measurement
+  noise.
+- **Memory.** `memory_mb` is an **estimate**: RSS growth across "create + warmup",
+  not an absolute peak. Peak RSS is a per-process high-water mark: do not read it
+  as the exact footprint of one configuration.
+
+### bench_autotune measurements
+
+Measured with `benchmarks/bench_autotune.cpp` (public C API only), QUICK mode,
+Release build, **i7-1065G7 (4C/8T)**, before → after the engine rework (commit
+`e263a90` and following):
+
+| Task (model) | Cold tuning | Repeated call (cache) | Throughput of chosen config vs library defaults |
+|--------------|-------------|-----------------------|-------------------------------------------------|
+| text (`all-MiniLM-L6-v2`) | 22.7 → 12.6 s | ~10–15 ms (already cached before) | ×1.77 |
+| reranker (`jina-reranker-v1-turbo-en`) | 144 → 47 s | ~10–15 ms (already cached before) | ×3.26 |
+| sparse (`Splade_PP_en_v1`) | 96 → 33 s | 95.6 s → 11 ms | ×1.01 |
+| image (`clip-ViT-B-32-vision`) | 166 → 28 s | 168 s → 13 ms | ×1.01 |
+
+How to read this table:
+
+- Throughput is measured on an **evaluation workload distinct** from the tuner's,
+  against the library defaults.
+- **Text ×1.77**: the earlier ×1.23 was measured on the *wrong model* (the old
+  tuner always measured the default model).
+- **Reranker ×3.26**: obtained mostly by **truncating to 64 tokens**. It is a speed
+  gain paid for with context seen by the model; use `min_tokens` if ranking quality
+  matters.
+- **Sparse ×1.01 and image ×1.01**: the defaults are already close to optimal on
+  this machine; the tuner confirms it, it does not manufacture a gain.
+- **Observed evaluation noise is 6 to 14 %** on this laptop: do not present small
+  differences as significant. These durations depend on the CPU, the model and the
+  workload: they are indicative, not guarantees.
+
+To reproduce (the Windows CMake generator is multi-config; models must already be
+in the local cache, nothing is downloaded):
+
+```powershell
+cmake -S . -B build -DLIBEMBEDDING_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --target bench_autotune
+build/benchmarks/Release/bench_autotune.exe --task text   # text | rerank | sparse | image
+# options: --model <code> (the task's model), --runs <n> (default 5, median reported)
+```
+
+The JSON report goes to stdout, progress to stderr.
 
 ### llama.cpp / GGUF Auto-Tuning
 

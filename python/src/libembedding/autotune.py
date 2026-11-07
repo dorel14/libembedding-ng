@@ -96,7 +96,8 @@ def autotune(
 
     Args:
         model_name: HuggingFace model code (e.g. "Qdrant/all-MiniLM-L6-v2-onnx")
-        full: If True, run exhaustive tuning (30-120s). Otherwise quick (5-15s).
+        full: If True, run the FULL grid, otherwise the QUICK one (duration
+            depends on the model and CPU).
         texts: Optional custom corpus for benchmarking. If None, a synthetic
             corpus is generated. The corpus is stratified-sampled down to
             ``max_sample_size`` first, because the tuner benchmarks every
@@ -150,61 +151,120 @@ _TASK_RERANKING = 1
 _TASK_IMAGE = 2
 _TASK_SPARSE = 3
 
+_TASKS = {
+    "embedding": _TASK_EMBEDDING,
+    "reranking": _TASK_RERANKING,
+    "image": _TASK_IMAGE,
+    "sparse": _TASK_SPARSE,
+}
+
+_OBJECTIVES = {
+    "latency": 0,
+    "throughput": 1,
+    "balanced": 2,
+    "memory": 3,
+}
+
+_DEFAULT_MODELS = {
+    "embedding": "BAAI/bge-small-en-v1.5",
+    "reranking": "jinaai/jina-reranker-v1-turbo-en-quantized",
+}
+
+
+def _check_texts(texts: list[str]) -> None:
+    for text in texts:
+        if not isinstance(text, str):
+            raise TypeError(f"texts must contain str, got {type(text).__name__}")
+
+
+def _sample_workload(task: str, texts: list[str], max_sample_size: int) -> list[str]:
+    """Bound the workload the C tuner benchmarks every configuration on.
+
+    For reranking the last text is the query: only the documents are sampled,
+    and the query stays last.
+    """
+    if task == "reranking" and len(texts) > 1:
+        docs = _sample_corpus(list(texts[:-1]), max(1, max_sample_size - 1))
+        return [*docs, texts[-1]]
+    return _sample_corpus(list(texts), max_sample_size)
+
 
 def autotune_unified(
     task: str = "embedding",
     model_name: str | None = None,
     *,
     full: bool = False,
+    objective: str | None = None,
+    texts: list[str] | None = None,
+    max_latency_ms: float = 0.0,
+    min_tokens: int = 0,
+    max_sample_size: int = _MAX_AUTOTUNE_SAMPLE,
 ) -> UnifiedTuningResult:
     """Unified auto-tune entry point for all task types.
 
+    Results are cached per model, machine, runtime, workload, objective, mode
+    and constraints, so a repeated call returns in milliseconds.
+
     Args:
-        task: "embedding", "reranking", "image", or "sparse"
-        model_name: Model name (default depends on task)
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        task: "embedding", "reranking", "image", or "sparse".
+        model_name: Model name (default for "embedding" and "reranking" only).
+        full: If True, run the FULL grid, else the QUICK one.
+        objective: "latency", "throughput", "balanced" or "memory". None keeps
+            the task default: "throughput" for embedding, sparse and image,
+            "balanced" for reranking.
+        texts: Optional custom workload. Embedding and sparse: the texts to
+            embed. Reranking: the last text is the query, the others are the
+            documents. Not supported for image. Sampled down to
+            ``max_sample_size`` first.
+        max_latency_ms: p95 budget for one tuning call (the whole workload),
+            0 for none. When nothing fits, the best unconstrained configuration
+            is returned: compare ``p95_latency_ms`` with the budget.
+        min_tokens: Reranking only, smallest acceptable ``max_tokens``.
+        max_sample_size: Upper bound on the number of texts sent to the tuner.
 
     Returns:
-        UnifiedTuningResult with optimal configuration.
+        UnifiedTuningResult with the optimal configuration.
     """
-    task_map = {
-        "embedding": _TASK_EMBEDDING,
-        "reranking": _TASK_RERANKING,
-        "image": _TASK_IMAGE,
-        "sparse": _TASK_SPARSE,
-    }
-    if task not in task_map:
-        raise ValueError(f"Unknown task '{task}'. Use: {list(task_map.keys())}")
+    if task not in _TASKS:
+        raise ValueError(f"Unknown task '{task}'. Use: {list(_TASKS.keys())}")
+    if objective is not None and objective not in _OBJECTIVES:
+        raise ValueError(
+            f"Unknown objective '{objective}'. Use: {list(_OBJECTIVES.keys())}"
+        )
+    if texts and task == "image":
+        raise ValueError("A custom workload is not supported for task 'image'.")
+    if min_tokens and task != "reranking":
+        raise ValueError("min_tokens only applies to task 'reranking'.")
+    if max_latency_ms < 0 or min_tokens < 0:
+        raise ValueError("max_latency_ms and min_tokens must be >= 0.")
 
     if model_name is None:
-        defaults = {
-            "embedding": "BAAI/bge-small-en-v1.5",
-            "reranking": "jinaai/jina-reranker-v1-turbo-en-quantized",
-            "image": None,
-            "sparse": None,
-        }
-        model_name = defaults.get(task)
+        model_name = _DEFAULT_MODELS.get(task)
         if model_name is None:
             raise ValueError(
                 f"No default model for task '{task}'. Please specify model_name."
             )
 
-    mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
+    resolved_name = _resolve_model_code(model_name) if task == "embedding" else model_name
+
+    options = lib.lembed_autotune_options_default(_TASKS[task])
+    options.mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
+    if objective is not None:
+        options.objective = _OBJECTIVES[objective]
+    options.max_latency_ms = float(max_latency_ms)
+    options.min_tokens = int(min_tokens)
+
+    _owners: list = []
+    if texts:
+        _check_texts(texts)
+        sampled = _sample_workload(task, texts, max_sample_size)
+        c_texts, _owners = _to_c_string_array(sampled)
+        options.texts = c_texts
+        options.n_texts = len(sampled)
+
+    p_options = ffi.new("lembed_autotune_options_t *", options)
     result = ffi.new("lembed_unified_tuning_result_t *")
-
-    resolved_name = model_name
-    if task == "embedding":
-        idx = resolve_text_model(model_name)
-        if idx >= 0:
-            info = ffi.new("lembed_model_info_t *")
-            lib.lembed_get_text_model_info(idx, info)
-            resolved_name = ffi.string(info.model_code).decode("utf-8")
-
-    check_status(
-        lib.lembed_autotune_unified(
-            task_map[task], resolved_name.encode("utf-8"), mode, result
-        )
-    )
+    check_status(lib.lembed_autotune_ex(resolved_name.encode("utf-8"), p_options, result))
 
     return UnifiedTuningResult(
         task=task,
@@ -216,6 +276,18 @@ def autotune_unified(
         latency_ms=result.latency_ms,
         p95_latency_ms=result.p95_latency_ms,
         memory_mb=result.memory_mb,
+        top_k=result.top_k,
+        min_weight=result.min_weight,
+        storage_format=result.storage_format,
+    )
+
+
+def clear_autotune_cache_unified(task: str, model_name: str | None = None) -> None:
+    """Clear the autotune cache of one task for a model (or all if None)."""
+    if task not in _TASKS:
+        raise ValueError(f"Unknown task '{task}'. Use: {list(_TASKS.keys())}")
+    lib.lembed_autotune_unified_clear_cache(
+        _TASKS[task], model_name.encode("utf-8") if model_name else ffi.NULL
     )
 
 

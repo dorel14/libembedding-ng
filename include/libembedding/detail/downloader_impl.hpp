@@ -9,21 +9,18 @@
 #define LIBEMBEDDING_DETAIL_DOWNLOADER_IMPL_HPP
 
 #include <cerrno>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include <sys/stat.h>
-
-#ifdef _WIN32
-#include <direct.h>
-#define lembed_mkdir(path) _mkdir(path)
-#else
-#define lembed_mkdir(path) mkdir(path, 0755)
-#endif
 
 namespace lembed { namespace detail {
 
@@ -69,19 +66,10 @@ inline std::string read_file_to_string(const std::string& path) {
 
 /* Recursively create directories */
 inline bool mkdirs(const std::string& path) {
-    std::string current;
-    for (size_t i = 0; i < path.size(); i++) {
-        current += path[i];
-        if (path[i] == '/' || i == path.size() - 1) {
-            struct stat st;
-            if (stat(current.c_str(), &st) != 0) {
-                if (lembed_mkdir(current.c_str()) != 0 && errno != EEXIST) {
-                    return false;
-                }
-            }
-        }
-    }
-    return true;
+    if (path.empty()) return false;
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
+    return !ec && std::filesystem::is_directory(path, ec) && !ec;
 }
 
 /* Sanitize repo name for directory */
@@ -118,7 +106,8 @@ inline std::string get_hf_endpoint() {
 /* curl write callback */
 static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     FILE* fp = (FILE*)userp;
-    return fwrite(contents, size, nmemb, fp);
+    const size_t bytes = size * nmemb;
+    return fwrite(contents, 1, bytes, fp);
 }
 
 /* curl progress callback */
@@ -142,22 +131,33 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
                               const std::string& dest_path,
                               download_progress_fn progress_fn = nullptr,
                               void* progress_userdata = nullptr) {
+    static std::atomic<unsigned long long> temp_sequence(0);
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto thread_id = std::hash<std::thread::id>()(std::this_thread::get_id());
+    const auto sequence = temp_sequence.fetch_add(1, std::memory_order_relaxed);
+
     /* Construct URL */
     std::string url = get_hf_endpoint() + "/" + repo + "/resolve/main/" + filename;
 
     /* Ensure destination directory exists */
-    size_t last_slash = dest_path.rfind('/');
-    if (last_slash != std::string::npos) {
-        mkdirs(dest_path.substr(0, last_slash));
+    const std::string parent = std::filesystem::path(dest_path).parent_path().string();
+    if (!parent.empty()) {
+        if (!mkdirs(parent)) return false;
     }
 
     /* Open temp file */
-    std::string tmp_path = dest_path + ".tmp";
+    std::string tmp_path = dest_path + ".tmp-" + std::to_string(tick) + "-" +
+                           std::to_string(thread_id) + "-" +
+                           std::to_string(sequence);
     FILE* fp = fopen(tmp_path.c_str(), "wb");
     if (!fp) return false;
 
     CURL* curl = curl_easy_init();
-    if (!curl) { fclose(fp); return false; }
+    if (!curl) {
+        fclose(fp);
+        remove(tmp_path.c_str());
+        return false;
+    }
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -166,7 +166,7 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "libembedding/" LIBEMBEDDING_VERSION_STRING);
     curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
 
-    static ProgressData pd = { progress_fn, progress_userdata };
+    ProgressData pd = { progress_fn, progress_userdata };
     if (progress_fn) {
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &pd);
@@ -182,9 +182,12 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
         return false;
     }
 
-    /* Rename tmp to final */
-    remove(dest_path.c_str());
+    /* Publish atomically; another downloader may have completed this file. */
     if (rename(tmp_path.c_str(), dest_path.c_str()) != 0) {
+        if (file_exists(dest_path)) {
+            remove(tmp_path.c_str());
+            return true;
+        }
         remove(tmp_path.c_str());
         return false;
     }
@@ -213,7 +216,9 @@ inline std::string ensure_model(const std::string& repo_code,
     /* Build model directory: cache_dir/models--repo_with_dashes/ */
     std::string repo_dir = repo_to_dirname(repo_code);
     std::string model_dir = cache_dir + "/models--" + repo_dir;
-    mkdirs(model_dir);
+    if (!mkdirs(model_dir)) {
+        throw std::runtime_error("Cannot create model cache directory: " + model_dir);
+    }
 
     /* Files to download */
     std::vector<std::string> files;
@@ -290,4 +295,3 @@ inline std::string ensure_model(const std::string& repo_code,
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_DOWNLOADER_IMPL_HPP */
-

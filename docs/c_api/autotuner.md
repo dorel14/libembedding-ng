@@ -5,40 +5,127 @@ nav_order: 18
 
 # Auto-tuneur C API
 
-Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (workers, threads, batch_size).
+Ce module fournit l'auto-tuning pour trouver la configuration optimale sur la machine courante : threads, batch_size, et selon la tâche workers (texte) ou `max_tokens` (reranker). Les quatre tâches (texte, reranker, sparse, image) tournent sur **un même moteur de mesure** (voir [méthodologie de mesure](../performance_tuning.html#méthodologie-de-mesure)) et partagent un seul magasin de cache.
+
+> **Disponibilité.** Comme tous les points d'entrée de l'auto-tuning, ces fonctions sont compilées dans la **bibliothèque partagée** (`python/csrc/libembedding_shlib.cpp` : DLL sous Windows, wheel Python), pas dans le build header-only `LIBEMBEDDING_IMPLEMENTATION`.
 
 ## Types
 
 | Type | Description |
 |------|-------------|
-| `lembed_tuning_result_t` | Résultat de l'autotuning |
-| `lembed_unified_tuning_result_t` | Résultat de l'autotuning unifié |
+| `lembed_tuning_result_t` | Résultat de l'autotuning texte (historique) |
+| `lembed_unified_tuning_result_t` | Résultat de l'autotuning unifié (toutes tâches) |
+| `lembed_autotune_options_t` | Options de `lembed_autotune_ex()` : tâche, mode, objectif, workload, budget, `min_tokens` |
 | `lembed_model_selection_t` | Résultat de sélection de modèle |
 
 ## Constantes
 
 | Constante | Valeur | Description |
 |-----------|--------|-------------|
-| `LEMBED_AUTOTUNE_QUICK` | `0` | Mode rapide (5-15s) |
-| `LEMBED_AUTOTUNE_FULL` | `1` | Mode exhaustif (30-120s) |
+| `LEMBED_AUTOTUNE_QUICK` | `0` | Mode rapide : grille réduite, 1 warmup + 3 appels chronométrés par configuration |
+| `LEMBED_AUTOTUNE_FULL` | `1` | Mode exhaustif : grille étendue, 2 warmups + 10 appels chronométrés par configuration |
+
+Durées **indicatives**, à froid (cache vide), mesurées en QUICK sur un portable i7-1065G7 (4C/8T) : texte ~13 s, reranker ~47 s, sparse ~33 s, image ~28 s (voir [Performance](../performance_tuning.html#mesures-du-banc-bench_autotune)). Elles dépendent du CPU, du modèle et du workload ; le mode FULL est plus long, sans durée garantie. Un appel répété (cache chaud) rend en quelques millisecondes.
+
+## Point d'entrée recommandé : `lembed_autotune_ex`
+
+`lembed_autotune_ex()` donne accès, pour **toutes** les tâches, à l'objectif, à un workload personnalisé et aux contraintes. Les fonctions historiques (liste plus bas) restent disponibles et sont des façades du même code ; pour un nouveau code, préférer `lembed_autotune_ex()`. (Dépréciation purement documentaire : aucun attribut compilateur n'est posé.)
+
+```c
+lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task);
+
+lembed_status_t lembed_autotune_ex(
+    const char* model_name,
+    const lembed_autotune_options_t* options,   /* NULL = défauts de LEMBED_TASK_EMBEDDING */
+    lembed_unified_tuning_result_t* result);
+```
+
+Toujours partir de `lembed_autotune_options_default(task)`, puis surcharger les champs :
+
+| Champ | Défaut | Sémantique |
+|-------|--------|------------|
+| `task` | argument de `_default()` | `LEMBED_TASK_EMBEDDING`, `_RERANKING`, `_IMAGE` ou `_SPARSE` |
+| `mode` | `LEMBED_AUTOTUNE_QUICK` | QUICK ou FULL |
+| `objective` | `THROUGHPUT` (texte, sparse, image) ; `BALANCED` (reranking) | Critère d'optimisation (voir [Objectifs](#objectifs)) |
+| `texts`, `n_texts` | `NULL`, `0` | Workload personnalisé ; `NULL`/`0` = corpus synthétique intégré. Texte, sparse : les textes à encoder. **Reranking : le dernier texte est la requête**, les autres sont les documents. **Image : refusé** (`LEMBED_ERROR_INVALID_ARGUMENT`). |
+| `max_latency_ms` | `0` (aucun) | Budget **p95 par appel de tuning**. Un appel = une requête sur tout le workload : les documents d'une requête de reranking, ou le batch texte/image complet. |
+| `min_tokens` | `0` (aucun) | Reranking uniquement : plus petit `max_tokens` acceptable. |
+
+Comportement :
+
+- **Budget et repli.** Seules les configurations dont le p95 respecte `max_latency_ms` sont éligibles. Si aucune ne convient, la meilleure configuration **sans contrainte** est renvoyée avec `LEMBED_OK` : comparer `result.p95_latency_ms` au budget pour détecter ce cas. Pour le reranker, ce repli conserve le plancher `min_tokens`.
+- **Latences.** `latency_ms` et `p95_latency_ms` sont des latences **par appel**, sauf pour `LEMBED_TASK_EMBEDDING` où elles sont amorties **par texte** (comme dans `lembed_tuning_result_t`).
+- **Cache.** Le résultat est mis en cache (voir [Cache d'autotuning](#cache-dautotuning)) ; un appel répété rend en quelques millisecondes.
+- **Erreurs.** `LEMBED_ERROR_MODEL_NOT_FOUND` (modèle inconnu), `LEMBED_ERROR_INVALID_ARGUMENT` (options incohérentes), `LEMBED_ERROR_ONNX_RUNTIME` (aucune configuration n'a pu s'exécuter). `lembed_last_error()` est renseigné sur tous les chemins d'erreur de l'autotune.
+
+Exemple : reranker avec budget p95 et plancher de troncature.
+
+```c
+#include <libembedding/libembedding.h>
+#include <stdio.h>
+
+int main(void) {
+    /* Workload réel : documents candidats, la requête en DERNIER. */
+    const char* texts[] = {
+        "Document candidat 1 ...",
+        "Document candidat 2 ...",
+        "Document candidat 3 ...",
+        "ma requête utilisateur",          /* dernier texte = requête */
+    };
+
+    lembed_autotune_options_t opts = lembed_autotune_options_default(LEMBED_TASK_RERANKING);
+    opts.mode           = LEMBED_AUTOTUNE_QUICK;
+    opts.objective      = LEMBED_OBJECTIVE_LATENCY;
+    opts.texts          = texts;
+    opts.n_texts        = 4;
+    opts.max_latency_ms = 300.0;   /* budget p95 pour une requête complète */
+    opts.min_tokens     = 128;     /* ne pas tronquer les documents sous 128 tokens */
+
+    lembed_unified_tuning_result_t r;
+    lembed_status_t st = lembed_autotune_ex(
+        "jinaai/jina-reranker-v1-turbo-en-quantized", &opts, &r);
+    if (st != LEMBED_OK) {
+        fprintf(stderr, "autotune: %s\n", lembed_last_error());
+        return 1;
+    }
+    printf("threads=%d batch=%d max_tokens=%d p95=%.1f ms\n",
+           r.threads, r.batch_size, r.max_tokens, r.p95_latency_ms);
+    if (r.p95_latency_ms > opts.max_latency_ms)
+        printf("budget non tenable : meilleure configuration sans contrainte renvoyée\n");
+    return 0;
+}
+```
+
+### Ce que le tuner règle, par tâche
+
+| Tâche | Grille | Notes |
+|-------|--------|-------|
+| `LEMBED_TASK_EMBEDDING` | Découpages des cœurs physiques *P* entre workers et threads : 1×P, 2×P/2, P×1 en QUICK (+ 1×logiques et 4×P/4 en FULL) × batch (32 en QUICK ; 16/32/64/128 en FULL) | Mesure bien le modèle demandé. Corpus synthétique : 32 textes (QUICK) / 256 (FULL). |
+| `LEMBED_TASK_RERANKING` | threads = cœurs physiques et logiques en QUICK (+ 1, 2, P/2 en FULL) × `max_tokens` (256/64 en QUICK ; 256/128/64/32 en FULL) × batch | `max_tokens` **tronque les documents** : c'est un compromis qualité/vitesse, à encadrer avec `min_tokens`. À égalité (5 %), la configuration qui tronque le moins l'emporte. |
+| `LEMBED_TASK_SPARSE` | threads × batch | `top_k`, `min_weight` et `storage_format` ne sont **plus** réglés : ils changent les vecteurs produits, pas seulement la vitesse. Le résultat renvoie les valeurs par défaut du modèle (champs informatifs). |
+| `LEMBED_TASK_IMAGE` | threads × batch | Workload personnalisé non supporté. |
 
 ## Fonctions d'autotuning
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
-| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle texte |
-| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Auto-tuner avec corpus custom |
-| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Auto-tuner unifié (tous types) |
-| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Auto-tuner unifié avec budget de latence |
+| `lembed_autotune_ex(model_name, options, out)` | `lembed_status_t` | **Recommandée.** Toutes tâches, objectif, workload, budget p95, `min_tokens` |
+| `lembed_autotune_options_default(task)` | `lembed_autotune_options_t` | Options par défaut d'une tâche |
+| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Historique : auto-tuner un modèle texte |
+| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Historique : auto-tuner avec corpus custom |
+| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Façade de `lembed_autotune_ex` avec options par défaut |
+| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Façade avec budget de latence ; honore le budget pour **toutes** les tâches, sparse inclus (il renvoyait auparavant `UNSUPPORTED` pour sparse) |
 | `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Sélectionner le meilleur modèle pour la machine |
-| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle sparse |
-| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle image |
-| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker |
-| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker sur un corpus fourni |
-| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
-| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
+| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Historique : auto-tuner un modèle sparse (threads × batch) |
+| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Historique : auto-tuner un modèle image |
+| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Historique : auto-tuner un reranker |
+| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Historique : auto-tuner un reranker sur un corpus fourni |
+| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Historique : auto-tune avec contraintes |
+| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Historique : auto-configurer selon latence (respecte maintenant `objective`) |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
 | `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Choisir la variante de quantification la plus rapide sur cette machine |
+
+Les fonctions marquées « Historique » sont conservées pour la compatibilité source et binaire (aucune signature n'a changé) ; elles exposent moins de réglages que `lembed_autotune_ex()`.
 
 ## Sélection automatique de la quantification
 
@@ -174,7 +261,7 @@ testable en quelques millisecondes sans modèle ni réseau
 |----------|--------|-------------|
 | `lembed_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune texte ; `NULL` = tout le cache |
 | `lembed_reranker_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune reranker ; `NULL` = tout le cache reranker |
-| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Dispatcher vers le cache de la tâche |
+| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Purger le cache d'une tâche (texte, reranker, sparse **et** image) pour un modèle ; `NULL` = tous les modèles de cette tâche (pour `LEMBED_TASK_EMBEDDING`, les entrées texte de la racine uniquement). |
 
 ## Tâches unifiées
 
@@ -189,44 +276,49 @@ testable en quelques millisecondes sans modèle ni réseau
 
 | Constante | Description |
 |-----------|-------------|
-| `LEMBED_OBJECTIVE_LATENCY` | Minimiser la latence |
+| `LEMBED_OBJECTIVE_LATENCY` | Minimiser la latence (coût = P50 + ½(P95 − P50)) |
 | `LEMBED_OBJECTIVE_THROUGHPUT` | Maximiser le débit |
-| `LEMBED_OBJECTIVE_BALANCED` | Compromis |
-| `LEMBED_OBJECTIVE_MEMORY` | Minimiser la mémoire |
+| `LEMBED_OBJECTIVE_BALANCED` | Compromis : moyenne des coûts latence et débit normalisés |
+| `LEMBED_OBJECTIVE_MEMORY` | Minimiser la mémoire (delta de RSS, plancher de 16 Mo) |
+
+Les coûts sont **normalisés sans unité** (chaque terme est divisé par la meilleure valeur observée sur la grille), de sorte que ni des docs/s ni des millisecondes ne se mélangent. Défauts de `lembed_autotune_options_default()` : `THROUGHPUT` pour texte, sparse et image ; `BALANCED` pour le reranking. Le détail est dans [Performance — méthodologie de mesure](../performance_tuning.html#méthodologie-de-mesure).
 
 ## Cache d'autotuning
 
-Les résultats sont persistés sous `%LOCALAPPDATA%\libembedding\autotune\`
+Un **seul magasin** pour les quatre tâches : `%LOCALAPPDATA%\libembedding\autotune\`
 (`$HOME/.cache/libembedding/autotune` hors Windows, et
 `./libembedding_autotune_cache` en dernier recours si aucune de ces variables
-n'est définie). Les rerankers ont un sous-répertoire `reranker/` séparé.
+n'est définie). Les entrées du **texte** sont à la racine ; les autres tâches ont
+leur sous-répertoire : `reranker/`, `sparse/`, `image/`. Les décisions de
+quantification sont dans `quantization/`.
 
 Une entrée n'est réutilisée que si son identité correspond **intégralement** :
-modèle, variante, empreinte du corpus, objectif et mode. Un résultat obtenu sur
-un corpus n'est donc jamais renvoyé pour un autre, et un fichier illisible ou
-corrompu est traité comme un cache miss.
+modèle canonique, empreinte matérielle et logicielle, empreinte du workload,
+objectif, mode et contraintes (budget p95, `min_tokens`). Un résultat obtenu sur
+un workload n'est donc jamais renvoyé pour un autre, et un fichier illisible ou
+corrompu est traité comme un cache miss. Les résultats **contraints** sont
+eux aussi mis en cache, de même que ceux de sparse et d'image (ils ne l'étaient
+pas avant : un appel répété relançait un tuning de 95 à 170 s).
 
-| Libellé de variante | Utilisé par |
-|---------------------|-------------|
-| `synthetic` | Tuning texte par défaut, sur corpus synthétique |
-| `custom` | Tuning texte ou reranker sur un corpus fourni |
-| `default` | Tuning reranker par défaut, sur corpus synthétique |
+L'identité de modèle est toujours la forme résolue (pour le texte, le `model_code` ;
+voir la note sur les deux formes du nom plus haut). L'empreinte matérielle et logicielle comprend la
+marque CPU, les cœurs logiques et physiques, la version majeure/mineure
+d'ONNX Runtime et la version majeure/mineure de libembedding, de sorte qu'un
+résultat mesuré sur une autre machine ou après un changement de version n'est
+jamais resservi.
 
-Attention : le libellé par défaut **n'est pas le même** pour le texte
-(`synthetic`, dans `autotune_bench_text.hpp`) et pour le reranker (`default`, via
-`default_reranker_identity()` dans `autotune_bench_reranker.hpp`). Rien dans la
-sélection de variante ne dépend de ces libellés : `lembed_find_text_model_variant()`
-compare le mode de quantification et le `model_name`, pas `synthetic`/`custom`.
-
-L'identité inclut aussi une empreinte matérielle et logicielle (marque CPU,
-cœurs logiques et physiques, version majeure/mineure d'ONNX Runtime, version
-majeure/mineure de libembedding), de sorte qu'un résultat mesuré sur une autre
-machine ou après un changement de version n'est jamais resservi.
+> **Invalidation à la mise à jour.** Les anciennes entrées de cache du tuner texte
+> sont invalidées : elles avaient été mesurées sur le modèle par défaut quel que
+> soit le modèle demandé.
 
 `lembed_autotune_clear_cache(model_name)` supprime toutes les entrées d'un modèle
-(toutes variantes confondues) ; `lembed_reranker_autotune_clear_cache(model_name)`
-fait de même pour les rerankers. Passer `NULL` vide le cache correspondant en
-entier. Les entrées sont appariées sur le champ `model` lu **dans** le fichier,
+dans le magasin racine et ses sous-répertoires (un nom inconnu est sans effet) ;
+`lembed_reranker_autotune_clear_cache(model_name)` fait de même pour les rerankers ;
+`lembed_autotune_unified_clear_cache(task, model_name)` cible une tâche (sparse et
+image compris). Passer `NULL` vide le cache de cette tâche seulement : pour
+`LEMBED_TASK_EMBEDDING`, seules les entrées texte de la racine sont supprimées.
+Seul `lembed_autotune_clear_cache(NULL)` supprime **tout** le répertoire
+d'autotune, sous-répertoires compris. Les entrées sont appariées sur le champ `model` lu **dans** le fichier,
 et non sur le nom de fichier, qui est un hash de l'empreinte matérielle.
 
 > **À ne pas confondre** avec le cache bas niveau `tune_cache.json` et l'API
@@ -259,7 +351,7 @@ malgré tout une erreur thread-local**, comme n'importe quel mode introuvable.
 `lembed_text_embedding_create_v2` n'appelle cette fonction que pour un mode
 explicitement demandé, jamais pour `AUTO`.
 
-## Exemple
+## Exemple (API historique, texte)
 
 ```c
 #include <libembedding/autotuner.h>

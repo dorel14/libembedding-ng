@@ -103,6 +103,10 @@ best_idx = scores.argmax()
 ### SparseTextEmbedding
 
 Generates **sparse** embeddings (sparse vectors with token indices and weights).
+`batch_size=None` uses the backend default: 256 for ONNX and 16 for GGUF. The
+GGUF default is a measured compromise between throughput, stability and number
+of batches; batch 2 can further reduce padding and memory at similar throughput.
+Callers can override either setting.
 
 #### Constructor
 
@@ -114,7 +118,7 @@ SparseTextEmbedding(
     cache_dir=None,
     max_length=0,
     threads=0,
-    batch_size=256,
+    batch_size=None,
     offline=False,
     show_download_progress=True,
     top_terms=0,
@@ -397,16 +401,17 @@ cache.clear()
 | Function | Description |
 |----------|-------------|
 | `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune a model. Returns `TuningResult`. `texts` supplies a measurement corpus (sampled down to `max_sample_size`); `None` uses a synthetic corpus. |
-| `autotune_unified(task, model_name, mode="quick")` | Unified auto-tune for any task type. See [Unified Tuning](#unified-tuning). |
-| `sparse_autotune(model_name, mode="quick")` | Auto-tune sparse embedding. Returns `SparseTuningResult`. |
-| `image_autotune(model_name, mode="quick")` | Auto-tune image embedding. Returns `ImageTuningResult`. |
-| `reranker_autotune(model_name, mode="quick", objective="latency")` | Auto-tune reranker. Returns `RerankerTuningResult`. |
-| `reranker_auto_config(model_name, target_latency_ms=500, objective="latency")` | Auto-config reranker for a latency budget. |
-| `reranker_auto_config_profile(model_name, profile="balanced")` | Auto-config reranker using a profile. |
-| `reranker_autotune_constrained(model_name, mode="quick", objective="latency", min_tokens=32, max_latency_ms=1000)` | Auto-tune with constraints. |
+| `autotune_unified(task="embedding", model_name=None, *, full=False, objective=None, texts=None, max_latency_ms=0.0, min_tokens=0, max_sample_size=100)` | **Recommended.** Unified auto-tune for the four tasks (`"embedding"`, `"reranking"`, `"image"`, `"sparse"`). Returns `UnifiedTuningResult`. See [Unified Tuning](#unified-tuning). |
+| `clear_autotune_cache_unified(task, model_name=None)` | Clear one task's autotune cache for a model (`None` = every model of the task). |
+| `sparse_autotune(model_name, *, full=False)` | Legacy: auto-tune sparse embedding (threads × batch). Returns `SparseTuningResult`. |
+| `image_autotune(model_name, *, full=False)` | Legacy: auto-tune image embedding. Returns `ImageTuningResult`. |
+| `reranker_autotune(model_name, *, full=False, objective="balanced")` | Legacy: auto-tune reranker. Returns `RerankerTuningResult`. |
+| `reranker_auto_config(model_name, target_latency_ms=500, objective="balanced")` | Auto-config reranker for a latency budget. |
+| `reranker_auto_config_profile(profile="balanced", model_name=...)` | Auto-config reranker using a profile. |
+| `reranker_autotune_constrained(model_name, *, full=False, objective="balanced", min_tokens=64, max_latency_ms=500.0)` | Legacy: auto-tune with constraints. |
 | `clear_reranker_autotune_cache(model_name=None)` | Clear reranker autotune cache. |
 | `auto_select_model(use_case="balanced")` | Select best model. Returns `ModelSelectionResult`. |
-| `clear_autotune_cache(model_name=None)` | Clear autotune cache. |
+| `clear_autotune_cache(model_name=None)` | Clear the text autotune cache (with `None`, the **whole** autotune directory). |
 | `cache_path()` | Get autotune cache file path. |
 | `cosine_similarity(a, b)` | Cosine similarity between two vectors |
 | `dot_product(a, b)` | Dot product between two vectors |
@@ -467,28 +472,23 @@ clear_cache()
 
 ### Unified Tuning
 
-The unified auto-tuner provides a single API for optimizing all task types (text embedding, sparse, image, reranking).
+The unified auto-tuner provides a single API for optimizing all task types (text embedding, sparse, image, reranking). It runs on `lembed_autotune_ex()` on the C side.
 
 ```python
-from libembedding import (
-    autotune_unified,
-    LEMBED_TASK_EMBEDDING,
-    LEMBED_TASK_SPARSE,
-    LEMBED_TASK_IMAGE,
-    LEMBED_TASK_RERANKING,
-    LEMBED_AUTOTUNE_QUICK,
-    LEMBED_AUTOTUNE_FULL,
-    UnifiedTuningResult,
-)
+from libembedding import autotune_unified, UnifiedTuningResult
 
-# Tune any task type
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",                      # default: "throughput" (embedding, sparse, image), "balanced" (reranking)
+    texts=[*documents, query],                # reranking: the LAST text is the query
+    max_latency_ms=300.0,                     # p95 budget per tuning call (0 = none)
+    min_tokens=128,                           # reranking only
 )
 print(result.threads, result.batch_size, result.max_tokens)
 ```
+
+When no configuration fits `max_latency_ms`, the best unconstrained configuration is returned: compare `result.p95_latency_ms` with the budget. `texts` is rejected for `"image"`. For `"sparse"`, `top_k`, `min_weight` and `storage_format` are not tuned: they reflect the model defaults. Details, grids, methodology and measurements: [Performance](performance_tuning.html#unified-auto-tuning-api).
 
 #### UnifiedTuningResult
 
@@ -500,13 +500,13 @@ class UnifiedTuningResult:
     batch_size: int
     workers: int            # embedding only
     max_tokens: int         # reranker only
-    top_k: int              # sparse only
-    min_weight: float       # sparse only
-    storage_format: int    # sparse only
     throughput_docs_sec: float
-    latency_ms: float
+    latency_ms: float       # per call; amortised per text for "embedding"
     p95_latency_ms: float
-    memory_mb: float
+    memory_mb: float        # estimate (RSS delta), not an absolute peak
+    top_k: int = 0          # sparse: model default (not tuned)
+    min_weight: float = 0.0 # sparse: same
+    storage_format: int = 0 # sparse: same
 ```
 
 ### SparseTuningResult

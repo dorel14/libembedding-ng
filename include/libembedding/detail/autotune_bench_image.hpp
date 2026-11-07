@@ -2,6 +2,10 @@
  * libembedding - detail/autotune_bench_image.hpp
  * Image embedding auto-tuner
  *
+ * Tunes threads x batch_size for an image model on a synthetic batch of
+ * 224x224 images (the input size of the registry's vision models, so the
+ * resize step costs what it costs in production).
+ *
  * Auteur: David Orel
  * Version: 1.11.0
  *
@@ -16,9 +20,11 @@
 #include "libembedding/image_embedding.h"
 #include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
+#include "autotune_result.hpp"
+#include "autotune_search.hpp"
+#include "autotune_session.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -26,180 +32,223 @@
 
 namespace lembed { namespace detail {
 
-/* Create a simple synthetic BMP image for benchmarking (no zlib needed) */
-inline void create_benchmark_image(std::vector<unsigned char>& out, int width = 32, int height = 32) {
-    /* BMP file header + DIB header + pixel data */
-    int rowSize = ((width * 3 + 3) / 4) * 4;  /* rows padded to 4 bytes */
-    int imageSize = rowSize * height;
-    int fileSize = 54 + imageSize;
+/* =========================================================================
+ * Workload
+ * ========================================================================= */
 
-    out.clear();
-
-    /* BMP file header (14 bytes) */
-    out.push_back('B'); out.push_back('M');  /* signature */
-    out.push_back(fileSize & 0xFF); out.push_back((fileSize >> 8) & 0xFF);
-    out.push_back((fileSize >> 16) & 0xFF); out.push_back((fileSize >> 24) & 0xFF);
-    out.push_back(0); out.push_back(0); out.push_back(0); out.push_back(0);  /* reserved */
-    out.push_back(54); out.push_back(0); out.push_back(0); out.push_back(0);  /* data offset */
-
-    /* DIB header (40 bytes) - BITMAPINFOHEADER */
-    out.push_back(40); out.push_back(0); out.push_back(0); out.push_back(0);  /* header size */
-    out.push_back(width & 0xFF); out.push_back((width >> 8) & 0xFF);
-    out.push_back((width >> 16) & 0xFF); out.push_back((width >> 24) & 0xFF);
-    out.push_back(height & 0xFF); out.push_back((height >> 8) & 0xFF);
-    out.push_back((height >> 16) & 0xFF); out.push_back((height >> 24) & 0xFF);
-    out.push_back(1); out.push_back(0);  /* color planes */
-    out.push_back(24); out.push_back(0);  /* bits per pixel */
-    out.push_back(0); out.push_back(0); out.push_back(0); out.push_back(0);  /* compression */
-    for (int i = 0; i < 20; i++) out.push_back(0);  /* rest of header */
-
-    /* Pixel data (BGR format) */
-    for (int y = 0; y < height; y++) {
+/* 24-bit BMP: decodable by stb_image without zlib, deterministic content. */
+inline std::vector<unsigned char> create_benchmark_image(int width, int height) {
+    const int row = ((width * 3 + 3) / 4) * 4;
+    const int size = 54 + row * height;
+    std::vector<unsigned char> b((size_t)size, 0);
+    auto put32 = [&](int off, int v) {
+        for (int i = 0; i < 4; i++) b[(size_t)(off + i)] = (unsigned char)((v >> (8 * i)) & 0xFF);
+    };
+    b[0] = 'B';
+    b[1] = 'M';
+    put32(2, size);
+    put32(10, 54);    /* pixel data offset */
+    put32(14, 40);    /* BITMAPINFOHEADER */
+    put32(18, width);
+    put32(22, height);
+    b[26] = 1;        /* planes */
+    b[28] = 24;       /* bits per pixel */
+    for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++) {
-            out.push_back((x * 255) / width);   /* B */
-            out.push_back((y * 255) / height);  /* G */
-            out.push_back(128);                 /* R */
+            unsigned char* p = &b[(size_t)(54 + y * row + x * 3)];
+            p[0] = (unsigned char)((x * 255) / width);
+            p[1] = (unsigned char)((y * 255) / height);
+            p[2] = 128;
         }
-        /* Pad row to 4-byte boundary */
-        for (int p = 0; p < rowSize - width * 3; p++) out.push_back(0);
-    }
+    return b;
 }
 
-/* Benchmark a single image configuration */
-inline lembed_image_tuning_result_t bench_image_config(
-    const char* model_name,
-    int threads,
-    int batch_size,
-    int n_images,
-    int warmup_iters,
-    int bench_iters)
-{
-    lembed_image_tuning_result_t res = {0};
-    res.threads = threads;
-    res.batch_size = batch_size;
-
-    lembed_image_options_t opts = lembed_image_options_default();
-    opts.num_threads = threads;
-    opts.batch_size = batch_size;
-    opts.show_download_progress = 0;
-
-    int model_idx = lembed_find_image_model_by_code(model_name);
-    if (model_idx < 0) {
-        /* Unknown model: do not silently benchmark a different one. */
-        res.latency_ms = 999999;
-        return res;
-    }
-    opts.model = static_cast<lembed_image_model_t>(model_idx);
-
-    lembed_image_embedding_t* ctx = nullptr;
-    lembed_status_t s = lembed_image_embedding_create(&opts, &ctx);
-    if (s != LEMBED_OK) {
-        res.latency_ms = 999999;
-        return res;
-    }
-
-    /* Create benchmark images */
-    std::vector<unsigned char> img_data;
-    create_benchmark_image(img_data, 224, 224);
-
-    std::vector<const unsigned char*> images;
-    std::vector<int> sizes;
-    for (int i = 0; i < n_images; i++) {
-        images.push_back(img_data.data());
-        sizes.push_back((int)img_data.size());
-    }
-
-    /* Warmup */
-    for (int i = 0; i < warmup_iters; i++) {
-        lembed_embeddings_t result = {0};
-        lembed_image_embedding_embed_bytes(ctx, images.data(), sizes.data(), n_images, batch_size, &result);
-        lembed_embeddings_free(&result);
-    }
-
-    /* Benchmark */
-    std::vector<double> times;
-    times.reserve(bench_iters > 0 ? (size_t)bench_iters : 0);
-    for (int i = 0; i < bench_iters; i++) {
-        auto t0 = std::chrono::high_resolution_clock::now();
-        lembed_embeddings_t result = {0};
-        lembed_status_t es = lembed_image_embedding_embed_bytes(ctx, images.data(), sizes.data(),
-                                                                n_images, batch_size, &result);
-        auto t1 = std::chrono::high_resolution_clock::now();
-        if (es != LEMBED_OK) continue;
-        lembed_embeddings_free(&result);
-        times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
-    }
-
-    lembed_image_embedding_free(ctx);
-
-    /* Every iteration failed: report the sentinel so this configuration is
-     * never mistaken for a zero-latency winner. */
-    if (times.empty()) {
-        res.latency_ms = 999999;
-        return res;
-    }
-
-    std::sort(times.begin(), times.end());
-    double p50 = percentile_sorted(times, 0.50);
-
-    res.latency_ms = p50;
-    res.throughput_docs_sec = (p50 > 0) ? (1000.0 / p50) * n_images : 0;
-
-    return res;
+inline int image_tune_batch_images(lembed_autotune_mode_t mode) {
+    return (mode == LEMBED_AUTOTUNE_QUICK) ? 16 : 32;
 }
 
-/* Main image auto-tune function */
-extern "C" lembed_status_t lembed_image_autotune(
-    const char* model_name,
-    lembed_autotune_mode_t mode,
-    lembed_image_tuning_result_t* result)
-{
+/* =========================================================================
+ * Configuration space
+ * ========================================================================= */
+
+struct image_tune_config {
+    int threads;
+    int batch;
+};
+
+inline std::string describe_image_config(const image_tune_config& c) {
+    return "threads=" + std::to_string(c.threads) + " batch=" + std::to_string(c.batch);
+}
+
+inline std::vector<image_tune_config> image_tune_grid(lembed_autotune_mode_t mode) {
+    int physical = std::max(1, cpu_physical_cores());
+    int logical = std::max(physical, cpu_logical_cores());
+    std::vector<int> threads = {physical, logical};
+    if (mode == LEMBED_AUTOTUNE_FULL) {
+        threads.push_back(1);
+        threads.push_back(std::max(1, physical / 2));
+    }
+    std::sort(threads.begin(), threads.end());
+    threads.erase(std::unique(threads.begin(), threads.end()), threads.end());
+
+    std::vector<int> batches = (mode == LEMBED_AUTOTUNE_QUICK) ? std::vector<int>{1, 8, 16}
+                                                               : std::vector<int>{1, 4, 8, 16, 32};
+    std::vector<image_tune_config> grid;
+    for (int t : threads)
+        for (int b : batches) grid.push_back({t, b});
+    return grid;
+}
+
+/* =========================================================================
+ * Measuring one configuration
+ * ========================================================================= */
+
+/* The batch size is a per-call argument: one session per thread count. */
+using image_session_cache = autotune_session_cache<int, lembed_image_embedding_t>;
+
+inline autotune_measurement bench_image_config(lembed_image_model_t model,
+                                               const std::vector<unsigned char>& img,
+                                               int n_images,
+                                               const image_tune_config& c,
+                                               const autotune_protocol& proto,
+                                               image_session_cache& sessions) {
+    autotune_measurement failed;
+
+    lembed_image_embedding_t* ctx = sessions.get(c.threads, [&]() -> lembed_image_embedding_t* {
+        lembed_image_options_t opts = lembed_image_options_default();
+        opts.model = model;
+        opts.num_threads = c.threads;
+        opts.offline = 1;
+        opts.show_download_progress = 0;
+        lembed_image_embedding_t* created = nullptr;
+        return lembed_image_embedding_create(&opts, &created) == LEMBED_OK ? created : nullptr;
+    });
+    if (!ctx) return failed;
+
+    std::vector<const unsigned char*> images((size_t)n_images, img.data());
+    std::vector<int> sizes((size_t)n_images, (int)img.size());
+    return autotune_measure_calls(proto, n_images, sessions.rss_before_mb(), [&]() {
+        lembed_embeddings_t r = {0};
+        bool ok = lembed_image_embedding_embed_bytes(ctx, images.data(), sizes.data(), n_images,
+                                                     c.batch, &r) == LEMBED_OK;
+        lembed_embeddings_free(&r);
+        return ok;
+    });
+}
+
+/* =========================================================================
+ * Cache
+ * ========================================================================= */
+
+inline const char* image_cache_subdir() { return "image"; }
+
+/* Registry index of an image model named by its repo or its canonical name. */
+inline int resolve_image_model(const char* model) {
+    if (!model) return -1;
+    int idx = lembed_find_image_model_by_code(model);
+    if (idx >= 0) return idx;
+    const int count = (int)(sizeof(lembed__image_models) / sizeof(lembed__image_models[0]));
+    for (int i = 0; i < count; i++)
+        if (lembed__image_models[i].model_name &&
+            std::strcmp(lembed__image_models[i].model_name, model) == 0)
+            return i;
+    return -1;
+}
+
+inline std::string canonical_image_id(const char* model) {
+    if (!model) return std::string();
+    int idx = resolve_image_model(model);
+    if (idx < 0) return std::string(model);
+    return std::string(lembed__image_models[idx].model_code);
+}
+
+/* =========================================================================
+ * Tuner
+ * ========================================================================= */
+
+inline lembed_objective_t image_default_objective() { return LEMBED_OBJECTIVE_THROUGHPUT; }
+
+/* max_latency_ms bounds the p95 of one call over the synthetic batch. */
+inline lembed_status_t image_autotune_run(const char* model_name, lembed_autotune_mode_t mode,
+                                          lembed_objective_t objective, double max_latency_ms,
+                                          lembed_unified_tuning_result_t* result) {
     if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = make_unified_result(LEMBED_TASK_IMAGE);
 
-    int n_images = 16;
-    int warmup = 2;
-    int bench_iters = (mode == LEMBED_AUTOTUNE_QUICK) ? 5 : 15;
+    int idx = resolve_image_model(model_name);
+    if (idx < 0)
+        return autotune_fail(LEMBED_ERROR_MODEL_NOT_FOUND,
+                             std::string("image_autotune: unknown image model '") + model_name +
+                                 "'");
 
-    int threads_options[] = {1, 2, 4, 8};
-    int batch_options[] = {1, 4, 8, 16};
+    const int n_images = image_tune_batch_images(mode);
+    char variant[64];
+    std::snprintf(variant, sizeof(variant), "synthetic%d_p95_%.3f", n_images, max_latency_ms);
+    autotune_cache_identity id;
+    id.model = canonical_image_id(model_name);
+    id.variant = variant;
+    id.corpus = "bmp224";
+    id.objective = (int)objective;
+    id.mode = (int)mode;
 
-    int cores = cpu_logical_cores();
-    std::vector<int> valid_threads;
-    for (int t : threads_options) {
-        if (t <= cores) valid_threads.push_back(t);
-    }
-    if (valid_threads.empty()) valid_threads.push_back(1);
+    if (read_unified_cache(image_cache_subdir(), id, *result)) return LEMBED_OK;
 
-    lembed_image_tuning_result_t best = {0};
-    best.latency_ms = 999999;
+    autotune_search_options sopts;
+    sopts.objective = objective;
+    sopts.constraints.max_p95_ms = max_latency_ms;
+    sopts.protocol = autotune_protocol_for(mode);
+    sopts.label = "image_autotune";
 
-    int total = (int)(valid_threads.size() * (sizeof(batch_options) / sizeof(int)));
+    lembed_image_model_t model = (lembed_image_model_t)idx;
+    std::vector<unsigned char> img = create_benchmark_image(224, 224);
+    image_session_cache sessions(lembed_image_embedding_free);
+    auto search = autotune_grid_search(
+        image_tune_grid(mode),
+        [&](const image_tune_config& c, const autotune_protocol& p) {
+            return bench_image_config(model, img, n_images, c, p, sessions);
+        },
+        describe_image_config, sopts);
+    sessions.reset();
+    if (!search.found()) return autotune_fail_no_config("image_autotune", id.model);
 
-    fprintf(stderr, "image_autotune: testing %d configurations (mode=%s)...\n",
-            total, mode == LEMBED_AUTOTUNE_QUICK ? "QUICK" : "FULL");
+    result->threads = search.best_config().threads;
+    result->batch_size = search.best_config().batch;
+    set_result_metrics(*result, search.best_measurement());
 
-    for (int t : valid_threads) {
-        for (int b : batch_options) {
-            auto r = bench_image_config(model_name, t, b, n_images, warmup, bench_iters);
-
-            if (r.latency_ms < best.latency_ms) {
-                best = r;
-            }
-        }
-    }
-
-    /* No configuration could be benchmarked: do not report the sentinel as a
-     * tuning result. */
-    if (best.latency_ms >= 999999) {
-        *result = {0};
-        return LEMBED_ERROR_ONNX_RUNTIME;
-    }
-
-    fprintf(stderr, "image_autotune: best config: threads=%d batch=%d (P50=%.1fms)\n",
-            best.threads, best.batch_size, best.latency_ms);
-
-    *result = best;
+    write_unified_cache(image_cache_subdir(), id, *result);
     return LEMBED_OK;
+}
+
+inline lembed_image_tuning_result_t to_image_result(const lembed_unified_tuning_result_t& u) {
+    lembed_image_tuning_result_t r = {0};
+    r.threads = u.threads;
+    r.batch_size = u.batch_size;
+    r.throughput_docs_sec = u.throughput_docs_sec;
+    r.latency_ms = u.latency_ms;
+    r.memory_mb = u.memory_mb;
+    return r;
+}
+
+extern "C" lembed_status_t lembed_image_autotune(const char* model_name,
+                                                 lembed_autotune_mode_t mode,
+                                                 lembed_image_tuning_result_t* result) {
+    if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *result = lembed_image_tuning_result_t{0};
+    return autotune_guard("image_autotune", [&]() {
+        lembed_unified_tuning_result_t u;
+        lembed_status_t s = image_autotune_run(model_name, mode, image_default_objective(), 0.0, &u);
+        if (s == LEMBED_OK) *result = to_image_result(u);
+        return s;
+    });
+}
+
+/* NULL clears every image entry; otherwise the model's entries only. */
+inline void lembed_image_autotune_clear_cache(const char* model_name) {
+    autotune_guard("image_autotune_clear_cache", [&]() {
+        if (!model_name) clear_autotune_cache(nullptr, image_cache_subdir());
+        else clear_autotune_cache(canonical_image_id(model_name).c_str(), image_cache_subdir());
+        return LEMBED_OK;
+    });
 }
 
 }} /* namespace lembed::detail */
@@ -207,7 +256,3 @@ extern "C" lembed_status_t lembed_image_autotune(
 #endif /* LIBEMBEDDING_NO_IMAGE */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_IMAGE_HPP */
-
-
-
-

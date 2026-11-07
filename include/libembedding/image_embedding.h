@@ -84,6 +84,7 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -130,7 +131,8 @@ lembed_status_t lembed_image_embedding_create(
         std::string model_dir(model_dir_cstr);
         lembed_free_string(model_dir_cstr);
 
-        auto* ctx = new lembed_image_embedding();
+        std::unique_ptr<lembed_image_embedding_t, decltype(&lembed_image_embedding_free)>
+            ctx(new lembed_image_embedding(), &lembed_image_embedding_free);
         ctx->dim = info.dim;
         ctx->target_size = 224; /* Standard for CLIP, ResNet, etc. */
         ctx->model_name_str = info.model_name;
@@ -154,7 +156,7 @@ lembed_status_t lembed_image_embedding_create(
         ctx->desc.provider = ctx->provider;
         ctx->desc.device_id = ctx->device_id;
 
-        *out = ctx;
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -182,14 +184,15 @@ lembed_status_t lembed_image_embedding_create_from_path(
         }
         if (dim == 0) dim = options->dim;
 
-        if (dim == 0) {
+        if (dim <= 0) {
             lembed::detail::set_error(
                 "Cannot determine model dimension: no config.json found and "
                 "options.dim not set");
             return LEMBED_ERROR_INVALID_ARGUMENT;
         }
 
-        auto* ctx = new lembed_image_embedding();
+        std::unique_ptr<lembed_image_embedding_t, decltype(&lembed_image_embedding_free)>
+            ctx(new lembed_image_embedding(), &lembed_image_embedding_free);
         ctx->dim = dim;
         ctx->target_size = 224;
         ctx->model_name_str = dir_path;
@@ -212,7 +215,7 @@ lembed_status_t lembed_image_embedding_create_from_path(
         ctx->desc.provider = ctx->provider;
         ctx->desc.device_id = ctx->device_id;
 
-        *out = ctx;
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -233,6 +236,8 @@ lembed_status_t lembed_image_embedding_embed_files(
 
     try {
         int dim = ctx->dim;
+        if ((size_t)num_images > ((size_t)-1) / (size_t)dim / sizeof(float))
+            return LEMBED_ERROR_OUT_OF_MEMORY;
         result->dim = dim;
         result->num_embeddings = num_images;
         result->data = (float*)malloc((size_t)num_images * dim * sizeof(float));
@@ -270,17 +275,26 @@ lembed_status_t lembed_image_embedding_embed_files(
                 input_name, batch_data.data(), shape, 4);
 
             auto& output = outputs[0];
-            int out_dim = (output.shape.size() >= 2)
-                ? (int)output.shape[output.shape.size() - 1] : dim;
+            if (output.shape.empty() || output.shape[0] != bsz ||
+                output.data.size() != (size_t)bsz * (size_t)dim) {
+                throw std::runtime_error(
+                    "Image model output size does not match the configured dimension");
+            }
 
             /* L2 normalize */
-            lembed::detail::l2_normalize(output.data.data(), bsz, out_dim);
+            lembed::detail::l2_normalize(output.data.data(), bsz, dim);
 
             std::memcpy(result->data + out_offset * dim,
                        output.data.data(), (size_t)bsz * dim * sizeof(float));
             out_offset += bsz;
         }
 
+        auto t_end = std::chrono::high_resolution_clock::now();
+        double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        ctx->texts_embedded += (uint64_t)num_images;
+        ctx->batches_run += (uint64_t)num_batches;
+        ctx->total_latency_ms += elapsed_ms;
+        ctx->stats_calls++;
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -303,6 +317,8 @@ lembed_status_t lembed_image_embedding_embed_bytes(
 
     try {
         int dim = ctx->dim;
+        if ((size_t)num_images > ((size_t)-1) / (size_t)dim / sizeof(float))
+            return LEMBED_ERROR_OUT_OF_MEMORY;
         result->dim = dim;
         result->num_embeddings = num_images;
         result->data = (float*)malloc((size_t)num_images * dim * sizeof(float));
@@ -337,6 +353,11 @@ lembed_status_t lembed_image_embedding_embed_bytes(
                 input_name, batch_data.data(), shape, 4);
 
             auto& output = outputs[0];
+            if (output.shape.empty() || output.shape[0] != bsz ||
+                output.data.size() != (size_t)bsz * (size_t)dim) {
+                throw std::runtime_error(
+                    "Image model output size does not match the configured dimension");
+            }
             lembed::detail::l2_normalize(output.data.data(), bsz, dim);
 
             std::memcpy(result->data + out_offset * dim,
@@ -409,7 +430,4 @@ void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed
 #endif /* LIBEMBEDDING_IMPLEMENTATION */
 
 #endif /* LIBEMBEDDING_IMAGE_EMBEDDING_H */
-
-
-
 

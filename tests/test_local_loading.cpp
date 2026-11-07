@@ -9,7 +9,9 @@
  * mode when a model directory is available.
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/libembedding.h>
 
 #include <stdio.h>
@@ -57,6 +59,16 @@ int main(void) {
         lembed_status_t s = lembed_text_embedding_create_from_path(
             "/some/path", NULL, &ctx);
         ASSERT(s == LEMBED_ERROR_INVALID_ARGUMENT, "create_from_path with NULL options returns error");
+    }
+
+    /* Test: GGUF filenames cannot escape the model cache directory */
+    {
+        char* model_path = NULL;
+        lembed_status_t s = lembed_ensure_gguf_model(
+            "org/repo", "../outside.gguf", NULL, 0, 1, &model_path);
+        ASSERT(s == LEMBED_ERROR_INVALID_ARGUMENT,
+               "GGUF parent traversal must be rejected");
+        ASSERT(model_path == NULL, "rejected GGUF path must not return a path");
     }
 
     /* Test: create_from_path functions are declared */

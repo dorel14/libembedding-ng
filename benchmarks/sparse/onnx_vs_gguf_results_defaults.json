@@ -1,0 +1,126 @@
+{
+  "environment": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "machine": "AMD64",
+    "cpu_count": 8,
+    "hostname": "PC_Asus",
+    "python": "3.12.10",
+    "libembedding": "1.11.0",
+    "git": "107ec2b",
+    "timestamp": "2026-11-05T18:18:59Z"
+  },
+  "dataset": {
+    "name": "scifact",
+    "split": "test",
+    "docs": 1000,
+    "queries": 300
+  },
+  "settings": {
+    "threads": 0,
+    "batch_size": 0,
+    "max_length": 512,
+    "rounds": 2
+  },
+  "cost": {
+    "onnx": {
+      "docs_per_s": 1.512621195404547,
+      "query_p50_ms": 43.868849985301495,
+      "load_s": 2.4861065999721177,
+      "peak_rss_mb": 903.3984375,
+      "library": "C:\\Users\\david\\Documents\\devs\\libembedding\\build\\Release\\libembedding.dll",
+      "threads": 0,
+      "batch_size": 256,
+      "docs_per_batch": 1.1904761904761905
+    },
+    "gguf": {
+      "docs_per_s": 1.164330142246469,
+      "query_p50_ms": 72.00902499607764,
+      "load_s": 0.09757355001056567,
+      "peak_rss_mb": 544.69140625,
+      "library": "C:\\Users\\david\\Documents\\devs\\libembedding\\build\\Release\\libembedding.dll",
+      "threads": 8,
+      "batch_size": 16,
+      "docs_per_batch": 1.1904761904761905
+    }
+  },
+  "fidelity_docs": {
+    "texts": 1000,
+    "cosine_mean": 0.9998932688478006,
+    "cosine_p5": 0.9998389702399195,
+    "cosine_min": 0.9996666675966912,
+    "max_weight_diff": 0.17820873856544495,
+    "top10_overlap_mean": 0.9913,
+    "nnz_ratio_mean": 1.0159631339619637
+  },
+  "fidelity_queries": {
+    "texts": 300,
+    "cosine_mean": 0.9998487055041623,
+    "cosine_p5": 0.9997478708712682,
+    "cosine_min": 0.9995049078913789,
+    "max_weight_diff": 0.14059573411941528,
+    "top10_overlap_mean": 0.9956666666666665,
+    "nnz_ratio_mean": 1.021894753379962
+  },
+  "delta_docs": {
+    "bands": [
+      {
+        "band": "[0, 0.1)",
+        "terms": 24156,
+        "mean_delta": 0.014184320428173131,
+        "p99_delta": 0.04911202266812328,
+        "max_delta": 0.09278129041194916,
+        "max_relative": 1.0
+      },
+      {
+        "band": "[0.1, 0.5)",
+        "terms": 66447,
+        "mean_delta": 0.013874117930372144,
+        "p99_delta": 0.04862013608217233,
+        "max_delta": 0.17820873856544495,
+        "max_relative": 1.0
+      },
+      {
+        "band": "[0.5, 1)",
+        "terms": 55798,
+        "mean_delta": 0.009864867508546003,
+        "p99_delta": 0.03387537896633148,
+        "max_delta": 0.09839648008346558,
+        "max_relative": 0.16451717711936506
+      },
+      {
+        "band": "[1, 2)",
+        "terms": 58925,
+        "mean_delta": 0.007042425993796775,
+        "p99_delta": 0.022955188751220712,
+        "max_delta": 0.08299517631530762,
+        "max_relative": 0.07514078360483088
+      },
+      {
+        "band": "[2, inf)",
+        "terms": 4755,
+        "mean_delta": 0.006095532313004904,
+        "p99_delta": 0.017951850891113286,
+        "max_delta": 0.030721187591552734,
+        "max_relative": 0.01436135045332979
+      }
+    ],
+    "one_sided_terms": 4384,
+    "one_sided_share": 0.02086814133596089,
+    "one_sided_max_weight": 0.10383719950914383,
+    "one_sided_p99_weight": 0.05117591977119446
+  },
+  "retrieval": {
+    "onnx": {
+      "ndcg@10": 0.8110227115279885,
+      "recall@100": 0.9660000000000001,
+      "mrr@10": 0.7908187830687831
+    },
+    "gguf": {
+      "ndcg@10": 0.8104147623981536,
+      "recall@100": 0.9660000000000001,
+      "mrr@10": 0.7900449735449736
+    }
+  },
+  "top10_agreement": 0.9903333333333334,
+  "errors": []
+}

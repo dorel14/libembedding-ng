@@ -3,7 +3,9 @@
  * Requires network access for model download.
  */
 
+#ifndef _WIN32
 #define LIBEMBEDDING_IMPLEMENTATION
+#endif
 #include <libembedding/libembedding.h>
 
 #include <stdio.h>

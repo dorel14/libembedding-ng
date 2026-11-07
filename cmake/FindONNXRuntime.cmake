@@ -52,7 +52,7 @@ find_library(ONNXRuntime_LIBRARY
     PATH_SUFFIXES lib lib64
 )
 
-# Fallback: search for versioned shared libraries (e.g. libonnxruntime.so.1.20.1)
+# Fallback: search for versioned shared libraries (e.g. libonnxruntime.so.1.31.0)
 if(NOT ONNXRuntime_LIBRARY)
     foreach(_dir IN LISTS _onnxruntime_search_paths)
         foreach(_suffix IN ITEMS lib lib64)

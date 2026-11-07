@@ -133,7 +133,7 @@ static float measure_pool_throughput(const char* path, int n_sess, int n_threads
         if (it != cache.end()) {
             pool_ptr = it->second.get();
         } else {
-            auto pool = std::make_unique<lembed::LlamaSessionPool>();
+            std::unique_ptr<lembed::LlamaSessionPool> pool(new lembed::LlamaSessionPool());
             try { pool->load_from_file(path, n_sess, n_threads, 0, 0, 0, false); }
             catch (...) { return 0; }
             pool_ptr = pool.get();

@@ -20,7 +20,8 @@
  * functions would be compiled with C++ linkage and clash with their declarations.
  * Everything needed here -- the identity, the fingerprinting file name, the
  * fault-tolerant JSON accessors and the atomic write -- lives in the detail
- * header. */#include "autotune_cache.hpp"
+ * header. */
+#include "autotune_cache.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -43,6 +44,16 @@ static const double kQuantMinGain = 1.05;
  * preferred instead. Dynamic INT8 is the safer of the quantized options quality
  * wise, so the default only moves when the win is clear. */
 static const double kQuantDynamicPreference = 1.15;
+
+inline const char* quant_auto_quantization_name(int quantization) {
+    switch (quantization) {
+        case LEMBED_QUANTIZATION_STATIC: return "static";
+        case LEMBED_QUANTIZATION_DYNAMIC: return "dynamic";
+        case LEMBED_QUANTIZATION_AUTO: return "auto";
+        case LEMBED_QUANTIZATION_FP16: return "fp16";
+        default: return "none";
+    }
+}
 
 /* Cap on recorded variants: NONE, STATIC, DYNAMIC, FP16. */
 static const int kQuantMaxVariants = 4;
@@ -348,7 +359,7 @@ inline std::string quant_auto_reason(const lembed_quantization_choice_t& c) {
          * what stands. */
         snprintf(buf, sizeof(buf),
                  "no fp32 baseline on this machine, kept %s",
-                 lembed__quantization_name((lembed_quantization_t)c.quantization));
+                 quant_auto_quantization_name(c.quantization));
     } else if (c.quantization == LEMBED_QUANTIZATION_NONE) {
         /* "1.00x" here came from dividing the baseline by itself: when FP32 is
          * kept, the row matching the winner IS the baseline. What the reader

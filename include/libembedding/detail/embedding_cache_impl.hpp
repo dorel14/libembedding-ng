@@ -69,10 +69,10 @@ public:
     }
 
     bool get_copy(const std::string& key, std::vector<float>& out) {
-        float* vec = nullptr;
-        int dim = 0;
-        if (!get(key, &vec, &dim) || dim <= 0) return false;
-        out.assign(vec, vec + dim);
+        std::lock_guard<std::mutex> lock(mtx_);
+        Entry* e = touch(key);
+        if (!e || e->dim <= 0) return false;
+        out.assign(e->vec, e->vec + e->dim);
         return true;
     }
 
@@ -175,4 +175,3 @@ private:
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_EMBEDDING_CACHE_IMPL_HPP */
-

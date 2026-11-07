@@ -29,13 +29,13 @@ typedef struct {
 
 /* Autotune modes */
 typedef enum {
-    LEMBED_AUTOTUNE_QUICK = 0,  /* 5-15s */
-    LEMBED_AUTOTUNE_FULL        /* 30-120s */
+    LEMBED_AUTOTUNE_QUICK = 0,  /* small grid, 1 warmup + 3 timed calls per point */
+    LEMBED_AUTOTUNE_FULL        /* larger grid, 2 warmups + 10 timed calls per point */
 } lembed_autotune_mode_t;
 
 /* Run auto-tuning for a model
  * Returns optimal configuration for current hardware.
- * mode: QUICK (5-15s) or FULL (30-120s)
+ * mode: QUICK or FULL (duration depends on model and CPU: seconds to minutes)
  * result: output configuration
  * Returns LEMBED_OK on success. */
 lembed_status_t lembed_autotune(
@@ -144,7 +144,9 @@ typedef enum {
 
 /* Run auto-tuning for a reranker model
  * Optimizes threads × batch_size × max_tokens for the given objective.
- * mode: QUICK (5-15s) or FULL (30-120s)
+ * max_tokens truncates documents (speed vs ranking quality): set a floor with
+ * lembed_reranker_autotune_constrained() or lembed_autotune_ex().
+ * mode: QUICK or FULL
  * objective: what to optimize for
  * result: output configuration
  * Returns LEMBED_OK on success. */
@@ -209,8 +211,8 @@ void lembed_reranker_autotune_clear_cache(const char* model_name);
 typedef enum {
     LEMBED_TASK_EMBEDDING = 0,   /* Text embedding */
     LEMBED_TASK_RERANKING = 1,   /* Document reranking */
-    LEMBED_TASK_IMAGE = 2,       /* Image embedding (future) */
-    LEMBED_TASK_SPARSE = 3,      /* Sparse embedding (future) */
+    LEMBED_TASK_IMAGE = 2,       /* Image embedding */
+    LEMBED_TASK_SPARSE = 3,      /* Sparse embedding */
 } lembed_task_t;
 
 /* Unified tuning result (union of all task-specific results) */
@@ -220,9 +222,9 @@ typedef struct {
     int batch_size;
     int workers;         /* embedding only */
     int max_tokens;      /* reranker only */
-    int top_k;           /* sparse only */
-    float min_weight;    /* sparse only */
-    int storage_format;  /* sparse only */
+    int top_k;           /* sparse only: model default, reported, not tuned */
+    float min_weight;    /* sparse only: model default, reported, not tuned */
+    int storage_format;  /* sparse only: model default, reported, not tuned */
     double throughput_docs_sec;
     double latency_ms;
     double p95_latency_ms;
@@ -242,7 +244,9 @@ typedef struct {
 } lembed_sparse_tuning_result_t;
 
 /* Run auto-tuning for sparse embedding
- * Optimizes top_k x min_weight x storage_format for throughput */
+ * Optimizes threads x batch_size for throughput. top_k, min_weight and
+ * storage_format change the output vectors, so they are not tuned: the result
+ * reports the model defaults. */
 lembed_status_t lembed_sparse_autotune(
     const char* model_name,
     lembed_autotune_mode_t mode,
@@ -254,8 +258,9 @@ lembed_status_t lembed_sparse_autotune(
  *
  * task: EMBEDDING, RERANKING, IMAGE, or SPARSE
  * model_name: model identifier (e.g. "BAAI/bge-small-en-v1.5")
- * mode: QUICK (5-15s) or FULL (30-120s)
+ * mode: QUICK or FULL
  * result: output configuration
+ * Facade over lembed_autotune_ex() with the task's default options.
  */
 lembed_status_t lembed_autotune_unified(
     lembed_task_t task,
@@ -270,8 +275,65 @@ lembed_status_t lembed_autotune_unified_config(
     double target_latency_ms,
     lembed_unified_tuning_result_t* result);
 
-/* Clear unified autotune cache */
+/* Clear the autotune cache of one task for a model (or every model if NULL).
+ * Covers all four tasks. */
 void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name);
+
+/* Options of lembed_autotune_ex(). Always start from
+ * lembed_autotune_options_default(task), then override fields. */
+typedef struct {
+    lembed_task_t task;
+    lembed_autotune_mode_t mode;     /* QUICK or FULL */
+    lembed_objective_t objective;    /* see lembed_autotune_options_default() */
+
+    /* Optional custom workload (NULL / 0 = built-in synthetic workload).
+     * EMBEDDING, SPARSE: the texts to embed.
+     * RERANKING: the last text is the query, the others are the documents.
+     * IMAGE: not supported (LEMBED_ERROR_INVALID_ARGUMENT). */
+    const char* const* texts;
+    int n_texts;
+
+    /* p95 budget in ms for one tuning call (0 = none). A call is one request
+     * over the whole workload: the documents of a reranking query, or the
+     * full text/image batch. When no configuration fits, the best
+     * unconstrained one is returned: compare p95_latency_ms to the budget. */
+    double max_latency_ms;
+
+    /* RERANKING only: smallest acceptable max_tokens (0 = none). */
+    int min_tokens;
+} lembed_autotune_options_t;
+
+/* Defaults for a task: QUICK mode, no budget, synthetic workload, and the
+ * objective each task has always optimised: THROUGHPUT for EMBEDDING, SPARSE
+ * and IMAGE (batch workloads), BALANCED for RERANKING (request workload). */
+lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task);
+
+/* Auto-tune any task with full control over objective, workload and
+ * constraints. Results are cached per (model, machine, runtime, workload,
+ * objective, mode, constraints); a repeated call returns in milliseconds.
+ *
+ * Search: every grid point is measured (warmup, then P50/P95 over timed
+ * calls); points clearly slower than the best so far stop early; costs within
+ * 5% of the best are treated as a tie and resolved toward the preferred point
+ * (fewer sessions, less truncation, smaller batch), so the choice does not flip
+ * on measurement noise.
+ *
+ * Availability: like every auto-tuner entry point, this is compiled into the
+ * shared library (python/csrc/libembedding_shlib.cpp), not into the
+ * header-only LIBEMBEDDING_IMPLEMENTATION build.
+ *
+ * model_name: registry repo or canonical name.
+ * options:    NULL = lembed_autotune_options_default(LEMBED_TASK_EMBEDDING).
+ * result:     filled on LEMBED_OK; latency_ms/p95_latency_ms are per call,
+ *             except EMBEDDING where they are amortised per text (as in
+ *             lembed_tuning_result_t).
+ * Returns LEMBED_ERROR_MODEL_NOT_FOUND for an unknown model,
+ * LEMBED_ERROR_INVALID_ARGUMENT for inconsistent options, and
+ * LEMBED_ERROR_ONNX_RUNTIME when no configuration could run. */
+lembed_status_t lembed_autotune_ex(
+    const char* model_name,
+    const lembed_autotune_options_t* options,
+    lembed_unified_tuning_result_t* result);
 
 /* =========================================================================
  * Image Auto-Tuner

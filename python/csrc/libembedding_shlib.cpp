@@ -137,4 +137,15 @@ void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_n
     lembed::detail::lembed_autotune_unified_clear_cache(task, model_name);
 }
 
+lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task) {
+    return lembed::detail::autotune_options_default(task);
+}
+
+lembed_status_t lembed_autotune_ex(
+        const char* model_name,
+        const lembed_autotune_options_t* options,
+        lembed_unified_tuning_result_t* result) {
+    return lembed::detail::autotune_ex_impl(model_name, options, result);
+}
+
 } /* extern "C" */

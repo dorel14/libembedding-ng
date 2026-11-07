@@ -206,12 +206,32 @@ lembed_status_t lembed_ensure_gguf_model(
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
     try {
+        std::string file(filename);
+        for (char& ch : file) {
+            if (ch == '\\') ch = '/';
+        }
+        const std::filesystem::path relative(file);
+        if (relative.is_absolute() || relative.has_root_name() ||
+            file.find(':') != std::string::npos) {
+            lembed::detail::set_error("GGUF filename must be a relative path");
+            return LEMBED_ERROR_INVALID_ARGUMENT;
+        }
+        for (const auto& component : relative) {
+            if (component == "..") {
+                lembed::detail::set_error("GGUF filename must not traverse parent directories");
+                return LEMBED_ERROR_INVALID_ARGUMENT;
+            }
+        }
+
         std::string cache = lembed::detail::get_cache_dir(cache_dir);
         std::string repo_dir = lembed::detail::repo_to_dirname(repo);
         std::string model_dir = cache + "/models--" + repo_dir;
-        lembed::detail::mkdirs(model_dir);
+        if (!lembed::detail::mkdirs(model_dir)) {
+            lembed::detail::set_error("Cannot create GGUF cache directory: " + model_dir);
+            return LEMBED_ERROR_IO;
+        }
 
-        std::string dest = model_dir + "/" + filename;
+        std::string dest = (std::filesystem::path(model_dir) / relative).string();
 
         /* Check if already cached */
         if (lembed::detail::file_exists(dest)) {

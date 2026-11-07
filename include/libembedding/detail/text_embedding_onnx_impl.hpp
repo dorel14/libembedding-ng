@@ -54,6 +54,7 @@ extern "C++" {
 #include <chrono>
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #ifdef __cplusplus
 }
 extern "C" {
@@ -87,7 +88,9 @@ lembed_status_t lembed_text_embedding_create(
         std::string model_dir(model_dir_cstr);
         lembed_free_string(model_dir_cstr);
 
-        auto* ctx = new lembed_text_embedding();
+        std::unique_ptr<lembed_text_embedding_t,
+                        decltype(&lembed_text_embedding_free)>
+            ctx(new lembed_text_embedding(), &lembed_text_embedding_free);
         ctx->backend_type = LEMBED_BACKEND_ONNX;
         ctx->pooling = (lembed_pooling_t)info.pooling;
         ctx->quantization = (lembed_quantization_t)info.quantization;
@@ -119,8 +122,8 @@ lembed_status_t lembed_text_embedding_create(
             ctx->cache = new lembed::detail::LRUCache((size_t)options->cache_size, 0);
         }
 
-        lembed__text_update_desc(ctx);
-        *out = ctx;
+        lembed__text_update_desc(ctx.get());
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -228,7 +231,9 @@ lembed_status_t lembed_text_embedding_create_custom(
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
     try {
-        auto* ctx = new lembed_text_embedding();
+        std::unique_ptr<lembed_text_embedding_t,
+                        decltype(&lembed_text_embedding_free)>
+            ctx(new lembed_text_embedding(), &lembed_text_embedding_free);
         ctx->backend_type = LEMBED_BACKEND_ONNX;
         ctx->pooling = model->pooling;
         ctx->quantization = LEMBED_QUANTIZATION_NONE;
@@ -246,8 +251,8 @@ lembed_status_t lembed_text_embedding_create_custom(
         std::string tok_blob((const char*)model->tokenizer_json, model->tokenizer_json_size);
         ctx->onnx.tokenizer.load_from_blob(tok_blob, ctx->max_length);
 
-        lembed__text_update_desc(ctx);
-        *out = ctx;
+        lembed__text_update_desc(ctx.get());
+        *out = ctx.release();
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());

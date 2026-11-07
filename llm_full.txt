@@ -303,6 +303,23 @@ add_subdirectory(path/to/libembedding)
 target_link_libraries(your_app PRIVATE libembedding::libembedding)
 ```
 
+To install the CMake package and consume it from another project:
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Release
+cmake --install build --config Release --prefix C:/path/to/libembedding-install
+```
+
+```cmake
+find_package(libembedding CONFIG REQUIRED)
+target_link_libraries(your_app PRIVATE libembedding::libembedding)
+```
+
+On Linux/macOS, the installed package still uses the header-only implementation:
+define `LIBEMBEDDING_IMPLEMENTATION` in exactly one `.cpp` file. ONNX Runtime
+must be discoverable by CMake, for example through `ONNXRUNTIME_ROOT`.
+
 ### Step 2: Implementation File
 
 Create **exactly one** `.cpp` file in your project that defines the implementation:
@@ -844,7 +861,7 @@ vocabulary; a dense GGUF is refused with a reason rather than accepted.
 Measured against the sparse ONNX model on the same texts, cosine similarity is
 0.9998 (worst case over 12 texts), i.e. Q8_0 quantisation noise rather than an
 implementation divergence. See `docs/gguf_sparse_runtime.md` and
-`benchmarks/sparse/LE-9.6-results.md`.
+`docs/archive/LE-9.6-results.md`.
 
 ---
 
@@ -853,16 +870,29 @@ implementation divergence. See `docs/gguf_sparse_runtime.md` and
 libembedding includes a comprehensive auto-tuning system that optimizes thread count, batch size, and worker count for your specific hardware. The unified API covers all task types:
 
 ```python
-from libembedding import autotune, autotune_unified, LEMBED_TASK_EMBEDDING, LEMBED_AUTOTUNE_QUICK
+from libembedding import autotune, autotune_unified
 
-# Quick auto-tune for text embedding (5-15s)
-result = autotune("BAAI/bge-small-en-v1.5", LEMBED_AUTOTUNE_QUICK)
+# Quick auto-tune for text embedding (QUICK by default; ~13 s cold on an
+# i7-1065G7 4C/8T — indicative, depends on CPU, model and workload)
+result = autotune("BAAI/bge-small-en-v1.5")
 print(result.threads, result.batch_size, result.workers)
 
-# Unified API — same pattern for all task types
-from libembedding import autotune_unified, LEMBED_TASK_SPARSE, LEMBED_TASK_IMAGE, LEMBED_TASK_RERANKING
-result = autotune_unified(LEMBED_TASK_RERANKING, "BAAI/bge-reranker-base", LEMBED_AUTOTUNE_FULL)
+# Unified API — same pattern for all task types ("embedding", "reranking", "sparse", "image")
+result = autotune_unified(
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    full=False,                  # True = FULL grid
+    objective="latency",         # default: "throughput" (embedding/sparse/image), "balanced" (reranking)
+    max_latency_ms=300.0,        # p95 budget per tuning call; falls back to the best unconstrained config
+    min_tokens=128,              # reranking: floor for max_tokens (truncation trade-off)
+)
 ```
+
+In C, `lembed_autotune_ex()` exposes the same controls (objective, custom workload,
+p95 budget, `min_tokens`) for every task; see `docs/c_api/autotuner.md`. Sparse
+tuning only sets threads × batch: `top_k`, `min_weight` and `storage_format` change
+the output and are not tuned. Measured tuning times and the measurement protocol
+are in `docs/performance_tuning.md`.
 
 The **unified benchmark** compares ONNX and llama.cpp backends on identical corpora:
 
@@ -883,7 +913,7 @@ comparison = bench.compare_all(
 print(comparison.recommendation)
 ```
 
-**Autotune cache**: Results are cached using a hardware fingerprint (CPU name, core count, RAM, OS, SIMD features) combined with software versions and model quantization. Subsequent runs load instantly from `lembed_tune_cache_path()`.
+**Autotune cache**: Results are cached using a hardware fingerprint (CPU name, core count, RAM, OS, SIMD features) combined with software versions and model quantization. Subsequent runs load instantly from `lembed_tune_cache_path()`. (This is the benchmark cache, `lembed_tune_cache_*`. The `autotune*` / `lembed_autotune_ex()` tuners use their own store under `%LOCALAPPDATA%\libembedding\autotune` / `~/.cache/libembedding/autotune`, keyed by model, hardware, runtime versions, workload, objective, mode and constraints.)
 
 **Automatic model selection**: Let libembedding pick the best model for your hardware:
 
@@ -1783,6 +1813,10 @@ best_idx = scores.argmax()
 ### SparseTextEmbedding
 
 Generates **sparse** embeddings (sparse vectors with token indices and weights).
+`batch_size=None` uses the backend default: 256 for ONNX and 16 for GGUF. The
+GGUF default is a measured compromise between throughput, stability and number
+of batches; batch 2 can further reduce padding and memory at similar throughput.
+Callers can override either setting.
 
 #### Constructor
 
@@ -1794,7 +1828,7 @@ SparseTextEmbedding(
     cache_dir=None,
     max_length=0,
     threads=0,
-    batch_size=256,
+    batch_size=None,
     offline=False,
     show_download_progress=True,
     top_terms=0,
@@ -2077,16 +2111,17 @@ cache.clear()
 | Function | Description |
 |----------|-------------|
 | `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune a model. Returns `TuningResult`. `texts` supplies a measurement corpus (sampled down to `max_sample_size`); `None` uses a synthetic corpus. |
-| `autotune_unified(task, model_name, mode="quick")` | Unified auto-tune for any task type. See [Unified Tuning](#unified-tuning). |
-| `sparse_autotune(model_name, mode="quick")` | Auto-tune sparse embedding. Returns `SparseTuningResult`. |
-| `image_autotune(model_name, mode="quick")` | Auto-tune image embedding. Returns `ImageTuningResult`. |
-| `reranker_autotune(model_name, mode="quick", objective="latency")` | Auto-tune reranker. Returns `RerankerTuningResult`. |
-| `reranker_auto_config(model_name, target_latency_ms=500, objective="latency")` | Auto-config reranker for a latency budget. |
-| `reranker_auto_config_profile(model_name, profile="balanced")` | Auto-config reranker using a profile. |
-| `reranker_autotune_constrained(model_name, mode="quick", objective="latency", min_tokens=32, max_latency_ms=1000)` | Auto-tune with constraints. |
+| `autotune_unified(task="embedding", model_name=None, *, full=False, objective=None, texts=None, max_latency_ms=0.0, min_tokens=0, max_sample_size=100)` | **Recommended.** Unified auto-tune for the four tasks (`"embedding"`, `"reranking"`, `"image"`, `"sparse"`). Returns `UnifiedTuningResult`. See [Unified Tuning](#unified-tuning). |
+| `clear_autotune_cache_unified(task, model_name=None)` | Clear one task's autotune cache for a model (`None` = every model of the task). |
+| `sparse_autotune(model_name, *, full=False)` | Legacy: auto-tune sparse embedding (threads × batch). Returns `SparseTuningResult`. |
+| `image_autotune(model_name, *, full=False)` | Legacy: auto-tune image embedding. Returns `ImageTuningResult`. |
+| `reranker_autotune(model_name, *, full=False, objective="balanced")` | Legacy: auto-tune reranker. Returns `RerankerTuningResult`. |
+| `reranker_auto_config(model_name, target_latency_ms=500, objective="balanced")` | Auto-config reranker for a latency budget. |
+| `reranker_auto_config_profile(profile="balanced", model_name=...)` | Auto-config reranker using a profile. |
+| `reranker_autotune_constrained(model_name, *, full=False, objective="balanced", min_tokens=64, max_latency_ms=500.0)` | Legacy: auto-tune with constraints. |
 | `clear_reranker_autotune_cache(model_name=None)` | Clear reranker autotune cache. |
 | `auto_select_model(use_case="balanced")` | Select best model. Returns `ModelSelectionResult`. |
-| `clear_autotune_cache(model_name=None)` | Clear autotune cache. |
+| `clear_autotune_cache(model_name=None)` | Clear the text autotune cache (with `None`, the **whole** autotune directory). |
 | `cache_path()` | Get autotune cache file path. |
 | `cosine_similarity(a, b)` | Cosine similarity between two vectors |
 | `dot_product(a, b)` | Dot product between two vectors |
@@ -2147,28 +2182,23 @@ clear_cache()
 
 ### Unified Tuning
 
-The unified auto-tuner provides a single API for optimizing all task types (text embedding, sparse, image, reranking).
+The unified auto-tuner provides a single API for optimizing all task types (text embedding, sparse, image, reranking). It runs on `lembed_autotune_ex()` on the C side.
 
 ```python
-from libembedding import (
-    autotune_unified,
-    LEMBED_TASK_EMBEDDING,
-    LEMBED_TASK_SPARSE,
-    LEMBED_TASK_IMAGE,
-    LEMBED_TASK_RERANKING,
-    LEMBED_AUTOTUNE_QUICK,
-    LEMBED_AUTOTUNE_FULL,
-    UnifiedTuningResult,
-)
+from libembedding import autotune_unified, UnifiedTuningResult
 
-# Tune any task type
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",                      # default: "throughput" (embedding, sparse, image), "balanced" (reranking)
+    texts=[*documents, query],                # reranking: the LAST text is the query
+    max_latency_ms=300.0,                     # p95 budget per tuning call (0 = none)
+    min_tokens=128,                           # reranking only
 )
 print(result.threads, result.batch_size, result.max_tokens)
 ```
+
+When no configuration fits `max_latency_ms`, the best unconstrained configuration is returned: compare `result.p95_latency_ms` with the budget. `texts` is rejected for `"image"`. For `"sparse"`, `top_k`, `min_weight` and `storage_format` are not tuned: they reflect the model defaults. Details, grids, methodology and measurements: [Performance](performance_tuning.html#unified-auto-tuning-api).
 
 #### UnifiedTuningResult
 
@@ -2180,13 +2210,13 @@ class UnifiedTuningResult:
     batch_size: int
     workers: int            # embedding only
     max_tokens: int         # reranker only
-    top_k: int              # sparse only
-    min_weight: float       # sparse only
-    storage_format: int    # sparse only
     throughput_docs_sec: float
-    latency_ms: float
+    latency_ms: float       # per call; amortised per text for "embedding"
     p95_latency_ms: float
-    memory_mb: float
+    memory_mb: float        # estimate (RSS delta), not an absolute peak
+    top_k: int = 0          # sparse: model default (not tuned)
+    min_weight: float = 0.0 # sparse: same
+    storage_format: int = 0 # sparse: same
 ```
 
 ### SparseTuningResult
@@ -2734,7 +2764,8 @@ pool = TextEmbeddingPool(
     autotune=True,           # enable auto-tuning
     offline=True,
 )
-# → benchmark ~5-15s first time, then instant cache
+# → benchmark on the first call (~13 s in QUICK on an i7-1065G7 4C/8T,
+#   indicative: depends on the CPU and the model), then instant cache
 ```
 
 ### Autotune with your corpus (recommended)
@@ -2756,25 +2787,28 @@ pool = TextEmbeddingPool(
 
 ### Autotune cache
 
-Results are cached by machine + model:
-
-```
-    %LOCALAPPDATA%\libembedding\autotune\8x4_Intel_i7-1065G7_model_ort1.29_v1.4.0.json
-```
+Results are cached by machine + model, in a **single store** shared by the four
+tasks: `%LOCALAPPDATA%\libembedding\autotune` (`~/.cache/libembedding/autotune`
+outside Windows). Text sits at the root; `reranker/`, `sparse/` and `image/` have
+their own subdirectory. The file name encodes the hardware fingerprint and a
+short hash of the variant (workload, objective, mode).
 
 | Event | Behavior |
 |-------|----------|
 | First call | Benchmark + save cache |
-| Same machine + model | Cache hit (< 1ms) |
-| Change CPU/ORT/model | Cache miss → re-benchmark |
-| Same model, different corpus | Cache miss (the corpus fingerprint is part of the key) |
-| Same corpus, different objective or mode | Cache miss |
+| Same machine + model + workload | Cache hit (a few ms) |
+| Change CPU/ORT/library version/model | Cache miss → re-benchmark |
+| Same model, different workload | Cache miss (the workload fingerprint is part of the key) |
+| Same workload, different objective, mode or constraint | Cache miss |
 
 A cache entry is reused only when **every** identity dimension matches: model,
-variant (`synthetic` / `custom`), corpus fingerprint, objective and mode. A
-corrupt or truncated file is treated as a miss, never as a result. Writes are
-atomic (temporary file then rename), so an interruption cannot leave a partial
-result behind.
+hardware and software fingerprint, workload fingerprint, objective, mode and
+constraints (p95 budget, `min_tokens`). A corrupt or truncated file is treated as
+a miss, never as a result. Writes are atomic (temporary file then rename), so an
+interruption cannot leave a partial result behind. Sparse, image and constrained
+results are now cached too (previously a repeated sparse or image call re-ran a
+95 to 170 s tuning). Older text-tuner entries are invalidated: they had been
+measured on the default model whatever model was requested.
 
 Tune on your own corpus:
 
@@ -2821,27 +2855,134 @@ pool = TextEmbeddingPool(
 
 ### Unified Auto-Tuning API
 
-The unified auto-tuner provides a single entry point for all task types. It routes to the appropriate backend implementation and caches results using a hardware fingerprint.
+`autotune_unified()` is the single entry point for the four tasks
+(`"embedding"`, `"reranking"`, `"sparse"`, `"image"`). It runs on
+`lembed_autotune_ex()` on the C side ([C reference](c_api/autotuner.html)).
 
 ```python
-from libembedding import (
-    autotune_unified,
-    LEMBED_TASK_EMBEDDING,    # text embedding
-    LEMBED_TASK_SPARSE,      # sparse embedding
-    LEMBED_TASK_IMAGE,       # image embedding
-    LEMBED_TASK_RERANKING,   # reranking
-    LEMBED_AUTOTUNE_QUICK,   # 5-15s
-    LEMBED_AUTOTUNE_FULL,    # 30-120s
-)
+from libembedding import autotune_unified, clear_autotune_cache_unified
 
-# Tune a reranker model
+# Defaults: QUICK, synthetic corpus, objective "throughput"
+# (embedding, sparse, image) or "balanced" (reranking)
+result = autotune_unified("embedding", "BAAI/bge-small-en-v1.5")
+
+# Reranker on your real data: the LAST text is the query.
+# p95 budget of 300 ms for one whole request, never truncate below 128 tokens.
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",
+    texts=[*candidate_documents, user_query],
+    max_latency_ms=300.0,
+    min_tokens=128,
 )
-# result: UnifiedTuningResult with threads, batch_size, max_tokens, latency, etc.
+print(result.threads, result.batch_size, result.max_tokens)
+if result.p95_latency_ms > 300.0:
+    print("budget not reachable: best unconstrained configuration returned")
+
+# Purge one task's cache for a model (None = every model of that task)
+clear_autotune_cache_unified("reranking", "jinaai/jina-reranker-v1-turbo-en-quantized")
 ```
+
+Parameters: `full=False` (QUICK) or `True` (FULL); `objective` (`"latency"`,
+`"throughput"`, `"balanced"`, `"memory"`, `None` = task default); `texts`
+(custom workload, sampled down to `max_sample_size=100`; rejected for `"image"`);
+`max_latency_ms` (p95 budget per tuning call, `0` = none); `min_tokens`
+(reranking only). `model_name` has a default only for `"embedding"` and
+`"reranking"`.
+
+**Objectives.** `latency` minimizes the tail cost P50 + ½(P95 − P50);
+`throughput` maximizes throughput; `balanced` averages the two normalized costs;
+`memory` minimizes the RSS delta (16 MB floor).
+
+**Budget and fallback.** Only configurations whose p95 fits in `max_latency_ms`
+are eligible. When none fits, the best **unconstrained** configuration is returned
+(no error): compare `result.p95_latency_ms` with the budget. For the reranker the
+fallback keeps the `min_tokens` floor. A tuning call is one request over the whole
+workload (the documents of a reranking query, or the full batch); the latencies in
+the result are **per call**, except for `"embedding"` where they are amortised
+**per text**.
+
+**`min_tokens` and truncation.** The reranker tuner chooses `max_tokens`
+(256/64 in QUICK; 256/128/64/32 in FULL), which **truncates documents**: this is a
+quality/speed trade-off, not a pure optimization. `min_tokens` sets the acceptable
+floor. On equal performance (within 5 %), the configuration that truncates least
+wins.
+
+**What the tuner deliberately does not set.** For sparse, `top_k`, `min_weight`
+and `storage_format` change the vectors produced, not only the speed: they are no
+longer chosen by the tuner (only threads × batch are). `UnifiedTuningResult` still
+exposes those three fields, filled with the model defaults, for information.
+
+**Grids.** Text: splits of the *P* physical cores between workers and threads
+(1×P, 2×P/2, P×1 in QUICK; + 1×logical and 4×P/4 in FULL) × batch (32 in QUICK;
+16/32/64/128 in FULL), on a synthetic corpus of 32 (QUICK) or 256 (FULL) texts.
+Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
+`max_tokens` × batch. Sparse and image: threads × batch.
+
+### Measurement methodology
+
+The four tuners share one engine:
+
+- **Protocol.** QUICK: 1 warmup + 3 timed calls per configuration; FULL: 2 warmups
+  + 10 calls. Every call is timed individually (monotonic clock); P50 and P95 are
+  derived from them.
+- **Racing.** A configuration whose **first two** timed calls both exceed 2.5 × the
+  best P50 seen so far is stopped without finishing its calls (except for the
+  `memory` objective, which does not rely on latency).
+- **Session reuse.** Grid points that differ only by batch size share one ONNX
+  Runtime session instead of rebuilding it.
+- **Unit-free costs.** Every term is divided by the best value observed among the
+  eligible configurations; a cost is "how many times worse than the best" (lower
+  is better). Constraints (p95 budget, `min_tokens`) filter *before* normalization,
+  so an ineligible configuration cannot distort the references.
+- **5 % tie rule.** Costs within 5 % of the best are treated as a tie, resolved
+  toward the preferred configuration (first grid point: fewer sessions, less
+  truncation, smaller batch). The choice therefore does not flip on measurement
+  noise.
+- **Memory.** `memory_mb` is an **estimate**: RSS growth across "create + warmup",
+  not an absolute peak. Peak RSS is a per-process high-water mark: do not read it
+  as the exact footprint of one configuration.
+
+### bench_autotune measurements
+
+Measured with `benchmarks/bench_autotune.cpp` (public C API only), QUICK mode,
+Release build, **i7-1065G7 (4C/8T)**, before → after the engine rework (commit
+`e263a90` and following):
+
+| Task (model) | Cold tuning | Repeated call (cache) | Throughput of chosen config vs library defaults |
+|--------------|-------------|-----------------------|-------------------------------------------------|
+| text (`all-MiniLM-L6-v2`) | 22.7 → 12.6 s | ~10–15 ms (already cached before) | ×1.77 |
+| reranker (`jina-reranker-v1-turbo-en`) | 144 → 47 s | ~10–15 ms (already cached before) | ×3.26 |
+| sparse (`Splade_PP_en_v1`) | 96 → 33 s | 95.6 s → 11 ms | ×1.01 |
+| image (`clip-ViT-B-32-vision`) | 166 → 28 s | 168 s → 13 ms | ×1.01 |
+
+How to read this table:
+
+- Throughput is measured on an **evaluation workload distinct** from the tuner's,
+  against the library defaults.
+- **Text ×1.77**: the earlier ×1.23 was measured on the *wrong model* (the old
+  tuner always measured the default model).
+- **Reranker ×3.26**: obtained mostly by **truncating to 64 tokens**. It is a speed
+  gain paid for with context seen by the model; use `min_tokens` if ranking quality
+  matters.
+- **Sparse ×1.01 and image ×1.01**: the defaults are already close to optimal on
+  this machine; the tuner confirms it, it does not manufacture a gain.
+- **Observed evaluation noise is 6 to 14 %** on this laptop: do not present small
+  differences as significant. These durations depend on the CPU, the model and the
+  workload: they are indicative, not guarantees.
+
+To reproduce (the Windows CMake generator is multi-config; models must already be
+in the local cache, nothing is downloaded):
+
+```powershell
+cmake -S . -B build -DLIBEMBEDDING_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --target bench_autotune
+build/benchmarks/Release/bench_autotune.exe --task text   # text | rerank | sparse | image
+# options: --model <code> (the task's model), --runs <n> (default 5, median reported)
+```
+
+The JSON report goes to stdout, progress to stderr.
 
 ### llama.cpp / GGUF Auto-Tuning
 
@@ -4581,40 +4722,127 @@ Rendered: https://dorel14.github.io/libembedding-ng/en/c_api/autotuner.html
 
 # Autotuner C API
 
-This module provides comprehensive auto-tuning to find optimal configuration (workers, threads, batch_size).
+This module provides auto-tuning to find the best configuration on the current machine: threads, batch_size, and depending on the task workers (text) or `max_tokens` (reranker). The four tasks (text, reranker, sparse, image) run on **one shared measurement engine** (see [measurement methodology](../performance_tuning.html#measurement-methodology)) and share a single cache store.
+
+> **Availability.** Like every auto-tuner entry point, these functions are compiled into the **shared library** (`python/csrc/libembedding_shlib.cpp`: the DLL on Windows, the Python wheel), not into the header-only `LIBEMBEDDING_IMPLEMENTATION` build.
 
 ## Types
 
 | Type | Description |
 |------|-------------|
-| `lembed_tuning_result_t` | Autotuning result |
-| `lembed_unified_tuning_result_t` | Unified autotuning result |
+| `lembed_tuning_result_t` | Text autotuning result (legacy) |
+| `lembed_unified_tuning_result_t` | Unified autotuning result (all tasks) |
+| `lembed_autotune_options_t` | Options of `lembed_autotune_ex()`: task, mode, objective, workload, budget, `min_tokens` |
 | `lembed_model_selection_t` | Model selection result |
 
 ## Constants
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `LEMBED_AUTOTUNE_QUICK` | `0` | Quick mode (5-15s) |
-| `LEMBED_AUTOTUNE_FULL` | `1` | Exhaustive mode (30-120s) |
+| `LEMBED_AUTOTUNE_QUICK` | `0` | Quick mode: reduced grid, 1 warmup + 3 timed calls per configuration |
+| `LEMBED_AUTOTUNE_FULL` | `1` | Exhaustive mode: extended grid, 2 warmups + 10 timed calls per configuration |
+
+**Indicative** cold durations (empty cache), measured in QUICK mode on an i7-1065G7 laptop (4C/8T): text ~13 s, reranker ~47 s, sparse ~33 s, image ~28 s (see [Performance](../performance_tuning.html#bench_autotune-measurements)). They depend on the CPU, the model and the workload; FULL mode takes longer, with no guaranteed duration. A repeated call (warm cache) returns in a few milliseconds.
+
+## Recommended entry point: `lembed_autotune_ex`
+
+`lembed_autotune_ex()` exposes the objective, a custom workload and constraints for **every** task. The legacy functions (listed below) remain available and are facades over the same code; new code should prefer `lembed_autotune_ex()`. (Documentation-only deprecation: no compiler attribute is applied.)
+
+```c
+lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task);
+
+lembed_status_t lembed_autotune_ex(
+    const char* model_name,
+    const lembed_autotune_options_t* options,   /* NULL = defaults of LEMBED_TASK_EMBEDDING */
+    lembed_unified_tuning_result_t* result);
+```
+
+Always start from `lembed_autotune_options_default(task)`, then override fields:
+
+| Field | Default | Semantics |
+|-------|---------|-----------|
+| `task` | argument of `_default()` | `LEMBED_TASK_EMBEDDING`, `_RERANKING`, `_IMAGE` or `_SPARSE` |
+| `mode` | `LEMBED_AUTOTUNE_QUICK` | QUICK or FULL |
+| `objective` | `THROUGHPUT` (text, sparse, image); `BALANCED` (reranking) | What to optimize (see [Objectives](#objectives)) |
+| `texts`, `n_texts` | `NULL`, `0` | Custom workload; `NULL`/`0` = built-in synthetic workload. Text, sparse: the texts to embed. **Reranking: the last text is the query**, the others are the documents. **Image: rejected** (`LEMBED_ERROR_INVALID_ARGUMENT`). |
+| `max_latency_ms` | `0` (none) | **p95 budget per tuning call**. One call = one request over the whole workload: the documents of a reranking query, or the full text/image batch. |
+| `min_tokens` | `0` (none) | Reranking only: smallest acceptable `max_tokens`. |
+
+Behavior:
+
+- **Budget and fallback.** Only configurations whose p95 meets `max_latency_ms` are eligible. When none fits, the best **unconstrained** configuration is returned with `LEMBED_OK`: compare `result.p95_latency_ms` with the budget to detect that case. For the reranker, the fallback keeps the `min_tokens` floor.
+- **Latencies.** `latency_ms` and `p95_latency_ms` are **per call**, except for `LEMBED_TASK_EMBEDDING` where they are amortised **per text** (as in `lembed_tuning_result_t`).
+- **Cache.** The result is cached (see [Autotune cache](#autotune-cache)); a repeated call returns in a few milliseconds.
+- **Errors.** `LEMBED_ERROR_MODEL_NOT_FOUND` (unknown model), `LEMBED_ERROR_INVALID_ARGUMENT` (inconsistent options), `LEMBED_ERROR_ONNX_RUNTIME` (no configuration could run). `lembed_last_error()` is set on every autotune error path.
+
+Example: a reranker with a p95 budget and a truncation floor.
+
+```c
+#include <libembedding/libembedding.h>
+#include <stdio.h>
+
+int main(void) {
+    /* Real workload: candidate documents, the query LAST. */
+    const char* texts[] = {
+        "Candidate document 1 ...",
+        "Candidate document 2 ...",
+        "Candidate document 3 ...",
+        "my user query",                   /* last text = query */
+    };
+
+    lembed_autotune_options_t opts = lembed_autotune_options_default(LEMBED_TASK_RERANKING);
+    opts.mode           = LEMBED_AUTOTUNE_QUICK;
+    opts.objective      = LEMBED_OBJECTIVE_LATENCY;
+    opts.texts          = texts;
+    opts.n_texts        = 4;
+    opts.max_latency_ms = 300.0;   /* p95 budget for one whole request */
+    opts.min_tokens     = 128;     /* never truncate documents below 128 tokens */
+
+    lembed_unified_tuning_result_t r;
+    lembed_status_t st = lembed_autotune_ex(
+        "jinaai/jina-reranker-v1-turbo-en-quantized", &opts, &r);
+    if (st != LEMBED_OK) {
+        fprintf(stderr, "autotune: %s\n", lembed_last_error());
+        return 1;
+    }
+    printf("threads=%d batch=%d max_tokens=%d p95=%.1f ms\n",
+           r.threads, r.batch_size, r.max_tokens, r.p95_latency_ms);
+    if (r.p95_latency_ms > opts.max_latency_ms)
+        printf("budget not reachable: best unconstrained configuration returned\n");
+    return 0;
+}
+```
+
+### What the tuner sets, per task
+
+| Task | Grid | Notes |
+|------|------|-------|
+| `LEMBED_TASK_EMBEDDING` | Splits of the *P* physical cores between workers and threads: 1×P, 2×P/2, P×1 in QUICK (+ 1×logical and 4×P/4 in FULL) × batch (32 in QUICK; 16/32/64/128 in FULL) | Measures the model you asked for. Synthetic corpus: 32 texts (QUICK) / 256 (FULL). |
+| `LEMBED_TASK_RERANKING` | threads = physical and logical cores in QUICK (+ 1, 2, P/2 in FULL) × `max_tokens` (256/64 in QUICK; 256/128/64/32 in FULL) × batch | `max_tokens` **truncates documents**: it is a quality/speed trade-off, to be bounded with `min_tokens`. On a tie (5 %), the configuration that truncates least wins. |
+| `LEMBED_TASK_SPARSE` | threads × batch | `top_k`, `min_weight` and `storage_format` are **no longer** tuned: they change the vectors produced, not only the speed. The result returns the model defaults (informational fields). |
+| `LEMBED_TASK_IMAGE` | threads × batch | Custom workload not supported. |
 
 ## Autotuning functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Autotune a text model |
-| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Autotune with custom corpus |
-| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Unified autotune (all types) |
-| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Unified autotune with a latency budget |
+| `lembed_autotune_ex(model_name, options, out)` | `lembed_status_t` | **Recommended.** Every task, objective, workload, p95 budget, `min_tokens` |
+| `lembed_autotune_options_default(task)` | `lembed_autotune_options_t` | Default options of a task |
+| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Legacy: autotune a text model |
+| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Legacy: autotune with custom corpus |
+| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Facade over `lembed_autotune_ex` with default options |
+| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Facade with a latency budget; honors the budget for **every** task, sparse included (it used to return `UNSUPPORTED` for sparse) |
 | `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Pick the best model for the machine |
-| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Autotune a sparse model |
-| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Autotune an image model |
-| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Autotune a reranker |
-| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Autotune a reranker on a supplied corpus |
-| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Constrained autotune |
-| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Latency-budget autoconfig |
+| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Legacy: autotune a sparse model (threads × batch) |
+| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Legacy: autotune an image model |
+| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Legacy: autotune a reranker |
+| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Legacy: autotune a reranker on a supplied corpus |
+| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Legacy: constrained autotune |
+| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Legacy: latency-budget autoconfig (now honors `objective`) |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Profile-based autoconfig |
 | `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Pick the fastest quantization variant for this machine |
+
+Functions marked "Legacy" are kept for source and binary compatibility (no signature changed); they expose fewer settings than `lembed_autotune_ex()`.
 
 ## Automatic quantization selection
 
@@ -4746,7 +4974,7 @@ makes it testable in milliseconds without a model or network
 |----------|---------|-------------|
 | `lembed_autotune_clear_cache(model_name)` | `void` | Clear the text autotune cache; `NULL` = whole cache |
 | `lembed_reranker_autotune_clear_cache(model_name)` | `void` | Clear the reranker autotune cache; `NULL` = whole reranker cache |
-| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Dispatch to the cache of the given task |
+| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Purge the cache of one task (text, reranker, sparse **and** image) for a model; `NULL` = every model of that task (for `LEMBED_TASK_EMBEDDING`, the root-level text entries only). |
 
 ## Unified tasks
 
@@ -4761,43 +4989,46 @@ makes it testable in milliseconds without a model or network
 
 | Constant | Description |
 |----------|-------------|
-| `LEMBED_OBJECTIVE_LATENCY` | Minimize latency |
+| `LEMBED_OBJECTIVE_LATENCY` | Minimize latency (cost = P50 + ½(P95 − P50)) |
 | `LEMBED_OBJECTIVE_THROUGHPUT` | Maximize throughput |
-| `LEMBED_OBJECTIVE_BALANCED` | Balanced |
-| `LEMBED_OBJECTIVE_MEMORY` | Minimize memory |
+| `LEMBED_OBJECTIVE_BALANCED` | Balanced: mean of the normalized latency and throughput costs |
+| `LEMBED_OBJECTIVE_MEMORY` | Minimize memory (RSS delta, 16 MB floor) |
+
+Costs are **normalized and unit-free** (each term is divided by the best value observed on the grid), so docs/s and milliseconds are never mixed. Defaults of `lembed_autotune_options_default()`: `THROUGHPUT` for text, sparse and image; `BALANCED` for reranking. Details in [Performance — measurement methodology](../performance_tuning.html#measurement-methodology).
 
 ## Autotune cache
 
-Results are stored under `%LOCALAPPDATA%\libembedding\autotune`
+A **single store** for the four tasks: `%LOCALAPPDATA%\libembedding\autotune`
 (`$HOME/.cache/libembedding/autotune` outside Windows, and
 `./libembedding_autotune_cache` as a last resort when none of those variables is
-set). Rerankers use a separate `reranker/` subdirectory.
+set). **Text** entries sit at the root; the other tasks have their own
+subdirectory: `reranker/`, `sparse/`, `image/`. Quantization decisions live in
+`quantization/`.
 
-An entry is reused only when its identity matches **in full**: model, variant,
-corpus fingerprint, objective and mode. A result measured on one corpus is
+An entry is reused only when its identity matches **in full**: resolved model,
+hardware and software fingerprint, workload fingerprint, objective, mode and
+constraints (p95 budget, `min_tokens`). A result measured on one workload is
 therefore never returned for another, and an unreadable or corrupt file is
-treated as a cache miss.
+treated as a cache miss. **Constrained** results are cached too, as are sparse
+and image results (they were not: a repeated call re-ran a 95 to 170 s tuning).
 
-| Variant label | Used by |
-|---------------|---------|
-| `synthetic` | Default text tuning, on a synthetic corpus |
-| `custom` | Text or reranker tuning on a supplied corpus |
-| `default` | Default reranker tuning, on a synthetic corpus |
+The model identity is always the resolved form (for text, the `model_code`; see
+the note on the two forms of the name above). The hardware and software
+fingerprint covers the CPU brand, logical and physical cores, the ONNX Runtime
+major.minor version and the libembedding major.minor version, so a result
+measured on another machine or after a version bump is never served again.
 
-Note that the default label is **not** the same for text (`synthetic`, in
-`autotune_bench_text.hpp`) and for reranker (`default`, via
-`default_reranker_identity()` in `autotune_bench_reranker.hpp`). No variant
-selection depends on those labels: `lembed_find_text_model_variant()` compares the
-quantization mode and the `model_name`, not `synthetic`/`custom`.
+> **Invalidation on upgrade.** Older text-tuner cache entries are invalidated:
+> they had been measured on the default model whatever model was requested.
 
-The identity also includes a hardware and software fingerprint (CPU brand,
-logical and physical cores, ONNX Runtime major.minor version, libembedding
-major.minor version), so a result measured on another machine or after a version
-bump is never served again.
-
-`lembed_autotune_clear_cache(model_name)` removes every entry for a model (all
-variants); `lembed_reranker_autotune_clear_cache(model_name)` does the same for
-rerankers. Passing `NULL` empties the matching cache entirely. Entries are
+`lembed_autotune_clear_cache(model_name)` removes every entry for a model in the
+root store and its subdirectories (an unknown name is a no-op);
+`lembed_reranker_autotune_clear_cache(model_name)` does the same for
+rerankers; `lembed_autotune_unified_clear_cache(task, model_name)` targets one
+task (sparse and image included). Passing `NULL` empties that task's cache
+only: for `LEMBED_TASK_EMBEDDING`, only the root-level text entries are removed.
+Only `lembed_autotune_clear_cache(NULL)` deletes the **whole** autotune
+directory, subdirectories included. Entries are
 matched on the `model` field read **from inside** the file, not on the file
 name, which is a hash of the hardware fingerprint.
 
@@ -4830,7 +5061,7 @@ that mode, so the function always returns `-1` -- and **still sets a thread-loca
 error**, like any unknown mode. `lembed_text_embedding_create_v2` only calls it
 for an explicitly requested mode, never for `AUTO`.
 
-## Example
+## Example (legacy API, text)
 
 ```c
 #include <libembedding/autotuner.h>
@@ -5359,6 +5590,10 @@ best_idx = scores.argmax()
 ### SparseTextEmbedding
 
 Génère des embeddings **sparse** (vecteurs creux avec indices de tokens et poids).
+`batch_size=None` utilise le défaut du backend : 256 pour ONNX et 16 pour GGUF.
+Le réglage GGUF est un compromis mesuré entre débit, stabilité et nombre de
+lots ; batch 2 peut réduire davantage le padding et la mémoire à débit similaire.
+Les deux réglages peuvent être surchargés par l'appelant.
 
 #### Constructeur
 
@@ -5370,7 +5605,7 @@ SparseTextEmbedding(
     cache_dir=None,
     max_length=0,
     threads=0,
-    batch_size=256,
+    batch_size=None,
     offline=False,
     show_download_progress=True,
     top_terms=0,
@@ -5656,33 +5891,39 @@ class ModelSelectionResult:
 | Fonction | Description |
 |----------|-------------|
 | `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune un modèle. Retourne `TuningResult`. `texts` fournit un corpus de mesure (échantillonné à `max_sample_size`) ; `None` utilise un corpus synthétique. |
-| `autotune_unified(task, model_name, mode="quick")` | Auto-tune unifié pour tous les types de tâches. Voir [Unified Tuning](#unified-tuning). |
-| `sparse_autotune(model_name, mode="quick")` | Auto-tune l'embedding sparse. Retourne `SparseTuningResult`. |
-| `image_autotune(model_name, mode="quick")` | Auto-tune l'embedding image. Retourne `ImageTuningResult`. |
-| `reranker_autotune(model_name, mode="quick", objective="latency")` | Auto-tune le reranker. Retourne `RerankerTuningResult`. |
-| `reranker_auto_config(model_name, target_latency_ms=500, objective="latency")` | Configuration automatique du reranker pour un budget de latence. |
-| `reranker_auto_config_profile(model_name, profile="balanced")` | Configuration du reranker via un profil. |
-| `reranker_autotune_constrained(model_name, mode="quick", objective="latency", min_tokens=32, max_latency_ms=1000)` | Auto-tune avec contraintes. |
+| `autotune_unified(task="embedding", model_name=None, *, full=False, objective=None, texts=None, max_latency_ms=0.0, min_tokens=0, max_sample_size=100)` | **Recommandé.** Auto-tune unifié pour les quatre tâches (`"embedding"`, `"reranking"`, `"image"`, `"sparse"`). Retourne `UnifiedTuningResult`. Voir [Unified Tuning](#unified-tuning). |
+| `clear_autotune_cache_unified(task, model_name=None)` | Efface le cache d'autotune d'une tâche pour un modèle (`None` = tous les modèles de la tâche). |
+| `sparse_autotune(model_name, *, full=False)` | Historique : auto-tune l'embedding sparse (threads × batch). Retourne `SparseTuningResult`. |
+| `image_autotune(model_name, *, full=False)` | Historique : auto-tune l'embedding image. Retourne `ImageTuningResult`. |
+| `reranker_autotune(model_name, *, full=False, objective="balanced")` | Historique : auto-tune le reranker. Retourne `RerankerTuningResult`. |
+| `reranker_auto_config(model_name, target_latency_ms=500, objective="balanced")` | Configuration automatique du reranker pour un budget de latence. |
+| `reranker_auto_config_profile(profile="balanced", model_name=...)` | Configuration du reranker via un profil. |
+| `reranker_autotune_constrained(model_name, *, full=False, objective="balanced", min_tokens=64, max_latency_ms=500.0)` | Historique : auto-tune avec contraintes. |
 | `clear_reranker_autotune_cache(model_name=None)` | Efface le cache d'autotune du reranker. |
 | `auto_select_model(use_case="balanced")` | Sélectionne le meilleur modèle. Retourne `ModelSelectionResult`. |
-| `clear_autotune_cache(model_name=None)` | Efface le cache d'autotune. |
+| `clear_autotune_cache(model_name=None)` | Efface le cache d'autotune texte (avec `None`, **tout** le répertoire d'autotune). |
 | `cache_path()` | Chemin du fichier de cache d'autotune. |
 
 ---
 
 ### Unified Tuning
 
-L'auto-tune unifié fournit un point d'entrée unique pour tous les types de tâches (texte, sparse, image, reranking).
+L'auto-tune unifié fournit un point d'entrée unique pour tous les types de tâches (texte, sparse, image, reranking). Il s'appuie sur `lembed_autotune_ex()` côté C.
 
 ```python
-from libembedding import autotune_unified, LEMBED_TASK_RERANKING, LEMBED_AUTOTUNE_QUICK
+from libembedding import autotune_unified
 
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",                      # défaut : "throughput" (embedding, sparse, image), "balanced" (reranking)
+    texts=[*documents, query],                # reranking : le DERNIER texte est la requête
+    max_latency_ms=300.0,                     # budget p95 par appel de tuning (0 = aucun)
+    min_tokens=128,                           # reranking uniquement
 )
 ```
+
+Si aucune configuration ne tient dans `max_latency_ms`, la meilleure configuration sans contrainte est renvoyée : comparer `result.p95_latency_ms` au budget. `texts` est refusé pour `"image"`. Pour `"sparse"`, `top_k`, `min_weight` et `storage_format` ne sont pas réglés par le tuner : ils reflètent les valeurs par défaut du modèle. Détails, grilles, méthodologie et mesures : [Performance](performance_tuning.html#auto-tune-unifié-api-unifiée).
 
 #### UnifiedTuningResult
 
@@ -5692,15 +5933,15 @@ class UnifiedTuningResult:
     task: str
     threads: int
     batch_size: int
-    workers: int
-    max_tokens: int
-    top_k: int
-    min_weight: float
-    storage_format: int
+    workers: int            # embedding uniquement
+    max_tokens: int         # reranking uniquement
     throughput_docs_sec: float
-    latency_ms: float
+    latency_ms: float       # par appel ; amortie par texte pour "embedding"
     p95_latency_ms: float
-    memory_mb: float
+    memory_mb: float        # estimation (delta de RSS), pas un pic absolu
+    top_k: int = 0          # sparse : valeur par défaut du modèle (non réglée)
+    min_weight: float = 0.0 # sparse : idem
+    storage_format: int = 0 # sparse : idem
 ```
 
 ---
@@ -6285,7 +6526,8 @@ pool = TextEmbeddingPool(
     autotune=True,           # active l'auto-tuning
     offline=True,
 )
-# → benchmark ~5-15s la première fois, puis cache instantané
+# → benchmark au premier appel (~13 s en QUICK sur un i7-1065G7 4C/8T,
+#   indicatif : dépend du CPU et du modèle), puis cache instantané
 ```
 
 ### Autotune avec votre corpus (recommandé)
@@ -6307,26 +6549,30 @@ pool = TextEmbeddingPool(
 
 ### Cache d'autotuning
 
-Les résultats sont mis en cache par machine + modèle :
-
-```
-    %LOCALAPPDATA%\libembedding\autotune\8x4_Intel_i7-1065G7_model_ort1.29_v1.4.0.json
-```
+Les résultats sont mis en cache par machine + modèle, dans un **seul magasin** pour
+les quatre tâches : `%LOCALAPPDATA%\libembedding\autotune` (`~/.cache/libembedding/autotune`
+hors Windows). Le texte est à la racine ; `reranker/`, `sparse/` et `image/` ont
+leur sous-répertoire. Le nom de fichier encode l'empreinte matérielle et un hash
+court de la variante (workload, objectif, mode).
 
 | Événement | Comportement |
 |-----------|--------------|
 | Premier appel | Benchmark + sauvegarde cache |
-| Même machine + modèle | Cache hit (< 1ms) |
-| Changement de CPU/ORT/modèle | Cache miss → re-benchmark |
-| Même modèle, corpus différent | Cache miss (l'empreinte du corpus fait partie de la clef) |
-| Même corpus, objectif ou mode différent | Cache miss |
+| Même machine + modèle + workload | Cache hit (quelques ms) |
+| Changement de CPU/ORT/version de la lib/modèle | Cache miss → re-benchmark |
+| Même modèle, workload différent | Cache miss (l'empreinte du workload fait partie de la clef) |
+| Même workload, objectif, mode ou contrainte différent | Cache miss |
 
 Une entrée de cache est réutilisée uniquement si **toutes** ses dimensions
-d'identité correspondent : modèle, variante (`synthetic` / `custom`), empreinte
-du corpus, objectif et mode. Un fichier de cache corrompu ou tronqué est traité
-comme un miss, jamais comme un résultat. Les écritures sont atomiques
-(fichier temporaire puis renommage), donc une interruption ne laisse pas de
-résultat partiel.
+d'identité correspondent : modèle, empreinte matérielle et logicielle, empreinte
+du workload, objectif, mode et contraintes (budget p95, `min_tokens`). Un fichier
+de cache corrompu ou tronqué est traité comme un miss, jamais comme un résultat.
+Les écritures sont atomiques (fichier temporaire puis renommage), donc une
+interruption ne laisse pas de résultat partiel. Les résultats sparse, image et
+les résultats contraints sont désormais mis en cache (avant, un appel sparse ou
+image répété relançait un tuning de 95 à 170 s). Les anciennes entrées du tuner
+texte sont invalidées : elles avaient été mesurées sur le modèle par défaut
+quel que soit le modèle demandé.
 
 Mesurer sur son propre corpus :
 
@@ -6373,22 +6619,137 @@ pool = TextEmbeddingPool(
 
 ### Auto-tune unifié (API unifiée)
 
-L'auto-tune unifié fournit un point d'entrée unique pour tous les types de tâches :
+`autotune_unified()` est le point d'entrée unique pour les quatre tâches
+(`"embedding"`, `"reranking"`, `"sparse"`, `"image"`). Il s'appuie sur
+`lembed_autotune_ex()` côté C ([référence C](c_api/autotuner.html)).
 
 ```python
-from libembedding import (
-    autotune_unified,
-    LEMBED_TASK_RERANKING,
-    LEMBED_AUTOTUNE_QUICK,
-)
+from libembedding import autotune_unified, clear_autotune_cache_unified
 
+# Défauts : QUICK, corpus synthétique, objectif "throughput"
+# (embedding, sparse, image) ou "balanced" (reranking)
+result = autotune_unified("embedding", "BAAI/bge-small-en-v1.5")
+
+# Reranker sur vos vraies données : le DERNIER texte est la requête.
+# Budget p95 de 300 ms pour une requête complète, sans tronquer sous 128 tokens.
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",
+    texts=[*candidate_documents, user_query],
+    max_latency_ms=300.0,
+    min_tokens=128,
 )
-# result: UnifiedTuningResult
+print(result.threads, result.batch_size, result.max_tokens)
+if result.p95_latency_ms > 300.0:
+    print("budget non tenable : meilleure configuration sans contrainte renvoyée")
+
+# Purger le cache d'une tâche pour un modèle (None = tous les modèles de la tâche)
+clear_autotune_cache_unified("reranking", "jinaai/jina-reranker-v1-turbo-en-quantized")
 ```
+
+Paramètres : `full=False` (QUICK) ou `True` (FULL) ; `objective` (`"latency"`,
+`"throughput"`, `"balanced"`, `"memory"`, `None` = défaut de la tâche) ; `texts`
+(workload personnalisé, échantillonné à `max_sample_size=100` ; refusé pour
+`"image"`) ; `max_latency_ms` (budget p95 par appel de tuning, `0` = aucun) ;
+`min_tokens` (reranking uniquement). `model_name` n'a de défaut que pour
+`"embedding"` et `"reranking"`.
+
+**Objectifs.** `latency` minimise le coût de queue P50 + ½(P95 − P50) ;
+`throughput` maximise le débit ; `balanced` moyenne les deux coûts normalisés ;
+`memory` minimise le delta de RSS (plancher 16 Mo).
+
+**Budget et repli.** Seules les configurations dont le p95 tient dans
+`max_latency_ms` sont éligibles. Si aucune ne convient, la meilleure
+configuration **sans contrainte** est renvoyée (pas d'erreur) : comparez
+`result.p95_latency_ms` au budget. Pour le reranker, le repli conserve le
+plancher `min_tokens`. Un appel de tuning est une requête sur tout le workload
+(les documents d'une requête de reranking, ou le batch complet) ; les latences du
+résultat sont **par appel**, sauf pour `"embedding"` où elles sont amorties
+**par texte**.
+
+**`min_tokens` et troncature.** Le tuner du reranker choisit `max_tokens`
+(256/64 en QUICK ; 256/128/64/32 en FULL), qui **tronque les documents** : c'est un
+compromis qualité/vitesse, pas une pure optimisation. `min_tokens` fixe le plancher
+acceptable. À performances égales (écart de 5 %), la configuration qui tronque le
+moins l'emporte.
+
+**Ce que le tuner ne règle volontairement pas.** Pour le sparse, `top_k`,
+`min_weight` et `storage_format` changent les vecteurs produits, pas seulement la
+vitesse : ils ne sont plus choisis par le tuner (seuls threads × batch le sont).
+`UnifiedTuningResult` expose ces trois champs avec les valeurs par défaut du modèle,
+à titre informatif.
+
+**Grilles.** Texte : découpages des cœurs physiques *P* entre workers et threads
+(1×P, 2×P/2, P×1 en QUICK ; + 1×logiques et 4×P/4 en FULL) × batch (32 en QUICK ;
+16/32/64/128 en FULL), sur un corpus synthétique de 32 (QUICK) ou 256 (FULL)
+textes. Reranker : threads (cœurs physiques et logiques en QUICK ; + 1, 2, P/2 en
+FULL) × `max_tokens` × batch. Sparse et image : threads × batch.
+
+### Méthodologie de mesure
+
+Les quatre tuners partagent le même moteur :
+
+- **Protocole.** QUICK : 1 warmup + 3 appels chronométrés par configuration ;
+  FULL : 2 warmups + 10 appels. Chaque appel est chronométré individuellement
+  (horloge monotone) ; on en tire P50 et P95.
+- **Racing.** Une configuration dont les **deux premiers** appels chronométrés
+  dépassent 2,5 × la meilleure P50 déjà vue est arrêtée sans finir ses appels
+  (sauf pour l'objectif `memory`, qui ne s'appuie pas sur la latence).
+- **Réutilisation de session.** Les points de la grille qui ne diffèrent que par
+  le batch partagent la même session ONNX Runtime au lieu d'en recréer une.
+- **Coûts sans unité.** Chaque terme est divisé par la meilleure valeur observée
+  sur les configurations éligibles ; un coût est « combien de fois pire que le
+  meilleur » (plus petit = meilleur). Les contraintes (budget p95, `min_tokens`)
+  filtrent *avant* normalisation, donc une configuration inéligible ne fausse pas
+  les références.
+- **Égalité à 5 %.** Les coûts à moins de 5 % du meilleur sont traités comme une
+  égalité, tranchée vers la configuration préférée (premier point de la grille :
+  moins de sessions, moins de troncature, batch plus petit). Le choix ne bascule
+  donc pas sur du bruit de mesure.
+- **Mémoire.** `memory_mb` est une **estimation** : croissance du RSS entre
+  « création + warmup », pas un pic absolu. Le pic RSS est une marque haute par
+  processus : à ne pas lire comme l'empreinte exacte d'une configuration.
+
+### Mesures du banc bench_autotune
+
+Mesuré avec `benchmarks/bench_autotune.cpp` (API C publique uniquement), mode
+QUICK, build Release, **i7-1065G7 (4C/8T)**, avant → après la refonte du moteur
+(commits `e263a90` et suivants) :
+
+| Tâche (modèle) | Tuning à froid | Appel répété (cache) | Débit config choisie vs défauts de la lib |
+|----------------|----------------|----------------------|-------------------------------------------|
+| texte (`all-MiniLM-L6-v2`) | 22,7 → 12,6 s | ~10–15 ms (déjà en cache avant) | ×1,77 |
+| reranker (`jina-reranker-v1-turbo-en`) | 144 → 47 s | ~10–15 ms (déjà en cache avant) | ×3,26 |
+| sparse (`Splade_PP_en_v1`) | 96 → 33 s | 95,6 s → 11 ms | ×1,01 |
+| image (`clip-ViT-B-32-vision`) | 166 → 28 s | 168 s → 13 ms | ×1,01 |
+
+Comment lire ce tableau :
+
+- Le débit est mesuré sur un **workload d'évaluation distinct** de celui du
+  tuner, contre les défauts de la bibliothèque.
+- **Texte ×1,77** : le ×1,23 mesuré auparavant portait sur le *mauvais modèle*
+  (l'ancien tuner mesurait toujours le modèle par défaut).
+- **Reranker ×3,26** : obtenu surtout par **troncature à 64 tokens**. C'est un gain
+  de vitesse payé en contexte vu par le modèle ; utilisez `min_tokens` si la
+  qualité de classement compte.
+- **Sparse ×1,01 et image ×1,01** : les défauts sont déjà quasi optimaux sur cette
+  machine ; le tuner le confirme, il ne fabrique pas de gain.
+- **Le bruit d'évaluation observé est de 6 à 14 %** sur ce portable : ne pas
+  présenter les petits écarts comme significatifs. Ces durées dépendent du CPU, du
+  modèle et du workload : elles sont indicatives, pas des garanties.
+
+Reproduire (la CMake Windows est multi-config ; les modèles doivent déjà être en
+cache local, rien n'est téléchargé) :
+
+```powershell
+cmake -S . -B build -DLIBEMBEDDING_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --target bench_autotune
+build/benchmarks/Release/bench_autotune.exe --task text   # text | rerank | sparse | image
+# options : --model <code> (modèle de la tâche), --runs <n> (défaut 5, médiane rapportée)
+```
+
+Le rapport JSON sort sur stdout, la progression sur stderr.
 
 ### Benchmark llama.cpp / GGUF
 
@@ -8151,40 +8512,127 @@ Rendu: https://dorel14.github.io/libembedding-ng/c_api/autotuner.html
 
 # Auto-tuneur C API
 
-Ce module fournit l'auto-tuning complet pour trouver la configuration optimale (workers, threads, batch_size).
+Ce module fournit l'auto-tuning pour trouver la configuration optimale sur la machine courante : threads, batch_size, et selon la tâche workers (texte) ou `max_tokens` (reranker). Les quatre tâches (texte, reranker, sparse, image) tournent sur **un même moteur de mesure** (voir [méthodologie de mesure](../performance_tuning.html#méthodologie-de-mesure)) et partagent un seul magasin de cache.
+
+> **Disponibilité.** Comme tous les points d'entrée de l'auto-tuning, ces fonctions sont compilées dans la **bibliothèque partagée** (`python/csrc/libembedding_shlib.cpp` : DLL sous Windows, wheel Python), pas dans le build header-only `LIBEMBEDDING_IMPLEMENTATION`.
 
 ## Types
 
 | Type | Description |
 |------|-------------|
-| `lembed_tuning_result_t` | Résultat de l'autotuning |
-| `lembed_unified_tuning_result_t` | Résultat de l'autotuning unifié |
+| `lembed_tuning_result_t` | Résultat de l'autotuning texte (historique) |
+| `lembed_unified_tuning_result_t` | Résultat de l'autotuning unifié (toutes tâches) |
+| `lembed_autotune_options_t` | Options de `lembed_autotune_ex()` : tâche, mode, objectif, workload, budget, `min_tokens` |
 | `lembed_model_selection_t` | Résultat de sélection de modèle |
 
 ## Constantes
 
 | Constante | Valeur | Description |
 |-----------|--------|-------------|
-| `LEMBED_AUTOTUNE_QUICK` | `0` | Mode rapide (5-15s) |
-| `LEMBED_AUTOTUNE_FULL` | `1` | Mode exhaustif (30-120s) |
+| `LEMBED_AUTOTUNE_QUICK` | `0` | Mode rapide : grille réduite, 1 warmup + 3 appels chronométrés par configuration |
+| `LEMBED_AUTOTUNE_FULL` | `1` | Mode exhaustif : grille étendue, 2 warmups + 10 appels chronométrés par configuration |
+
+Durées **indicatives**, à froid (cache vide), mesurées en QUICK sur un portable i7-1065G7 (4C/8T) : texte ~13 s, reranker ~47 s, sparse ~33 s, image ~28 s (voir [Performance](../performance_tuning.html#mesures-du-banc-bench_autotune)). Elles dépendent du CPU, du modèle et du workload ; le mode FULL est plus long, sans durée garantie. Un appel répété (cache chaud) rend en quelques millisecondes.
+
+## Point d'entrée recommandé : `lembed_autotune_ex`
+
+`lembed_autotune_ex()` donne accès, pour **toutes** les tâches, à l'objectif, à un workload personnalisé et aux contraintes. Les fonctions historiques (liste plus bas) restent disponibles et sont des façades du même code ; pour un nouveau code, préférer `lembed_autotune_ex()`. (Dépréciation purement documentaire : aucun attribut compilateur n'est posé.)
+
+```c
+lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task);
+
+lembed_status_t lembed_autotune_ex(
+    const char* model_name,
+    const lembed_autotune_options_t* options,   /* NULL = défauts de LEMBED_TASK_EMBEDDING */
+    lembed_unified_tuning_result_t* result);
+```
+
+Toujours partir de `lembed_autotune_options_default(task)`, puis surcharger les champs :
+
+| Champ | Défaut | Sémantique |
+|-------|--------|------------|
+| `task` | argument de `_default()` | `LEMBED_TASK_EMBEDDING`, `_RERANKING`, `_IMAGE` ou `_SPARSE` |
+| `mode` | `LEMBED_AUTOTUNE_QUICK` | QUICK ou FULL |
+| `objective` | `THROUGHPUT` (texte, sparse, image) ; `BALANCED` (reranking) | Critère d'optimisation (voir [Objectifs](#objectifs)) |
+| `texts`, `n_texts` | `NULL`, `0` | Workload personnalisé ; `NULL`/`0` = corpus synthétique intégré. Texte, sparse : les textes à encoder. **Reranking : le dernier texte est la requête**, les autres sont les documents. **Image : refusé** (`LEMBED_ERROR_INVALID_ARGUMENT`). |
+| `max_latency_ms` | `0` (aucun) | Budget **p95 par appel de tuning**. Un appel = une requête sur tout le workload : les documents d'une requête de reranking, ou le batch texte/image complet. |
+| `min_tokens` | `0` (aucun) | Reranking uniquement : plus petit `max_tokens` acceptable. |
+
+Comportement :
+
+- **Budget et repli.** Seules les configurations dont le p95 respecte `max_latency_ms` sont éligibles. Si aucune ne convient, la meilleure configuration **sans contrainte** est renvoyée avec `LEMBED_OK` : comparer `result.p95_latency_ms` au budget pour détecter ce cas. Pour le reranker, ce repli conserve le plancher `min_tokens`.
+- **Latences.** `latency_ms` et `p95_latency_ms` sont des latences **par appel**, sauf pour `LEMBED_TASK_EMBEDDING` où elles sont amorties **par texte** (comme dans `lembed_tuning_result_t`).
+- **Cache.** Le résultat est mis en cache (voir [Cache d'autotuning](#cache-dautotuning)) ; un appel répété rend en quelques millisecondes.
+- **Erreurs.** `LEMBED_ERROR_MODEL_NOT_FOUND` (modèle inconnu), `LEMBED_ERROR_INVALID_ARGUMENT` (options incohérentes), `LEMBED_ERROR_ONNX_RUNTIME` (aucune configuration n'a pu s'exécuter). `lembed_last_error()` est renseigné sur tous les chemins d'erreur de l'autotune.
+
+Exemple : reranker avec budget p95 et plancher de troncature.
+
+```c
+#include <libembedding/libembedding.h>
+#include <stdio.h>
+
+int main(void) {
+    /* Workload réel : documents candidats, la requête en DERNIER. */
+    const char* texts[] = {
+        "Document candidat 1 ...",
+        "Document candidat 2 ...",
+        "Document candidat 3 ...",
+        "ma requête utilisateur",          /* dernier texte = requête */
+    };
+
+    lembed_autotune_options_t opts = lembed_autotune_options_default(LEMBED_TASK_RERANKING);
+    opts.mode           = LEMBED_AUTOTUNE_QUICK;
+    opts.objective      = LEMBED_OBJECTIVE_LATENCY;
+    opts.texts          = texts;
+    opts.n_texts        = 4;
+    opts.max_latency_ms = 300.0;   /* budget p95 pour une requête complète */
+    opts.min_tokens     = 128;     /* ne pas tronquer les documents sous 128 tokens */
+
+    lembed_unified_tuning_result_t r;
+    lembed_status_t st = lembed_autotune_ex(
+        "jinaai/jina-reranker-v1-turbo-en-quantized", &opts, &r);
+    if (st != LEMBED_OK) {
+        fprintf(stderr, "autotune: %s\n", lembed_last_error());
+        return 1;
+    }
+    printf("threads=%d batch=%d max_tokens=%d p95=%.1f ms\n",
+           r.threads, r.batch_size, r.max_tokens, r.p95_latency_ms);
+    if (r.p95_latency_ms > opts.max_latency_ms)
+        printf("budget non tenable : meilleure configuration sans contrainte renvoyée\n");
+    return 0;
+}
+```
+
+### Ce que le tuner règle, par tâche
+
+| Tâche | Grille | Notes |
+|-------|--------|-------|
+| `LEMBED_TASK_EMBEDDING` | Découpages des cœurs physiques *P* entre workers et threads : 1×P, 2×P/2, P×1 en QUICK (+ 1×logiques et 4×P/4 en FULL) × batch (32 en QUICK ; 16/32/64/128 en FULL) | Mesure bien le modèle demandé. Corpus synthétique : 32 textes (QUICK) / 256 (FULL). |
+| `LEMBED_TASK_RERANKING` | threads = cœurs physiques et logiques en QUICK (+ 1, 2, P/2 en FULL) × `max_tokens` (256/64 en QUICK ; 256/128/64/32 en FULL) × batch | `max_tokens` **tronque les documents** : c'est un compromis qualité/vitesse, à encadrer avec `min_tokens`. À égalité (5 %), la configuration qui tronque le moins l'emporte. |
+| `LEMBED_TASK_SPARSE` | threads × batch | `top_k`, `min_weight` et `storage_format` ne sont **plus** réglés : ils changent les vecteurs produits, pas seulement la vitesse. Le résultat renvoie les valeurs par défaut du modèle (champs informatifs). |
+| `LEMBED_TASK_IMAGE` | threads × batch | Workload personnalisé non supporté. |
 
 ## Fonctions d'autotuning
 
 | Fonction | Retour | Description |
 |----------|--------|-------------|
-| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle texte |
-| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Auto-tuner avec corpus custom |
-| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Auto-tuner unifié (tous types) |
-| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Auto-tuner unifié avec budget de latence |
+| `lembed_autotune_ex(model_name, options, out)` | `lembed_status_t` | **Recommandée.** Toutes tâches, objectif, workload, budget p95, `min_tokens` |
+| `lembed_autotune_options_default(task)` | `lembed_autotune_options_t` | Options par défaut d'une tâche |
+| `lembed_autotune(model_name, mode, out)` | `lembed_status_t` | Historique : auto-tuner un modèle texte |
+| `lembed_autotune_custom(model_name, texts, n, mode, out)` | `lembed_status_t` | Historique : auto-tuner avec corpus custom |
+| `lembed_autotune_unified(task, model_name, mode, out)` | `lembed_status_t` | Façade de `lembed_autotune_ex` avec options par défaut |
+| `lembed_autotune_unified_config(task, model_name, target_latency_ms, out)` | `lembed_status_t` | Façade avec budget de latence ; honore le budget pour **toutes** les tâches, sparse inclus (il renvoyait auparavant `UNSUPPORTED` pour sparse) |
 | `lembed_auto_select_model(use_case, out)` | `lembed_status_t` | Sélectionner le meilleur modèle pour la machine |
-| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle sparse |
-| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Auto-tuner un modèle image |
-| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker |
-| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Auto-tuner un reranker sur un corpus fourni |
-| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Auto-tune avec contraintes |
-| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Auto-configurer selon latence |
+| `lembed_sparse_autotune(model_name, mode, out)` | `lembed_status_t` | Historique : auto-tuner un modèle sparse (threads × batch) |
+| `lembed_image_autotune(model_name, mode, out)` | `lembed_status_t` | Historique : auto-tuner un modèle image |
+| `lembed_reranker_autotune(model_name, mode, objective, out)` | `lembed_status_t` | Historique : auto-tuner un reranker |
+| `lembed_reranker_autotune_custom(model_name, texts, n, mode, objective, out)` | `lembed_status_t` | Historique : auto-tuner un reranker sur un corpus fourni |
+| `lembed_reranker_autotune_constrained(model_name, mode, objective, min_tokens, max_latency_ms, out)` | `lembed_status_t` | Historique : auto-tune avec contraintes |
+| `lembed_reranker_auto_config(model_name, target_latency_ms, objective, out)` | `lembed_status_t` | Historique : auto-configurer selon latence (respecte maintenant `objective`) |
 | `lembed_reranker_auto_config_profile(model_name, profile, out)` | `lembed_status_t` | Auto-configurer par profil |
 | `lembed_quantization_auto_select(model, threads, batch_size, num_docs, dry_run, out)` | `lembed_status_t` | Choisir la variante de quantification la plus rapide sur cette machine |
+
+Les fonctions marquées « Historique » sont conservées pour la compatibilité source et binaire (aucune signature n'a changé) ; elles exposent moins de réglages que `lembed_autotune_ex()`.
 
 ## Sélection automatique de la quantification
 
@@ -8320,7 +8768,7 @@ testable en quelques millisecondes sans modèle ni réseau
 |----------|--------|-------------|
 | `lembed_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune texte ; `NULL` = tout le cache |
 | `lembed_reranker_autotune_clear_cache(model_name)` | `void` | Effacer le cache d'autotune reranker ; `NULL` = tout le cache reranker |
-| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Dispatcher vers le cache de la tâche |
+| `lembed_autotune_unified_clear_cache(task, model_name)` | `void` | Purger le cache d'une tâche (texte, reranker, sparse **et** image) pour un modèle ; `NULL` = tous les modèles de cette tâche (pour `LEMBED_TASK_EMBEDDING`, les entrées texte de la racine uniquement). |
 
 ## Tâches unifiées
 
@@ -8335,44 +8783,49 @@ testable en quelques millisecondes sans modèle ni réseau
 
 | Constante | Description |
 |-----------|-------------|
-| `LEMBED_OBJECTIVE_LATENCY` | Minimiser la latence |
+| `LEMBED_OBJECTIVE_LATENCY` | Minimiser la latence (coût = P50 + ½(P95 − P50)) |
 | `LEMBED_OBJECTIVE_THROUGHPUT` | Maximiser le débit |
-| `LEMBED_OBJECTIVE_BALANCED` | Compromis |
-| `LEMBED_OBJECTIVE_MEMORY` | Minimiser la mémoire |
+| `LEMBED_OBJECTIVE_BALANCED` | Compromis : moyenne des coûts latence et débit normalisés |
+| `LEMBED_OBJECTIVE_MEMORY` | Minimiser la mémoire (delta de RSS, plancher de 16 Mo) |
+
+Les coûts sont **normalisés sans unité** (chaque terme est divisé par la meilleure valeur observée sur la grille), de sorte que ni des docs/s ni des millisecondes ne se mélangent. Défauts de `lembed_autotune_options_default()` : `THROUGHPUT` pour texte, sparse et image ; `BALANCED` pour le reranking. Le détail est dans [Performance — méthodologie de mesure](../performance_tuning.html#méthodologie-de-mesure).
 
 ## Cache d'autotuning
 
-Les résultats sont persistés sous `%LOCALAPPDATA%\libembedding\autotune\`
+Un **seul magasin** pour les quatre tâches : `%LOCALAPPDATA%\libembedding\autotune\`
 (`$HOME/.cache/libembedding/autotune` hors Windows, et
 `./libembedding_autotune_cache` en dernier recours si aucune de ces variables
-n'est définie). Les rerankers ont un sous-répertoire `reranker/` séparé.
+n'est définie). Les entrées du **texte** sont à la racine ; les autres tâches ont
+leur sous-répertoire : `reranker/`, `sparse/`, `image/`. Les décisions de
+quantification sont dans `quantization/`.
 
 Une entrée n'est réutilisée que si son identité correspond **intégralement** :
-modèle, variante, empreinte du corpus, objectif et mode. Un résultat obtenu sur
-un corpus n'est donc jamais renvoyé pour un autre, et un fichier illisible ou
-corrompu est traité comme un cache miss.
+modèle canonique, empreinte matérielle et logicielle, empreinte du workload,
+objectif, mode et contraintes (budget p95, `min_tokens`). Un résultat obtenu sur
+un workload n'est donc jamais renvoyé pour un autre, et un fichier illisible ou
+corrompu est traité comme un cache miss. Les résultats **contraints** sont
+eux aussi mis en cache, de même que ceux de sparse et d'image (ils ne l'étaient
+pas avant : un appel répété relançait un tuning de 95 à 170 s).
 
-| Libellé de variante | Utilisé par |
-|---------------------|-------------|
-| `synthetic` | Tuning texte par défaut, sur corpus synthétique |
-| `custom` | Tuning texte ou reranker sur un corpus fourni |
-| `default` | Tuning reranker par défaut, sur corpus synthétique |
+L'identité de modèle est toujours la forme résolue (pour le texte, le `model_code` ;
+voir la note sur les deux formes du nom plus haut). L'empreinte matérielle et logicielle comprend la
+marque CPU, les cœurs logiques et physiques, la version majeure/mineure
+d'ONNX Runtime et la version majeure/mineure de libembedding, de sorte qu'un
+résultat mesuré sur une autre machine ou après un changement de version n'est
+jamais resservi.
 
-Attention : le libellé par défaut **n'est pas le même** pour le texte
-(`synthetic`, dans `autotune_bench_text.hpp`) et pour le reranker (`default`, via
-`default_reranker_identity()` dans `autotune_bench_reranker.hpp`). Rien dans la
-sélection de variante ne dépend de ces libellés : `lembed_find_text_model_variant()`
-compare le mode de quantification et le `model_name`, pas `synthetic`/`custom`.
-
-L'identité inclut aussi une empreinte matérielle et logicielle (marque CPU,
-cœurs logiques et physiques, version majeure/mineure d'ONNX Runtime, version
-majeure/mineure de libembedding), de sorte qu'un résultat mesuré sur une autre
-machine ou après un changement de version n'est jamais resservi.
+> **Invalidation à la mise à jour.** Les anciennes entrées de cache du tuner texte
+> sont invalidées : elles avaient été mesurées sur le modèle par défaut quel que
+> soit le modèle demandé.
 
 `lembed_autotune_clear_cache(model_name)` supprime toutes les entrées d'un modèle
-(toutes variantes confondues) ; `lembed_reranker_autotune_clear_cache(model_name)`
-fait de même pour les rerankers. Passer `NULL` vide le cache correspondant en
-entier. Les entrées sont appariées sur le champ `model` lu **dans** le fichier,
+dans le magasin racine et ses sous-répertoires (un nom inconnu est sans effet) ;
+`lembed_reranker_autotune_clear_cache(model_name)` fait de même pour les rerankers ;
+`lembed_autotune_unified_clear_cache(task, model_name)` cible une tâche (sparse et
+image compris). Passer `NULL` vide le cache de cette tâche seulement : pour
+`LEMBED_TASK_EMBEDDING`, seules les entrées texte de la racine sont supprimées.
+Seul `lembed_autotune_clear_cache(NULL)` supprime **tout** le répertoire
+d'autotune, sous-répertoires compris. Les entrées sont appariées sur le champ `model` lu **dans** le fichier,
 et non sur le nom de fichier, qui est un hash de l'empreinte matérielle.
 
 > **À ne pas confondre** avec le cache bas niveau `tune_cache.json` et l'API
@@ -8405,7 +8858,7 @@ malgré tout une erreur thread-local**, comme n'importe quel mode introuvable.
 `lembed_text_embedding_create_v2` n'appelle cette fonction que pour un mode
 explicitement demandé, jamais pour `AUTO`.
 
-## Exemple
+## Exemple (API historique, texte)
 
 ```c
 #include <libembedding/autotuner.h>
@@ -8731,7 +9184,7 @@ refuse.
 ## 3. Recognised heads
 
 Names are the ones observed in the files examined in
-`benchmarks/sparse/LE-9.4-validation.md`.
+`docs/archive/LE-9.4-validation.md`.
 
 | Tensors | Capability | Meaning |
 |---|---|---|
@@ -8905,7 +9358,7 @@ requested is the failure this page is written to prevent.
 
 ## 11. Related
 
-- `benchmarks/sparse/LE-9.4-validation.md` — the investigation that produced this
+- `docs/archive/LE-9.4-validation.md` — the investigation that produced this
   convention, including the llama.cpp blocker and the CrispEmbed architecture
   reading
 - `roadmap-2.md` § P1.5b (this item), § P1.5c (the runtime that consumes it)
@@ -8919,7 +9372,7 @@ Rendu: https://dorel14.github.io/libembedding-ng/gguf_sparse_runtime.html
 # Runtime sparse GGUF
 
 Version: 1.11.0
-Status: implémenté, couvert par `tests/test_sparse_gguf.cpp` (67 assertions)
+Status: implémenté, couvert par `tests/test_sparse_gguf.cpp` (96 assertions)
 et `tests/test_sparse_gguf_vs_onnx.cpp` (intégration, réseau requis)
 
 Décrit **comment un fichier sparse GGUF est exécuté**. La
@@ -9012,13 +9465,13 @@ Un tenseur requis absent est fatal :
 `position_embd.weight` correspondent.
 
 Conséquence : `llama.cpp = n/a` dans
-[`benchmarks/sparse/LE-9.6-results.md`](https://github.com/dorel14/libembedding-ng/blob/dev/benchmarks/sparse/LE-9.6-results.md)
+[`LE-9.6-results.md`](archive/LE-9.6-results.md) (archivé)
 reste le résultat *correct*, et non une lacune à combler.
 
 Le runtime est donc le nôtre : un graphe ggml sur le backend CPU déjà
 vendorisé, qui lit les tenseurs par `gguf_init_from_file` et calcule dans
 `ggml_mul_mat`. C'est la conclusion de
-[`LE-9.4-validation.md` §5.3](https://github.com/dorel14/libembedding-ng/blob/dev/benchmarks/sparse/LE-9.4-validation.md).
+[`LE-9.4-validation.md` §5.3](archive/LE-9.4-validation.md) (archivé).
 
 ---
 
@@ -9029,11 +9482,34 @@ texte
   → ids WordPiece            TokenizerWrapper (partagé avec le backend ONNX)
   → encodeur BERT            graphe ggml, post-LayerNorm
   → tête MLM                 graphe ggml, ggml_mul_mat contre token_embd
-  → log(1 + relu) max-pool   sur l'hôte, tokens réels uniquement
+  → max-pool puis log(1 + relu)   sur l'hôte, tokens réels uniquement
   → retrait des ids spéciaux ids des métadonnées
   → top_k / min_weight / storage_format   sparse_prune_and_sort()
   → {indices, values}
 ```
+
+Les textes d'un appel sont tokenisés une fois, triés par longueur décroissante,
+puis découpés en lots bornés de deux façons : au plus `batch_size` textes, et au
+plus 512 colonnes de tokens paddées (`batch × seq_len`, voir
+`detail/gguf/sparse_batching.hpp`). Les résultats sont remis dans l'ordre
+d'entrée. Le second plafond est celui qui borne le coût : le graphe et les
+logits F32 `[vocab, batch × seq_len]` grandissent avec la largeur paddée, pas
+avec le nombre de textes.
+Sur `benchmarks/corpus.txt` (392 textes), batch 16 et 4 threads, une passe a
+calculé 8 256 tokens avant le tri (6 830 réels + 1 426 paddés, soit 17,3 % de
+padding) et 6 928 après (6 830 réels + 98 paddés, soit 1,4 %). Le travail
+tokenisé baisse ainsi de 16,1 %. Les constructions de graphe par passe sont
+passées de 20 à 9. Les médianes de latence observées sont passées de 27,76 s à
+21,11 s, mais les répétitions avant/après ne sont pas appariées : ce chiffre de
+débit reste indicatif et doit être confirmé par des mesures entrelacées.
+Le changement de forme des graphes peut aussi modifier légèrement les arrondis
+flottants. Sur ces 392 textes, avant/après tri à batch 16, les vecteurs complets
+ont un écart de poids maximal de 0,00168 et un cosinus minimal de 0,99999984 ;
+12 textes diffèrent par un terme de score quasi nul. Avec `top_k = 50`, deux
+textes sélectionnent un terme différent à la frontière du classement (cosinus
+minimal 0,99759). Le tri préserve l'ordre et les résultats usuels restent très
+proches, mais l'identité exacte des termes n'est pas garantie pour ces quasi-
+égalités numériques.
 
 ### 3.1 Encodeur — l'ordre post-LN n'est pas négociable
 
@@ -9081,12 +9557,39 @@ déquantifie le Q8_0 à notre place, ce qui règle au passage le piège des lect
 déquantisées : **aucun poids quantifié n'est jamais lu élément par élément**
 (`ggml_backend_tensor_get` au-delà de `ggml_nbytes` fait avorter le processus).
 
+Le pooling hôte calcule d'abord le maximum du logit brut par terme, puis applique
+`log(1 + relu(x))` une seule fois par terme. La transformation étant monotone,
+c'est équivalent au max des logits transformés, avec beaucoup moins d'appels à
+`log`. Le buffer des scores est réutilisé entre les documents d'un lot. Cette
+optimisation réduit le post-traitement, mais ne supprime pas la projection sur le
+vocabulaire complet ni le transfert de ses logits.
+Le filtrage `min_weight` compacte également les vecteurs en place ; lorsque
+`top_k` est appliqué, le résultat est déjà ordonné par poids et n'est pas retrié
+une seconde fois en format dict.
+
 ### 3.3 Lots et masque
 
 Tous les tokens d'un lot forment **une seule ligne**. Le masque d'attention
 [T, T] est bloc-diagonal par document et à −∞ sur le padding ; c'est lui qui
-sépare les documents, pas un second graphe. Un lot de deux et un lot de cinq
-donnent donc le même vecteur — ce que `test_sparse_gguf.cpp` vérifie.
+sépare les documents, pas un second graphe. Le test synthétique
+`test_sparse_gguf.cpp` vérifie l'égalité exacte entre batch 1 et les batchs 2 à 5
+pour ses poids fixes ; cela ne garantit pas une égalité bit à bit pour un vrai
+modèle quantifié, car la forme des GEMM change avec le batch et le padding.
+
+Sur `splade-pp-en-v1-q8_0.gguf`, comparé au traitement individuel des 392 textes
+de `benchmarks/corpus.txt` (4 threads, batch 16), les vecteurs complets ont un
+cosinus minimal de 0,99976 sans tri et 0,99986 avec tri. Le cosinus minimal
+calculé sur les seuls top 50 est respectivement 0,99807 et 0,99877. L'ensemble
+des 50 termes diffère de la référence individuelle pour 52 textes sans tri,
+contre 9 après tri par longueur. Le tri réduit donc la dérive mesurée, mais ne
+garantit pas l'identité des termes retenus.
+
+Exemple : pour le deuxième texte du corpus, le terme 2156 passe de 0,16757 en
+batch 1 à 0,14872 en batch 16 trié, tandis que le terme 2235 passe de 0,16218
+à 0,16151 ; la sélection top 50 change. Les scores de classement sur un jeu de
+requêtes avec pertinences annotées n'ont pas été mesurés. Les applications qui
+dépendent strictement des termes de tête doivent valider leur propre corpus et
+leur configuration de batch.
 
 ### 3.4 Tokenizer : partagé, pas dupliqué
 
@@ -9166,13 +9669,13 @@ lot 32, `top_k = 50` :
 | Sparse ONNX | 9.7 | 102.80 | 1176 | 1368 |
 | Sparse GGUF (ce runtime) | 2.8 | 357.85 | 109 | 905 |
 
-Le runtime est donc **3,5× plus lent** qu'ONNX Runtime, pour **un tiers de moins de
-RAM** et un chargement **dix fois plus rapide**. Le débit est le point faible, et il
-est attendu : chaque appel reconstruit le graphe et réserve un buffer
-d'activations neuf, là où ONNX Runtime garde un graphe fusionné et son pool de
-mémoire. La correction est connue et bornée — voir « Pas de cache de lots » plus
-bas — mais elle n'est pas faite dans P1.5c, dont le critère de sortie était la
-fidélité.
+Cette mesure est un résultat historique de la comparaison à lot 32. La mesure
+plus récente consignée dans
+[`LE-9.6-results.md`](archive/LE-9.6-results.md) utilise un lot 1 et
+rapporte 8,5 docs/s (117,10 ms/doc) sur 91 textes ; les deux chiffres ne sont pas
+directement comparables. Le débit demeure le point faible : contrairement à
+ONNX Runtime, ggml exécute ici la projection complète sur le vocabulaire et le
+runtime doit encore transférer ses logits pour le pooling.
 
 ---
 
@@ -9188,9 +9691,125 @@ fidélité.
   divergent de HuggingFace de la même façon.
 - **Pas de GPU** : backend CPU ggml uniquement. `provider` est rapporté
   `LEMBED_PROVIDER_CPU` et ignoré à la construction.
-- **Pas de cache de lots** : le graphe est reconstruit à chaque appel. Sur un
-  flux à lot unique et constant, la reconstruction se remarquerait ; ce n'est pas
-  le profil d'usage visé.
+- **Cache de graphe limité à une forme** : le graphe et son allocation sont
+  réutilisés tant que longueur de séquence et taille de lot ne changent pas. Une
+  forme différente remplace le cache et provoque une reconstruction ; les lots
+  de longueurs variables peuvent donc encore payer ce coût.
+- **Projection et logits complets** : `top_k` limite la sortie sparse, pas la
+  projection MLM sur le vocabulaire. Le graphe produit toujours les logits de
+  chaque token et les transfère à l'hôte avant le pooling.
+- **Taille de lot** : le défaut GGUF est 16 textes par lot ; la valeur reste
+  configurable. Sur le corpus de 392 textes mesuré sur un i7-1065G7, batch 2
+  avec 4 threads a atteint 18,0 documents/s, contre 16,7 pour batch 16 et
+  14,2 pour batch 64 dans un premier balayage. Une répétition alternée 16/2/2/16
+  a mesuré respectivement 16,2 et 16,3 documents/s en moyenne : performances
+  comparables dans la dispersion observée. Batch 2 utilisait environ 252 MiB
+  de RSS pic et 5,3 % de padding, contre 334 MiB et 17,3 % pour batch 16 ;
+  batch 16 réduit en revanche le nombre de lots et a montré une dispersion un
+  peu plus faible. Il reste le défaut comme compromis, pas comme minimum mémoire
+  ni comme optimum universel. Ces chiffres dépendent du processeur, du corpus et
+  des longueurs de séquence.
+- **Budget de tokens par lot** : 512 colonnes paddées au plus par graphe, quel
+  que soit `batch_size`. Mesuré sur i7-1065G7, 4 threads, profileur
+  `integration_sparse_gguf` :
+  - 256 textes courts (`customers_sample.txt`, ~13 tokens), batch 256 : sans
+    budget 12,6 documents/s et 1 642 MiB de RSS pic ; budget 128 / 256 / 512 /
+    1024 : 25,5 / 26,1 / 26,4 / 24,0 documents/s, 276 / 325 / 415 / 596 MiB.
+  - 96 dépêches Reuters (`reuters_clean.txt`, longues), batch 16 : sans budget
+    1,51 documents/s et 2 208 MiB ; budget 512 / 1024 / 2048 : 1,83 / 1,61 /
+    1,63 documents/s, 358 / 481 / 728 MiB.
+
+  512 est le meilleur débit sur les deux profils et borne la mémoire.
+
+  Le même budget (`kSparseMaxBatchTokens`, `detail/sparse_batching.hpp`)
+  s'applique au chemin sparse ONNX, qui n'avait ni tri par longueur ni plafond :
+  son batch par défaut de 256 réclamait 16 Go à ONNX Runtime sur des documents
+  de 512 tokens (`bad allocation`). Balayage ONNX, batch 256 : 128 résumés
+  SciFact 1,51 / 1,52 / 1,50 / 1,49 documents/s et 842 / 839 / 1 084 /
+  1 478 MiB pour 256 / 512 / 1024 / 2048 tokens ; 256 textes courts 38,6 /
+  41,3 / 37,9 / 33,2 documents/s, contre 22,6 avant correctif.
+- **Workers** : une session GGUF exécute plusieurs graphes indépendants
+  (`workers`) qui partagent une seule copie des poids, en lecture seule, et se
+  répartissent les lots d'un appel. Un graphe seul cesse de profiter de threads
+  supplémentaires (ggml synchronise tous les threads après chacune de ses ~460
+  opérations) ; des graphes indépendants ne s'attendent pas. `num_threads` est
+  le budget total (0 = tous les cœurs logiques) et `workers` le nombre de
+  graphes (0 = `num_threads / 2`, soit un par cœur physique sur un processeur
+  hyper-threadé). Un appel d'un seul lot, typiquement une requête, s'exécute sur
+  un worker avec tout le budget. Mesuré sur i7-1065G7 (profileur, entrelacé) :
+  256 textes courts 26,1 / 25,1 documents/s en 1 × 4, 23,5 en 1 × 8, 34,6 /
+  31,4 en auto (4 × 2), RSS 279 → 320 MiB ; 64 résumés SciFact 0,92 / 0,93 en
+  1 × 4, 0,98 en 1 × 8, 1,24 / 1,22 en auto, RSS 298 → 491 MiB. Les logits sont
+  lus directement dans le tampon du graphe, sans copie par worker.
+
+## 7. Profileur GGUF
+
+Le profileur manuel `integration_sparse_gguf` mesure le runtime sur un GGUF
+local, sans instrumentation dans la DLL ni modification de l'API publique. Il
+est construit avec les tests :
+
+```powershell
+cmake --build build --config Release --target integration_sparse_gguf
+build\tests\Release\integration_sparse_gguf.exe `
+  --model "$HOME\.cache\libembedding\models--cstr-splade-pp-en-v1-GGUF\splade-pp-en-v1-q8_0.gguf" `
+  --corpus benchmarks\corpus.txt `
+  --batch 4 --threads 4 --warmups 2 --repetitions 30 --top-k 50
+```
+
+`--corpus` attend un document non vide par ligne ; sans cette option, le
+profileur utilise douze textes intégrés. `--batch`, `--threads`, `--warmups`,
+`--repetitions`, `--top-k` et `--max-length` règlent le lot, les threads ggml,
+les passes non chronométrées, les passes mesurées, le pruning et la longueur
+maximale. `--max-batch-tokens` remplace le budget de tokens par lot (0 le
+désactive) ; `--workers` fixe le nombre de graphes (0 = auto) et `--threads` le
+budget total de threads (0 = tous les cœurs logiques). `--mode per-text` fait
+un appel à `embed()` par ligne au lieu d'un par passe sur le corpus : les
+statistiques sont alors des latences de requête (une requête par ligne).
+
+Pour chaque passe mesurée, le tableau rapporte médiane, moyenne, minimum,
+p95 empirique nearest-rank, maximum et écart-type des étapes : tokenisation,
+préparation des entrées, construction/allocation du graphe, masque,
+téléversement, exécution ggml, récupération des logits, pooling, pruning/tri et
+temps résiduel de l'enveloppe. Le résumé comprend aussi le débit documents/s,
+les nnz moyens, RSS courant/pic, temps CPU processus / temps mural, compteurs de
+graphes et padding, forme/nombre de nœuds ainsi que l'inventaire des opérateurs
+ggml.
+
+Les durées de scène agrègent tous les lots d'une passe ; elles ne sont pas des
+latences par document ni des chronométrages par opérateur. `GraphExec` est le
+temps de `ggml_backend_graph_compute` : il peut inclure le plan CPU et la
+préparation/allocation de son espace de travail, et ne sépare pas le temps des
+kernels individuels. L'inventaire final compte les opérations, sans leur
+attribuer de temps. Utiliser au moins 30 répétitions pour une estimation de
+queue plus informative ; avec peu de répétitions, le p95 peut être égal au
+maximum. La première passe de chauffe crée notamment le graphe ; son coût est
+rapporté séparément des passes chronométrées.
+
+### Microbenchmark GEMM Q8_0
+
+La cible `gguf_gemm_microbench` isole les multiplications matricielles ggml
+avec des poids synthétiques quantifiés en Q8_0 et des activations F32. Elle
+mesure les formes BERT `768x768`, `3072x768`, `768x3072` et la projection
+vocabulaire `30522x768`, pour `N=32, 64, 80, 128, 256, 512`, à 1, 2 et 4
+threads. Les pools de threads persistants sont mis en pause hors de leur mesure pour
+éviter qu'un pool inactif ne consomme du CPU.
+
+```powershell
+cmake -S . -B build -DLIBEMBEDDING_BUILD_BENCHMARKS=ON
+cmake --build build --config Release --target gguf_gemm_microbench
+build\benchmarks\Release\gguf_gemm_microbench.exe `
+  --warmups 2 --repetitions 5
+```
+
+`--shape-index 0..3` et `--n 32|64|80|128|256|512` limitent l'exécution à une
+forme ou une largeur. `--threads 1|2|4` sélectionne le nombre de workers ;
+`--cpumask <masque>` applique un masque d'affinité strict au pool ggml, par
+exemple `--threads 4 --cpumask 0x55`. Ce dernier sert à comparer les placements
+CPU dans le microbenchmark et ne change pas l'affinité du runtime libembedding.
+Les GFLOPS utilisent `2*M*K*N` opérations par produit. Ce benchmark sert à
+comparer les formes et l'échelle des threads ; les poids synthétiques, l'absence
+d'attention et le graphe réduit ne reproduisent pas l'inférence complète ni ses
+poids réels.
 
 ---
 

@@ -47,6 +47,7 @@ def test_public_api_exports():
         "auto_select_model",
         "autotune_unified",
         "clear_autotune_cache",
+        "clear_autotune_cache_unified",
         "clear_cache",
         "clear_reranker_autotune_cache",
         "reranker_auto_config",

@@ -8,7 +8,7 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
-from ._binding import lib
+from ._binding import ffi, lib
 from .autotune import (
     auto_select_model,
     autotune,
@@ -16,6 +16,7 @@ from .autotune import (
     cleanup_model_cache,
     cleanup_model_cache_except,
     clear_autotune_cache,
+    clear_autotune_cache_unified,
 )
 from .backend import detect_backend
 from .benchmark import (
@@ -87,6 +88,20 @@ try:
     __version__ = lib.lembed_version().decode("utf-8", errors="replace")
 except (AttributeError, OSError) as e:
     _logger.debug("Could not get version from C API: %s", e)
+
+
+def ggml_cpu_features() -> list[str]:
+    """Instruction sets of the ggml CPU backend that runs GGUF models.
+
+    The wheel ships one ggml CPU library per instruction-set level and ggml
+    loads the best match for this machine; this names the one it picked, e.g.
+    ``["SSE3", ..., "AVX512", "AVX512_VNNI", "LLAMAFILE", "REPACK"]``. Record
+    it with any GGUF benchmark: AVX2 and AVX-512 VNNI kernels are not
+    comparable. Loads the backend on first call. Empty when no CPU backend
+    could be loaded (a broken install).
+    """
+    return ffi.string(lib.lembed_ggml_cpu_features()).decode("ascii").split()
+
 
 # Autotune modes (re-exported for convenience)
 LEMBED_AUTOTUNE_QUICK = lib.LEMBED_AUTOTUNE_QUICK
@@ -172,6 +187,7 @@ __all__ = [
     "cleanup_model_cache",
     "cleanup_model_cache_except",
     "clear_autotune_cache",
+    "clear_autotune_cache_unified",
     "clear_cache",
     "clear_reranker_autotune_cache",
     "cosine_similarity",
@@ -179,6 +195,7 @@ __all__ = [
     "detect_hardware",
     "dot_product",
     "euclidean_distance",
+    "ggml_cpu_features",
     "image_autotune",
     "inspect_gguf",
     "list_image_models",
