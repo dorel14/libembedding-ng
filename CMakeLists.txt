@@ -598,7 +598,12 @@ if(LIBEMBEDDING_BUILD_SHARED)
     elseif(UNIX)
         set_target_properties(embedding_shared PROPERTIES INSTALL_RPATH "$ORIGIN")
     endif()
-    if(NOT WIN32 AND ONNXRuntime_LIBRARIES)
+    if(WIN32)
+        # libembedding.dll keeps its dependencies PRIVATE, and this target
+        # compiles the implementation again (libembedding_shlib.cpp), so it
+        # must link ORT, ggml/llama, cJSON and curl itself, like the examples.
+        link_implementation_deps(embedding_shared)
+    elseif(ONNXRuntime_LIBRARIES)
         copy_runtime_libs(embedding_shared)
     endif()
 endif()
@@ -627,6 +632,14 @@ install(DIRECTORY third_party/
 set(_install_targets libembedding cjson llama ggml ggml-base)
 if(NOT LIBEMBEDDING_CPU_DISPATCH)
     list(APPEND _install_targets ${LIBEMBEDDING_GGML_CPU_TARGETS})
+    # Without dynamic backend loading, ggml links every backend it enabled, so
+    # each one must be in the same export set. On macOS ggml enables BLAS
+    # (Accelerate) and Metal by default; elsewhere these targets do not exist.
+    foreach(_backend ggml-blas ggml-metal)
+        if(TARGET ${_backend})
+            list(APPEND _install_targets ${_backend})
+        endif()
+    endforeach()
 endif()
 if(NOT LIBEMBEDDING_NO_IMAGE AND TARGET libembedding_stb)
     list(APPEND _install_targets libembedding_stb)
