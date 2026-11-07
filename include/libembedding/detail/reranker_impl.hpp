@@ -22,6 +22,7 @@
 #include "onnx_session_impl.hpp"
 #include "tokenizer_impl.hpp"
 #include "batch.hpp"
+#include "sparse_batching.hpp"
 #include "embedding_cache_impl.hpp"
 
 #include <algorithm>
@@ -56,6 +57,11 @@ struct lembed_reranker {
     lembed_quantization_t quantization;
     int max_length;
 
+    /* True when the model's scores change with padding despite the attention
+     * mask (see lembed__reranker_padding_sensitive): batches then only group
+     * pairs of identical token length, i.e. are never padded. */
+    bool padding_sensitive = false;
+
     /* Runtime metadata for introspection */
     std::string model_name_str;
     int num_threads;
@@ -78,6 +84,21 @@ struct lembed_reranker {
 };
 
 #include "reranker_llama_impl.hpp"
+
+/* Rerankers whose ONNX export is not padding-invariant.
+ *
+ * Measured (24 pairs of 2-400 words, batched vs reranked alone): the scores of
+ * jina-reranker-v1-turbo-en (JinaBERT, ALiBi), FP32 and quantized, move by up
+ * to 0.36 logit for every padded pair, while bge-reranker-base and
+ * jina-reranker-v2-base-multilingual are bit-identical. Rerunning those pairs
+ * unpadded costs no measurable throughput on that model (1 query x 64 docs:
+ * 38-40 docs/s alone vs 25-42 batched, FP32). Matched on the repo name, so a
+ * local copy of the model is covered too. */
+static bool lembed__reranker_padding_sensitive(const std::string& id) {
+    std::string s = id;
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return s.find("jina-reranker-v1-turbo") != std::string::npos;
+}
 
 static bool lembed__path_ends_with_gguf(const char* path) {
     if (!path) return false;
@@ -116,6 +137,8 @@ static lembed_status_t lembed__reranker_create_onnx_impl(
             : (lembed_quantization_t)info.quantization;
         ctx->max_length = (options->max_length > 0) ? options->max_length : info.max_tokens;
         ctx->model_name_str = info.model_name;
+        ctx->padding_sensitive = lembed__reranker_padding_sensitive(info.model_code) ||
+                                 lembed__reranker_padding_sensitive(info.model_name);
         ctx->num_threads = options->num_threads;
         ctx->batch_size = (options->batch_size > 0) ? options->batch_size
                                                      : LEMBED_DEFAULT_BATCH_SIZE;
@@ -251,6 +274,7 @@ lembed_status_t lembed_reranker_create_from_path(
         ctx->quantization = LEMBED_QUANTIZATION_NONE;
         ctx->max_length = max_length;
         ctx->model_name_str = path;
+        ctx->padding_sensitive = lembed__reranker_padding_sensitive(path);
         ctx->num_threads = options->num_threads;
         ctx->batch_size = (options->batch_size > 0) ? options->batch_size
                                                      : LEMBED_DEFAULT_BATCH_SIZE;
@@ -331,6 +355,7 @@ lembed_status_t lembed_reranker_rerank(
             ctx->cache_misses += num_documents;
         }
 
+        int onnx_batches = 0; /* batches the ONNX path actually ran */
         if (!miss_indices.empty()) {
             if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
                 std::vector<const char*> miss_docs;
@@ -347,17 +372,48 @@ lembed_status_t lembed_reranker_rerank(
                     }
                 }
             } else {
-                int num_batches = lembed::detail::batch_count((int)miss_indices.size(), batch_size);
-                for (int bi = 0; bi < num_batches; bi++) {
-                    auto range = lembed::detail::get_batch(
-                        bi, (int)miss_indices.size(), batch_size);
+                /* Pairs are sorted longest first and each batch is bounded by
+                 * padded tokens, not only by pair count: with the default batch
+                 * of 256 a whole request used to be one batch padded to its
+                 * longest pair (same defect, same fix as the dense path). */
+                const int n_miss = (int)miss_indices.size();
+                std::vector<std::string> pairs((size_t)n_miss);
+                std::vector<int> pair_tokens((size_t)n_miss, 0);
+                for (int i = 0; i < n_miss; i++) {
+                    pairs[(size_t)i] = std::string(query) + " [SEP] " + documents[miss_indices[i]];
+                    pair_tokens[(size_t)i] = std::min(
+                        ctx->max_length,
+                        (int)ctx->onnx.tokenizer.encode(pairs[(size_t)i]).size());
+                }
+                std::vector<int> order((size_t)n_miss);
+                for (int i = 0; i < n_miss; i++) order[(size_t)i] = i;
+                std::stable_sort(order.begin(), order.end(), [&pair_tokens](int a, int b) {
+                    return pair_tokens[(size_t)a] > pair_tokens[(size_t)b];
+                });
+                const int max_batch_tokens = lembed::detail::kRerankMaxBatchTokens;
+
+                for (int start = 0; start < n_miss;) {
+                    lembed::detail::BatchRange range;
+                    range.start = start;
+                    const int first_len = pair_tokens[(size_t)order[(size_t)start]];
+                    range.end = (int)lembed::detail::sparse_batch_end(
+                        (size_t)start, (size_t)n_miss, (size_t)first_len, batch_size,
+                        max_batch_tokens);
+                    if (ctx->padding_sensitive) {
+                        /* Never pad: keep only the pairs as long as the first. */
+                        int end = start + 1;
+                        while (end < range.end && pair_tokens[(size_t)order[(size_t)end]] == first_len)
+                            end++;
+                        range.end = end;
+                    }
+                    start = range.end;
+                    onnx_batches++;
                     int bsz = range.end - range.start;
 
                     std::vector<std::string> pair_texts;
                     pair_texts.reserve(bsz);
                     for (int i = range.start; i < range.end; i++) {
-                        pair_texts.push_back(std::string(query) + " [SEP] " +
-                                             documents[miss_indices[i]]);
+                        pair_texts.push_back(pairs[(size_t)order[(size_t)i]]);
                     }
 
                     auto enc = ctx->onnx.tokenizer.encode_batch(pair_texts);
@@ -380,7 +436,7 @@ lembed_status_t lembed_reranker_rerank(
 
                     auto& output = outputs[0];
                     for (int i = 0; i < bsz; i++) {
-                        int doc_idx = miss_indices[range.start + i];
+                        int doc_idx = miss_indices[order[(size_t)(range.start + i)]];
                         all_scores[doc_idx] = output.data[i * ((int)output.shape.back())];
                         if (ctx->cache) {
                             ctx->cache->put(std::string(query) + "\n" + documents[doc_idx],
@@ -409,7 +465,10 @@ lembed_status_t lembed_reranker_rerank(
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
         ctx->texts_embedded += num_documents;
-        ctx->batches_run += lembed::detail::batch_count(num_documents, batch_size);
+        ctx->batches_run += (ctx->backend_type == LEMBED_BACKEND_LLAMACPP)
+                                ? (uint64_t)lembed::detail::batch_count((int)miss_indices.size(),
+                                                                        batch_size)
+                                : (uint64_t)onnx_batches;
         ctx->total_latency_ms += elapsed_ms;
         ctx->stats_calls++;
 
