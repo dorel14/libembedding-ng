@@ -35,6 +35,8 @@
 extern "C++" {
 #endif
 #include "quantization_auto_entry.hpp"
+/* Returns std::vector: needs C++ linkage, like the helper above. */
+#include "sparse_batching.hpp"
 #ifdef __cplusplus
 }
 extern "C" {
@@ -269,16 +271,18 @@ static lembed_status_t lembed__onnx_embed(
         const char* const* texts,
         int num_texts,
         int batch_size,
-        float* result_data) {
+        float* result_data,
+        int* batches_run = nullptr) {
     int dim = ctx->dim;
 
     /* Prepare indices based on batch strategy */
     std::vector<int> indices(num_texts);
     for (int i = 0; i < num_texts; i++) indices[i] = i;
 
+    std::vector<int> token_counts;
     if (ctx->batch_strategy == LEMBED_BATCH_LENGTH_BUCKET && num_texts > 1) {
         /* Pre-tokenize to get actual token counts, then sort by length */
-        std::vector<int> token_counts(num_texts);
+        token_counts.resize(num_texts);
         for (int i = 0; i < num_texts; i++) {
             token_counts[i] = (int)ctx->onnx.tokenizer.encode(texts[i]).size();
         }
@@ -289,10 +293,26 @@ static lembed_status_t lembed__onnx_embed(
     }
 
     int effective_batch = (ctx->batch_strategy == LEMBED_BATCH_SEQUENTIAL) ? 1 : batch_size;
-    int num_batches = lembed::detail::batch_count(num_texts, effective_batch);
+    const bool bucketed = ctx->batch_strategy == LEMBED_BATCH_LENGTH_BUCKET && num_texts > 1;
+    int batches = 0;
 
-    for (int bi = 0; bi < num_batches; bi++) {
-        auto range = lembed::detail::get_batch(bi, num_texts, effective_batch);
+    for (int start = 0; start < num_texts;) {
+        lembed::detail::BatchRange range;
+        range.start = start;
+        if (bucketed) {
+            /* Sorted longest first, so the batch is padded to its first text:
+             * cap batch * padded width, not only the number of texts. With the
+             * default batch of 256 the whole corpus used to be one batch padded
+             * to its longest text. */
+            range.end = (int)lembed::detail::sparse_batch_end(
+                (size_t)start, (size_t)num_texts,
+                (size_t)std::min(ctx->max_length, token_counts[indices[start]]),
+                effective_batch, lembed::detail::kDenseMaxBatchTokens);
+        } else {
+            range.end = std::min(start + std::max(1, effective_batch), num_texts);
+        }
+        start = range.end;
+        batches++;
         int bsz = range.end - range.start;
 
         /* Tokenize batch (in sorted order if bucketing) */
@@ -353,6 +373,7 @@ static lembed_status_t lembed__onnx_embed(
         }
     }
 
+    if (batches_run) *batches_run = batches;
     return LEMBED_OK;
 }
 

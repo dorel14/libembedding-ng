@@ -33,6 +33,15 @@ namespace detail {
  * from 1.6-4 GB to under 900 MB. */
 constexpr int kSparseMaxBatchTokens = 512;
 
+/* Same cap for the dense ONNX path (all-MiniLM-L6-v2, i7-1065G7, 4 threads, 256
+ * texts, library defaults, sweep 0/256/512/1024/2048, two passes in opposite
+ * order): 512 was the best or tied on mixed (8-160 words, 28.4-29.4 -> 80-83
+ * docs/s), short (352-365 -> 495-503) and long (31 -> 35) corpora. Dense output
+ * is [batch, seq, dim], so unlike the sparse case this is a compute/cache
+ * effect, not a memory one: a 256-text batch used to be padded to the longest
+ * text (47104 padded tokens for 19915 real ones). */
+constexpr int kDenseMaxBatchTokens = 512;
+
 /* One past the last document of the batch that starts at `start`, out of
  * `count` documents sorted longest first.
  *

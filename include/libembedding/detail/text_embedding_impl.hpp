@@ -157,6 +157,7 @@ lembed_status_t lembed_text_embedding_embed(
         auto t_start = std::chrono::high_resolution_clock::now();
 
         /* Embed the given subset of texts into a contiguous buffer */
+        int onnx_batches = 0; /* batches the ONNX path actually ran */
         auto embed_subset = [&](const std::vector<const char*>& subset,
                                 float* out) -> lembed_status_t {
             int n = (int)subset.size();
@@ -164,7 +165,7 @@ lembed_status_t lembed_text_embedding_embed(
                 lembed__llama_embed_batch(ctx, subset.data(), n, out);
                 return LEMBED_OK;
             }
-            return lembed__onnx_embed(ctx, subset.data(), n, batch_size, out);
+            return lembed__onnx_embed(ctx, subset.data(), n, batch_size, out, &onnx_batches);
         };
 
         lembed_status_t s;
@@ -206,8 +207,7 @@ lembed_status_t lembed_text_embedding_embed(
                 if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
                     if (!miss_texts.empty()) ctx->batches_run++;
                 } else {
-                    ctx->batches_run += lembed::detail::batch_count(
-                        (int)miss_texts.size(), batch_size);
+                    ctx->batches_run += (uint64_t)onnx_batches;
                 }
             }
         } else {
@@ -218,7 +218,7 @@ lembed_status_t lembed_text_embedding_embed(
                 if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
                     ctx->batches_run++;
                 } else {
-                    ctx->batches_run += lembed::detail::batch_count(num_texts, batch_size);
+                    ctx->batches_run += (uint64_t)onnx_batches;
                 }
             }
         }
