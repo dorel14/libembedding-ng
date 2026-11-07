@@ -148,13 +148,16 @@ inline lembed_status_t lembed_autotune_unified_config(lembed_task_t task, const 
     return autotune_ex_impl(model_name, &o, result);
 }
 
-/* Embedding entries are purged through lembed_autotune_clear_cache(), defined
- * with the text entry points; it resolves both name forms. */
+/* Task-scoped purge. For EMBEDDING, a model is purged through
+ * lembed_autotune_clear_cache() (it resolves both name forms); NULL removes the
+ * root-level text entries only. lembed_autotune_clear_cache(NULL) would wipe
+ * every task's cache, which is not what a task-scoped call promises. */
 inline void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name) {
     switch (task) {
         case LEMBED_TASK_EMBEDDING:
             autotune_guard("autotune_clear_cache", [&]() {
-                lembed_autotune_clear_cache(model_name);
+                if (model_name) lembed_autotune_clear_cache(model_name);
+                else clear_autotune_cache_root_entries();
                 return LEMBED_OK;
             });
             break;

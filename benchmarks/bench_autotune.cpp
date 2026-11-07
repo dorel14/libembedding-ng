@@ -14,10 +14,11 @@
  * allocator state from leaking between tasks.
  *
  * Usage (from the repository root, Release build):
- *   build/bin/Release/bench_autotune.exe --task text   > before_text.json
- *   build/bin/Release/bench_autotune.exe --task rerank > before_rerank.json
- *   build/bin/Release/bench_autotune.exe --task sparse > before_sparse.json
- *   build/bin/Release/bench_autotune.exe --task image  > before_image.json
+ * (configure with -DLIBEMBEDDING_BUILD_BENCHMARKS=ON)
+ *   build/benchmarks/Release/bench_autotune.exe --task text   > before_text.json
+ *   build/benchmarks/Release/bench_autotune.exe --task rerank > before_rerank.json
+ *   build/benchmarks/Release/bench_autotune.exe --task sparse > before_sparse.json
+ *   build/benchmarks/Release/bench_autotune.exe --task image  > before_image.json
  * Options: --model <code> overrides the default model of the task,
  *          --runs <n> timed evaluation runs (default 5, median reported).
  * Progress goes to stderr, the JSON report to stdout. Models must already be in

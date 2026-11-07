@@ -396,6 +396,13 @@ static void test_cache_entries() {
     CHECK(!fs::exists(cache_entry_path("sparse", id)), "per-model purge removes sparse entry");
     CHECK(!fs::exists(cache_entry_path("image", id)), "per-model purge removes image entry");
 
+    /* Root-only purge (task-scoped "all embedding entries") spares sub-directories. */
+    CHECK(write_cache_entry("", id, out_fields), "root entry written");
+    CHECK(write_cache_entry("sparse", id, out_fields), "sparse entry written again");
+    clear_autotune_cache_root_entries();
+    CHECK(!fs::exists(cache_entry_path("", id)), "root purge removes root entries");
+    CHECK(fs::exists(cache_entry_path("sparse", id)), "root purge keeps sparse entries");
+
     fs::remove_all(root, ec);
 }
 

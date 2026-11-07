@@ -96,7 +96,8 @@ def autotune(
 
     Args:
         model_name: HuggingFace model code (e.g. "Qdrant/all-MiniLM-L6-v2-onnx")
-        full: If True, run exhaustive tuning (30-120s). Otherwise quick (5-15s).
+        full: If True, run the FULL grid, otherwise the QUICK one (duration
+            depends on the model and CPU).
         texts: Optional custom corpus for benchmarking. If None, a synthetic
             corpus is generated. The corpus is stratified-sampled down to
             ``max_sample_size`` first, because the tuner benchmarks every

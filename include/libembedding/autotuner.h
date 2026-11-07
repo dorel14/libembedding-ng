@@ -29,13 +29,13 @@ typedef struct {
 
 /* Autotune modes */
 typedef enum {
-    LEMBED_AUTOTUNE_QUICK = 0,  /* 5-15s */
-    LEMBED_AUTOTUNE_FULL        /* 30-120s */
+    LEMBED_AUTOTUNE_QUICK = 0,  /* small grid, 1 warmup + 3 timed calls per point */
+    LEMBED_AUTOTUNE_FULL        /* larger grid, 2 warmups + 10 timed calls per point */
 } lembed_autotune_mode_t;
 
 /* Run auto-tuning for a model
  * Returns optimal configuration for current hardware.
- * mode: QUICK (5-15s) or FULL (30-120s)
+ * mode: QUICK or FULL (duration depends on model and CPU: seconds to minutes)
  * result: output configuration
  * Returns LEMBED_OK on success. */
 lembed_status_t lembed_autotune(
@@ -144,7 +144,9 @@ typedef enum {
 
 /* Run auto-tuning for a reranker model
  * Optimizes threads × batch_size × max_tokens for the given objective.
- * mode: QUICK (5-15s) or FULL (30-120s)
+ * max_tokens truncates documents (speed vs ranking quality): set a floor with
+ * lembed_reranker_autotune_constrained() or lembed_autotune_ex().
+ * mode: QUICK or FULL
  * objective: what to optimize for
  * result: output configuration
  * Returns LEMBED_OK on success. */
@@ -220,9 +222,9 @@ typedef struct {
     int batch_size;
     int workers;         /* embedding only */
     int max_tokens;      /* reranker only */
-    int top_k;           /* sparse only */
-    float min_weight;    /* sparse only */
-    int storage_format;  /* sparse only */
+    int top_k;           /* sparse only: model default, reported, not tuned */
+    float min_weight;    /* sparse only: model default, reported, not tuned */
+    int storage_format;  /* sparse only: model default, reported, not tuned */
     double throughput_docs_sec;
     double latency_ms;
     double p95_latency_ms;
@@ -242,7 +244,9 @@ typedef struct {
 } lembed_sparse_tuning_result_t;
 
 /* Run auto-tuning for sparse embedding
- * Optimizes top_k x min_weight x storage_format for throughput */
+ * Optimizes threads x batch_size for throughput. top_k, min_weight and
+ * storage_format change the output vectors, so they are not tuned: the result
+ * reports the model defaults. */
 lembed_status_t lembed_sparse_autotune(
     const char* model_name,
     lembed_autotune_mode_t mode,
@@ -254,8 +258,9 @@ lembed_status_t lembed_sparse_autotune(
  *
  * task: EMBEDDING, RERANKING, IMAGE, or SPARSE
  * model_name: model identifier (e.g. "BAAI/bge-small-en-v1.5")
- * mode: QUICK (5-15s) or FULL (30-120s)
+ * mode: QUICK or FULL
  * result: output configuration
+ * Facade over lembed_autotune_ex() with the task's default options.
  */
 lembed_status_t lembed_autotune_unified(
     lembed_task_t task,

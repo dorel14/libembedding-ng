@@ -430,14 +430,16 @@ def sparse_autotune(
 
     Args:
         model_name: Model name (e.g. "prithivida/Splade_PP_en_v1")
-        full: If True, run FULL mode (30-120s), else QUICK (5-15s)
+        full: If True, run the FULL grid, else the QUICK one
 
     Returns:
-        SparseTuningResult with optimal top_k, min_weight, storage_format.
+        SparseTuningResult with the optimal threads and batch_size. top_k,
+        min_weight and storage_format change the output vectors, so they are
+        not tuned: they report the model defaults.
 
     Example:
         >>> result = sparse_autotune("prithivida/Splade_PP_en_v1")
-        >>> print(f"Optimal: top_k={result.top_k}, storage={result.storage_format}")
+        >>> print(f"Optimal: threads={result.threads}, batch={result.batch_size}")
     """
     mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
     result = ffi.new("lembed_sparse_tuning_result_t *")

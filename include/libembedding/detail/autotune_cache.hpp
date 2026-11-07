@@ -606,6 +606,26 @@ inline void clear_autotune_cache(const char* model_name, const std::string& subd
     for (const std::string& d : dirs) clear_autotune_cache_in_dir(d, model_name);
 }
 
+/* Remove every entry stored directly in the cache root (the text tuner's
+ * entries), leaving the task sub-directories untouched. This is what a
+ * task-scoped "clear all embedding tunings" means; clear_autotune_cache(NULL)
+ * wipes every task and is kept for lembed_autotune_clear_cache(NULL). */
+inline void clear_autotune_cache_root_entries() {
+    std::error_code ec;
+    std::string dir = autotune_cache_dir();
+    if (!std::filesystem::exists(dir, ec)) return;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        std::error_code fec;
+        if (!entry.is_regular_file(fec)) continue;
+        std::string path = entry.path().string();
+        bool is_cache_file = (path.size() > 5 && path.compare(path.size() - 5, 5, ".json") == 0) ||
+                             (path.size() > 9 && path.compare(path.size() - 9, 9, ".json.tmp") == 0);
+        if (!is_cache_file) continue;
+        std::error_code rm;
+        std::filesystem::remove(path, rm);
+    }
+}
+
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_CACHE_HPP */
