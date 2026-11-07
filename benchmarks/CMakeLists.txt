@@ -10,6 +10,11 @@ target_compile_definitions(bench_reranker_compare PRIVATE
     LIBEMBEDDING_IMPLEMENTATION
 )
 
+# Auto-tuner before/after harness. Public C API only, linked against the shared
+# library, so the same source measures the tuners across a refactor.
+add_executable(bench_autotune bench_autotune.cpp)
+target_link_libraries(bench_autotune PRIVATE libembedding)
+
 add_executable(fair_compare fair_compare.cpp)
 target_link_libraries(fair_compare PRIVATE libembedding)
 target_compile_definitions(fair_compare PRIVATE LIBEMBEDDING_NO_DOWNLOAD)
@@ -34,7 +39,7 @@ endif()
 
 if(WIN32)
     set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare
-        gguf_gemm_microbench)
+        gguf_gemm_microbench bench_autotune)
     foreach(_t IN LISTS _benchmark_targets)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
@@ -46,7 +51,7 @@ if(WIN32)
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
     set(_benchmark_targets bench_libembedding bench_reranker_compare fair_compare
-        gguf_gemm_microbench)
+        gguf_gemm_microbench bench_autotune)
     foreach(_t IN LISTS _benchmark_targets)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
