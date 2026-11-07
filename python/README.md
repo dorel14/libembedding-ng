@@ -283,29 +283,37 @@ ONNX files, so its provenance is verifiable.
 
 ### Unified Auto-Tuning
 
-Auto-tune threads, batch_size, and workers for any task type:
+Auto-tune threads and batch_size (plus workers for text, `max_tokens` for the
+reranker) for any task type:
 
 ```python
-from libembedding import (
-    autotune,
-    autotune_unified,
-    LEMBED_TASK_RERANKING,
-    LEMBED_AUTOTUNE_QUICK,
-    LEMBED_AUTOTUNE_FULL,
-)
+from libembedding import autotune, autotune_unified, clear_autotune_cache_unified
 
-# Quick text embedding tune (5-15s)
-result = autotune("BAAI/bge-small-en-v1.5", LEMBED_AUTOTUNE_QUICK)
+# Text embedding tune (QUICK by default; ~13 s cold on an i7-1065G7, indicative)
+result = autotune("BAAI/bge-small-en-v1.5")
 
-# Unified API for any task type
+# Unified API for any task: "embedding", "reranking", "sparse", "image"
+result = autotune_unified("embedding", "BAAI/bge-small-en-v1.5")
+
+# Objective, custom workload and constraints (reranking: last text = the query)
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",              # "latency" | "throughput" | "balanced" | "memory"
+    texts=[*documents, query],
+    max_latency_ms=300.0,             # p95 budget for one tuning call (0 = none)
+    min_tokens=128,                   # reranking only: floor for max_tokens
 )
+# Over budget? The best unconstrained config is returned: check result.p95_latency_ms.
+
+clear_autotune_cache_unified("reranking")   # purge one task's cache
 ```
 
-Results are cached by hardware fingerprint — subsequent runs load instantly.
+Results are cached per model, hardware, runtime, workload, objective, mode and
+constraints — a repeated call returns in milliseconds. For sparse models, `top_k`,
+`min_weight` and `storage_format` are not tuned (they change the output); the
+result reports the model defaults. See `docs/performance_tuning.md` for grids,
+methodology and measurements.
 
 ### Error Handling
 

@@ -405,33 +405,39 @@ class ModelSelectionResult:
 | Fonction | Description |
 |----------|-------------|
 | `autotune(model_name, full=False, texts=None, max_sample_size=100)` | Auto-tune un modèle. Retourne `TuningResult`. `texts` fournit un corpus de mesure (échantillonné à `max_sample_size`) ; `None` utilise un corpus synthétique. |
-| `autotune_unified(task, model_name, mode="quick")` | Auto-tune unifié pour tous les types de tâches. Voir [Unified Tuning](#unified-tuning). |
-| `sparse_autotune(model_name, mode="quick")` | Auto-tune l'embedding sparse. Retourne `SparseTuningResult`. |
-| `image_autotune(model_name, mode="quick")` | Auto-tune l'embedding image. Retourne `ImageTuningResult`. |
-| `reranker_autotune(model_name, mode="quick", objective="latency")` | Auto-tune le reranker. Retourne `RerankerTuningResult`. |
-| `reranker_auto_config(model_name, target_latency_ms=500, objective="latency")` | Configuration automatique du reranker pour un budget de latence. |
-| `reranker_auto_config_profile(model_name, profile="balanced")` | Configuration du reranker via un profil. |
-| `reranker_autotune_constrained(model_name, mode="quick", objective="latency", min_tokens=32, max_latency_ms=1000)` | Auto-tune avec contraintes. |
+| `autotune_unified(task="embedding", model_name=None, *, full=False, objective=None, texts=None, max_latency_ms=0.0, min_tokens=0, max_sample_size=100)` | **Recommandé.** Auto-tune unifié pour les quatre tâches (`"embedding"`, `"reranking"`, `"image"`, `"sparse"`). Retourne `UnifiedTuningResult`. Voir [Unified Tuning](#unified-tuning). |
+| `clear_autotune_cache_unified(task, model_name=None)` | Efface le cache d'autotune d'une tâche pour un modèle (`None` = tous les modèles de la tâche). |
+| `sparse_autotune(model_name, *, full=False)` | Historique : auto-tune l'embedding sparse (threads × batch). Retourne `SparseTuningResult`. |
+| `image_autotune(model_name, *, full=False)` | Historique : auto-tune l'embedding image. Retourne `ImageTuningResult`. |
+| `reranker_autotune(model_name, *, full=False, objective="balanced")` | Historique : auto-tune le reranker. Retourne `RerankerTuningResult`. |
+| `reranker_auto_config(model_name, target_latency_ms=500, objective="balanced")` | Configuration automatique du reranker pour un budget de latence. |
+| `reranker_auto_config_profile(profile="balanced", model_name=...)` | Configuration du reranker via un profil. |
+| `reranker_autotune_constrained(model_name, *, full=False, objective="balanced", min_tokens=64, max_latency_ms=500.0)` | Historique : auto-tune avec contraintes. |
 | `clear_reranker_autotune_cache(model_name=None)` | Efface le cache d'autotune du reranker. |
 | `auto_select_model(use_case="balanced")` | Sélectionne le meilleur modèle. Retourne `ModelSelectionResult`. |
-| `clear_autotune_cache(model_name=None)` | Efface le cache d'autotune. |
+| `clear_autotune_cache(model_name=None)` | Efface le cache d'autotune texte (avec `None`, **tout** le répertoire d'autotune). |
 | `cache_path()` | Chemin du fichier de cache d'autotune. |
 
 ---
 
 ### Unified Tuning
 
-L'auto-tune unifié fournit un point d'entrée unique pour tous les types de tâches (texte, sparse, image, reranking).
+L'auto-tune unifié fournit un point d'entrée unique pour tous les types de tâches (texte, sparse, image, reranking). Il s'appuie sur `lembed_autotune_ex()` côté C.
 
 ```python
-from libembedding import autotune_unified, LEMBED_TASK_RERANKING, LEMBED_AUTOTUNE_QUICK
+from libembedding import autotune_unified
 
 result = autotune_unified(
-    task=LEMBED_TASK_RERANKING,
-    model_name="BAAI/bge-reranker-base",
-    mode=LEMBED_AUTOTUNE_QUICK,
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    objective="latency",                      # défaut : "throughput" (embedding, sparse, image), "balanced" (reranking)
+    texts=[*documents, query],                # reranking : le DERNIER texte est la requête
+    max_latency_ms=300.0,                     # budget p95 par appel de tuning (0 = aucun)
+    min_tokens=128,                           # reranking uniquement
 )
 ```
+
+Si aucune configuration ne tient dans `max_latency_ms`, la meilleure configuration sans contrainte est renvoyée : comparer `result.p95_latency_ms` au budget. `texts` est refusé pour `"image"`. Pour `"sparse"`, `top_k`, `min_weight` et `storage_format` ne sont pas réglés par le tuner : ils reflètent les valeurs par défaut du modèle. Détails, grilles, méthodologie et mesures : [Performance](performance_tuning.html#auto-tune-unifié-api-unifiée).
 
 #### UnifiedTuningResult
 
@@ -441,15 +447,15 @@ class UnifiedTuningResult:
     task: str
     threads: int
     batch_size: int
-    workers: int
-    max_tokens: int
-    top_k: int
-    min_weight: float
-    storage_format: int
+    workers: int            # embedding uniquement
+    max_tokens: int         # reranking uniquement
     throughput_docs_sec: float
-    latency_ms: float
+    latency_ms: float       # par appel ; amortie par texte pour "embedding"
     p95_latency_ms: float
-    memory_mb: float
+    memory_mb: float        # estimation (delta de RSS), pas un pic absolu
+    top_k: int = 0          # sparse : valeur par défaut du modèle (non réglée)
+    min_weight: float = 0.0 # sparse : idem
+    storage_format: int = 0 # sparse : idem
 ```
 
 ---

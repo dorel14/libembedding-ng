@@ -859,16 +859,29 @@ implementation divergence. See `docs/gguf_sparse_runtime.md` and
 libembedding includes a comprehensive auto-tuning system that optimizes thread count, batch size, and worker count for your specific hardware. The unified API covers all task types:
 
 ```python
-from libembedding import autotune, autotune_unified, LEMBED_TASK_EMBEDDING, LEMBED_AUTOTUNE_QUICK
+from libembedding import autotune, autotune_unified
 
-# Quick auto-tune for text embedding (5-15s)
-result = autotune("BAAI/bge-small-en-v1.5", LEMBED_AUTOTUNE_QUICK)
+# Quick auto-tune for text embedding (QUICK by default; ~13 s cold on an
+# i7-1065G7 4C/8T — indicative, depends on CPU, model and workload)
+result = autotune("BAAI/bge-small-en-v1.5")
 print(result.threads, result.batch_size, result.workers)
 
-# Unified API — same pattern for all task types
-from libembedding import autotune_unified, LEMBED_TASK_SPARSE, LEMBED_TASK_IMAGE, LEMBED_TASK_RERANKING
-result = autotune_unified(LEMBED_TASK_RERANKING, "BAAI/bge-reranker-base", LEMBED_AUTOTUNE_FULL)
+# Unified API — same pattern for all task types ("embedding", "reranking", "sparse", "image")
+result = autotune_unified(
+    "reranking",
+    "jinaai/jina-reranker-v1-turbo-en-quantized",
+    full=False,                  # True = FULL grid
+    objective="latency",         # default: "throughput" (embedding/sparse/image), "balanced" (reranking)
+    max_latency_ms=300.0,        # p95 budget per tuning call; falls back to the best unconstrained config
+    min_tokens=128,              # reranking: floor for max_tokens (truncation trade-off)
+)
 ```
+
+In C, `lembed_autotune_ex()` exposes the same controls (objective, custom workload,
+p95 budget, `min_tokens`) for every task; see `docs/c_api/autotuner.md`. Sparse
+tuning only sets threads × batch: `top_k`, `min_weight` and `storage_format` change
+the output and are not tuned. Measured tuning times and the measurement protocol
+are in `docs/performance_tuning.md`.
 
 The **unified benchmark** compares ONNX and llama.cpp backends on identical corpora:
 
@@ -889,7 +902,7 @@ comparison = bench.compare_all(
 print(comparison.recommendation)
 ```
 
-**Autotune cache**: Results are cached using a hardware fingerprint (CPU name, core count, RAM, OS, SIMD features) combined with software versions and model quantization. Subsequent runs load instantly from `lembed_tune_cache_path()`.
+**Autotune cache**: Results are cached using a hardware fingerprint (CPU name, core count, RAM, OS, SIMD features) combined with software versions and model quantization. Subsequent runs load instantly from `lembed_tune_cache_path()`. (This is the benchmark cache, `lembed_tune_cache_*`. The `autotune*` / `lembed_autotune_ex()` tuners use their own store under `%LOCALAPPDATA%\libembedding\autotune` / `~/.cache/libembedding/autotune`, keyed by model, hardware, runtime versions, workload, objective, mode and constraints.)
 
 **Automatic model selection**: Let libembedding pick the best model for your hardware:
 
