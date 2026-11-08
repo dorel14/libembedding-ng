@@ -255,11 +255,12 @@ would index past the position table.
 
 ## 5. Measurements
 
-LE-9.6 criterion: cosine >= 0.90 between sparse GGUF and sparse ONNX, on the same
-texts.
+Criterion: cosine >= 0.995 between sparse GGUF and sparse ONNX, on the same
+texts (the original LE-9.6 bar, 0.90, would let a broken LayerNorm through; the
+bar keeps ten times the measured gap as margin).
 
 ```
-sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.90)
+sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.995)
 ```
 
 Measured on `cstr/splade-pp-en-v1-q8_0.gguf` (Q8_0, ~111 MB) against

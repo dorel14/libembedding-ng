@@ -51,10 +51,17 @@ void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* 
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 
 /* Find optimal sparse configuration for a model and corpus.
+ *
+ * Deprecated: prefer lembed_sparse_autotune() (autotuner.h). This function
+ * picks top_k and min_weight by throughput, which trades recall for speed
+ * without saying so: both filters change which terms come out. The autotuner
+ * tunes threads and batch size only and leaves the output unchanged. Kept for
+ * ABI compatibility; its behaviour is unchanged.
+ *
  * The ONNX session is created once and reused for every candidate: top_k and
  * min_weight are post-processing filters, so reloading the model per candidate
- * would be pure waste. storage_format is not yet honoured by the C embed path
- * and is therefore not benchmarked.
+ * would be pure waste. storage_format only orders the output and is not
+ * benchmarked; the result reports 0 (LEMBED_SPARSE_FORMAT_DICT).
  * texts: array of text samples for benchmarking (must be non-empty)
  * n_texts: number of texts (must be > 0)
  * result: output configuration with optimal top_k, min_weight, storage_format
@@ -73,9 +80,10 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
 
 /* Load a SPLADE model from a GGUF file.
  *
- * The GGUF runtime is this library's own ggml graph, not llama.cpp: llama.cpp
- * v0.3.0 cannot load these files (it looks for `blk.N.attn_q.weight` and
- * friends, which the SPLADE exports do not use). The functions are named for the
+ * The GGUF runtime is this library's own ggml graph, not llama.cpp: llama.cpp's
+ * loader cannot load these files (it looks for `blk.N.attn_q.weight` and
+ * friends, which the SPLADE exports do not use; still true of the vendored
+ * v0.6.0). The functions are named for the
  * format rather than the runtime on purpose.
  *
  * The file must carry an MLM/SPLADE head over a declared vocabulary; a dense
@@ -472,8 +480,11 @@ void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* 
  * The ONNX session is created ONCE and reused for every candidate
  * configuration: top_k / min_weight are post-processing filters, so
  * reloading the model per candidate would be pure waste (24 model
- * loads for the default grid). storage_format is not yet honoured by
- * the C embed path, so it is not benchmarked here.
+ * loads for the default grid). storage_format only orders the output,
+ * so it is not benchmarked here.
+ *
+ * Deprecated in favour of lembed_sparse_autotune(), which does not tune
+ * the output filters (see the declaration above).
  */
 lembed_status_t lembed_sparse_best_config(
         const char* model_name,

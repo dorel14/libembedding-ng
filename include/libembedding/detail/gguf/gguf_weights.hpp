@@ -4,16 +4,17 @@
  *
  * Why this exists instead of llama.cpp's model loader
  * ----------------------------------------------------
- * llama.cpp v0.3.0 cannot read this family of files at all. It looks for
+ * llama.cpp cannot read this family of files at all (checked at v0.3.0, still
+ * true of the vendored v0.6.0). It looks for
  * `blk.N.attn_q.weight`, `blk.N.ffn_up.weight`, `blk.N.layer_output_norm.weight`,
  * `token_embd_norm.weight` and `token_types.weight`
- * (src/llama-arch.cpp:407-453), plus `%s.attention.head_count`,
+ * (src/llama-arch.cpp, LLM_TENSOR_NAMES), plus `%s.attention.head_count`,
  * `%s.feed_forward_length` and `%s.embedding_length`; the SPLADE exports carry
  * `enc.N.attn.q.weight`, `enc.N.ffn.fc1.weight`, `enc.N.ln1/ln2.weight`,
  * `embd_ln.weight`, `token_type_embd.weight` and `bert.hidden_size` /
  * `bert.num_attention_heads` / `bert.intermediate_size`. A missing required
  * tensor is fatal: `create_tensor` throws
- * "missing tensor 'blk.0.attn_q.weight'" (src/llama-model-loader.cpp:1103-1106).
+ * "missing tensor 'blk.0.attn_q.weight'" (src/llama-model-loader.cpp, create_tensor).
  * Only `token_embd.weight` and `position_embd.weight` happen to match.
  *
  * So the weights are read here, through gguf's own reader, into a buffer this
