@@ -327,9 +327,14 @@ const char* lembed_benchmark_default_cache_dir(void) {
     std::lock_guard<std::mutex> lock(dir_mutex);
     if (dir.empty()) {
         const char* home = getenv("USERPROFILE");
-        if (!home) home = getenv("HOME");
-        if (!home) home = ".";
-        dir = std::string(home) + "/.cache/libembedding";
+        if (!home || !home[0]) home = getenv("HOME");
+        if (home && home[0]) {
+            dir = std::string(home) + "/.cache/libembedding";
+        } else {
+            /* Android apps have no HOME; the runtime points TMPDIR at their cache. */
+            const char* tmp = getenv("TMPDIR");
+            dir = (tmp && tmp[0]) ? std::string(tmp) + "/libembedding" : std::string("./.cache/libembedding");
+        }
     }
     return dir.c_str();
 }

@@ -6,6 +6,9 @@ name: Android
 # tests exercise bionic, dlopen of the ggml CPU variants and the missing /tmp
 # there. ONNX Runtime comes from its official Android AAR on Maven Central.
 # Downloading is off (LIBEMBEDDING_NO_DOWNLOAD): models are passed by path.
+# CMakeLists.txt gives Android binaries RUNPATH=$ORIGIN: the linker of the ARM
+# translation layer on x86_64 emulators ignores LD_LIBRARY_PATH, so without it
+# arm64 binaries cannot find libllama.so.
 
 on:
   pull_request:
