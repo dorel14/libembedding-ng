@@ -14,15 +14,12 @@ Three rules drive the implementation, all inherited from
    only way to make the number mean anything. It also keeps a crashing or
    OOM-killed backend from taking the whole benchmark down.
 
-2. **A missing backend is a result, not an error.** ``Sparse GGUF`` is reported
-   as ``unavailable`` with the reason recorded in
-   ``docs/archive/LE-9.4-validation.md``: llama.cpp v0.3.0 loads a BERT GGUF
-   but never loads or executes the ``mlm_*`` projection head that SPLADE needs,
-   so no ``[seq_len, vocab_size]`` logits tensor exists to post-process. The
-   GGUF files themselves *do* carry the head, so a different runtime may well
-   work — which is why the reason points at the P1.5a/P1.5b spike instead of
-   claiming the concept is dead. Failing the whole run because one column is
-   empty would hide the three columns that do work.
+2. **A missing backend is a result, not an error.** A backend with an
+   ``unavailable_reason`` is reported as ``unavailable`` instead of failing the
+   whole run, which would hide the columns that do work. ``Sparse GGUF`` used
+   to be one (llama.cpp never runs the ``mlm_*`` head SPLADE needs); since
+   P1.5c it is measured on libembedding's own ggml runtime, see
+   ``UNAVAILABLE_SPARSE_GGUF`` below.
 
 3. **Recall@K is computed where the vectors live.** Vectors cannot cross the
    subprocess boundary as JSON without dominating the benchmark's own memory, so
@@ -78,8 +75,8 @@ _VOCAB_SPARSE = 30522
 UNAVAILABLE_SPARSE_GGUF = None
 """The sparse GGUF cell is measured since P1.5c.
 
-The runtime is libembedding's own ggml graph, not llama.cpp: llama.cpp v0.3.0
-cannot load these files at all, because their tensor names (`enc.N.attn.q.weight`)
+The runtime is libembedding's own ggml graph, not llama.cpp: llama.cpp (v0.3.0,
+still true of the vendored v0.6.0) cannot load these files at all, because their tensor names (`enc.N.attn.q.weight`)
 and metadata keys (`bert.hidden_size`) are not the ones it looks for
 (`blk.N.attn_q.weight`, `%s.embedding_length`). See
 docs/archive/LE-9.4-validation.md section 3(d).

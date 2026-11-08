@@ -472,6 +472,12 @@ def sparse_best_config(
 ) -> SparseTuningResult:
     """Find optimal sparse configuration by benchmarking variants.
 
+    .. deprecated::
+        Prefer :func:`sparse_autotune`. This function picks ``top_k`` and
+        ``min_weight`` by throughput, which changes which terms come out and so
+        trades recall for speed. :func:`sparse_autotune` tunes threads and
+        batch size only and leaves the vectors unchanged.
+
     Args:
         model_name: Model name or local path.
         texts: Optional list of sample texts for benchmarking.

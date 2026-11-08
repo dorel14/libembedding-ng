@@ -9,10 +9,13 @@ import pytest
 
 # Ensure the src layout is importable when running tests from the repo root.
 # conftest.py lives in <repo>/python/tests, so the repository root is three
-# levels up (tests -> python -> repo).
+# levels up (tests -> python -> repo). The wheel CI sets
+# LIBEMBEDDING_TEST_INSTALLED=1 to test the installed package instead: the
+# source tree also holds the native libraries the workflow copied into it, so
+# testing it says nothing about what the wheel ships.
 ROOT = Path(__file__).resolve().parent.parent.parent
 SRC = ROOT / "python" / "src"
-if str(SRC) not in sys.path:
+if os.environ.get("LIBEMBEDDING_TEST_INSTALLED") != "1" and str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 BGE_SMALL_MODEL = "BAAI/bge-small-en-v1.5"

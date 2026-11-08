@@ -20,6 +20,12 @@ pip install libembedding-ng
 > `libembedding` on PyPI); it is imported as `libembedding`. The wheel already bundles the
 > native shared library and ONNX Runtime, so no separate system install is required.
 
+**Platforms:** wheels exist for Windows x86-64, Linux x86-64 (manylinux) and macOS arm64
+(Apple Silicon, macOS 14 or later). The x86-64 wheels run on any x86-64 CPU, no AVX/AVX2
+required: GGUF models load the ggml CPU library matching the machine at run time
+(`libembedding.ggml_cpu_features()` names it). The macOS wheel bundles its dependencies
+(ONNX Runtime, llama.cpp/ggml) under `libembedding/.dylibs/` and uses the system libcurl.
+
 **Requirements:** ONNX Runtime must be installed on your system **only if** you build the package from source.
 
 ```bash

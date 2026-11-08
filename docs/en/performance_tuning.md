@@ -14,6 +14,27 @@ This guide covers libembedding's advanced performance features: session pooling,
 4. [llama.cpp / GGUF Performance](#llamacpp--gguf-performance)
 5. [Benchmarks](#benchmarks)
 6. [Best Practices](#best-practices)
+7. [CPU Requirements](#cpu-requirements)
+
+---
+
+## CPU Requirements
+
+The x86-64 wheels and release binaries run on any x86-64 CPU; no AVX or AVX2 is assumed:
+
+- libembedding's own code (tokenizer, pooling, SPLADE pooling, similarity) is compiled for the
+  x86-64 baseline; CI runs the unit tests under Intel SDE as Nehalem (SSE4.2), Sandy Bridge (AVX),
+  Haswell (AVX2), Skylake-X (AVX-512) and Ice Lake (AVX-512 VNNI);
+- GGUF models run on ggml, which ships one CPU library per instruction-set level (`ggml-cpu-x64` …
+  `ggml-cpu-alderlake`) and loads the best one for the machine at run time;
+  `libembedding.ggml_cpu_features()` (C: `lembed_ggml_cpu_features()`) names it. Record it with any
+  GGUF benchmark;
+- ONNX models run on ONNX Runtime, which selects its own kernels at run time.
+
+The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For a local build that
+will never leave the machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for
+AVX2. The hot paths are in ONNX Runtime and ggml, and on an i7-1065G7 the difference stayed within
+noise (dense, sparse ONNX, sparse GGUF: 0.98–1.01×).
 
 ---
 

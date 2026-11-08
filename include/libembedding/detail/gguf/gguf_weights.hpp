@@ -4,16 +4,17 @@
  *
  * Why this exists instead of llama.cpp's model loader
  * ----------------------------------------------------
- * llama.cpp v0.3.0 cannot read this family of files at all. It looks for
+ * llama.cpp cannot read this family of files at all (checked at v0.3.0, still
+ * true of the vendored v0.6.0). It looks for
  * `blk.N.attn_q.weight`, `blk.N.ffn_up.weight`, `blk.N.layer_output_norm.weight`,
  * `token_embd_norm.weight` and `token_types.weight`
- * (src/llama-arch.cpp:407-453), plus `%s.attention.head_count`,
+ * (src/llama-arch.cpp, LLM_TENSOR_NAMES), plus `%s.attention.head_count`,
  * `%s.feed_forward_length` and `%s.embedding_length`; the SPLADE exports carry
  * `enc.N.attn.q.weight`, `enc.N.ffn.fc1.weight`, `enc.N.ln1/ln2.weight`,
  * `embd_ln.weight`, `token_type_embd.weight` and `bert.hidden_size` /
  * `bert.num_attention_heads` / `bert.intermediate_size`. A missing required
  * tensor is fatal: `create_tensor` throws
- * "missing tensor 'blk.0.attn_q.weight'" (src/llama-model-loader.cpp:1103-1106).
+ * "missing tensor 'blk.0.attn_q.weight'" (src/llama-model-loader.cpp, create_tensor).
  * Only `token_embd.weight` and `position_embd.weight` happen to match.
  *
  * So the weights are read here, through gguf's own reader, into a buffer this
@@ -49,6 +50,27 @@
 
 namespace lembed {
 namespace gguf {
+
+/* Upper bounds on the header's hyper-parameters.
+ *
+ * A GGUF is untrusted input: every dimension below sizes an allocation or a
+ * loop before a single weight is read, so `block_count = 2^31 - 1` would build
+ * thirty billion tensor names before failing. The bounds are far above any
+ * BERT-family encoder (BERT-large: 1024 wide, 16 heads, 24 layers, 4096 FFN;
+ * XLM-R: 250 002 tokens; long-context BERTs: 8192 positions) and only exist to
+ * turn an absurd header into an immediate refusal. */
+constexpr int kMaxEmbd      = 16384;
+constexpr int kMaxHeads     = 256;
+constexpr int kMaxLayers    = 256;
+constexpr int kMaxFf        = 65536;
+constexpr int kMaxVocab     = 1 << 21;
+constexpr int kMaxPositions = 1 << 17;
+
+/* Tensors per encoder layer, as listed by Weights::collect_required(). A file
+ * with fewer tensors than its block_count implies is refused before any name
+ * is built. Only the layers are counted: a file missing the head or the
+ * embeddings is refused later, by the name of the tensor it lacks. */
+constexpr int kTensorsPerLayer = 16;
 
 /* Architecture hyper-parameters, resolved once at load time.
  *
@@ -176,12 +198,20 @@ public:
             return false;
         }
 
-        std::vector<std::string> names;
-        collect_required_names(names);
+        std::vector<RequiredTensor> required;
+        collect_required(required);
         if (!missing_.empty()) {
             err = "missing tensor '" + missing_ + "'";
             return false;
         }
+        /* Shapes and types are checked before anything is allocated: a wrong
+         * shape would otherwise reach a GGML_ASSERT inside the graph and abort
+         * the whole process, which is not a refusal anybody can catch. */
+        if (!validate_tensors(required, err)) return false;
+
+        std::vector<std::string> names;
+        names.reserve(required.size());
+        for (const RequiredTensor& r : required) names.push_back(r.name);
 
         /* Two spare object slots of headroom: ggml_new_tensor can fail, and a
          * half-built context would leak whatever it already holds. */
@@ -236,19 +266,6 @@ public:
         }
 
         bind(dst);
-        if (head_.type_embd->type != GGML_TYPE_F32) {
-            /* The encoder adds row 0 of this table to every token as a view, which
-             * assumes single-precision rows. Refusing here is better than
-             * reading a quantised row as floats. */
-            err = "token_type_embd.weight is not F32";
-            return false;
-        }
-        if (hp_.n_type < 1) {
-            /* BERT always has at least the "single segment" type; a table with no
-             * row at all cannot supply it. */
-            err = "token_type_embd.weight has no rows";
-            return false;
-        }
         return true;
     }
 
@@ -346,6 +363,32 @@ private:
             err = "GGUF header carries a non-positive BERT dimension";
             return false;
         }
+        struct Bound { int value; int max; const char* label; };
+        const Bound bounds[] = {
+            {hp_.n_embd,  kMaxEmbd,      "embedding_length"},
+            {hp_.n_head,  kMaxHeads,     "attention.head_count"},
+            {hp_.n_layer, kMaxLayers,    "block_count"},
+            {hp_.n_ff,    kMaxFf,        "feed_forward_length"},
+            {hp_.n_vocab, kMaxVocab,     "vocab_size"},
+            {hp_.n_pos,   kMaxPositions, "context_length"},
+        };
+        for (const Bound& b : bounds) {
+            if (b.value > b.max) {
+                err = "GGUF <arch>." + std::string(b.label) + " = " +
+                      std::to_string(b.value) + " exceeds the supported maximum of " +
+                      std::to_string(b.max);
+                return false;
+            }
+        }
+        /* The tensor table is already parsed, so a block_count the file cannot
+         * back with tensors is refused here, without building a single name. */
+        const int64_t needed = (int64_t)hp_.n_layer * kTensorsPerLayer;
+        if (probe_.n_tensors() < needed) {
+            err = "GGUF declares " + std::to_string(hp_.n_layer) + " layers but holds only " +
+                  std::to_string(probe_.n_tensors()) + " tensors (at least " +
+                  std::to_string(needed) + " required)";
+            return false;
+        }
         if (hp_.n_embd % hp_.n_head != 0) {
             err = "GGUF hidden size is not divisible by the attention head count";
             return false;
@@ -357,12 +400,65 @@ private:
         return true;
     }
 
-    void add(std::vector<std::string>& names, const char* name) {
-        names.emplace_back(name);
+    /* A tensor the runtime needs, with the shape the graph will use it at.
+     * ggml order: ne0 is the row length. A vector is [ne0, 1]. */
+    static constexpr int64_t kAnyRows = -1; /* ne1 >= 1, whatever its value */
+    struct RequiredTensor {
+        std::string name;
+        int64_t ne0;
+        int64_t ne1;
+    };
+
+    static void add(std::vector<RequiredTensor>& out, const char* name,
+                    int64_t ne0, int64_t ne1 = 1) {
+        out.push_back(RequiredTensor{name, ne0, ne1});
     }
 
-    void add_layer(std::vector<std::string>& names, int il, const std::string& suffix) {
-        names.push_back("enc." + std::to_string(il) + "." + suffix);
+    static void add_layer(std::vector<RequiredTensor>& out, int il, const char* suffix,
+                          int64_t ne0, int64_t ne1 = 1) {
+        out.push_back(RequiredTensor{"enc." + std::to_string(il) + "." + suffix, ne0, ne1});
+    }
+
+    /* Checks every required tensor against the shape and the type the graph
+     * relies on (gguf_bert_graph.hpp and SparseSession::build_mlm_head).
+     *
+     * Types are limited to what this runtime is tested with -- F32, F16 and
+     * Q8_0 -- rather than to what ggml can represent: a type nobody has run
+     * through this graph is refused by name instead of being trusted. */
+    bool validate_tensors(const std::vector<RequiredTensor>& required, std::string& err) const {
+        for (const RequiredTensor& r : required) {
+            const ggml_tensor* t = ggml_get_tensor(blob_ctx_, r.name.c_str());
+            if (!t) {
+                err = "missing tensor '" + r.name + "'";
+                return false;
+            }
+            if (t->type != GGML_TYPE_F32 && t->type != GGML_TYPE_F16 &&
+                t->type != GGML_TYPE_Q8_0) {
+                err = "tensor '" + r.name + "' has type " + ggml_type_name(t->type) +
+                      "; this runtime supports f32, f16 and q8_0";
+                return false;
+            }
+            const bool rows_ok = (r.ne1 == kAnyRows) ? t->ne[1] >= 1 : t->ne[1] == r.ne1;
+            if (t->ne[0] != r.ne0 || !rows_ok || t->ne[2] != 1 || t->ne[3] != 1) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                         "tensor '%s' has shape [%lld, %lld, %lld, %lld], expected [%lld, %s]",
+                         r.name.c_str(), (long long)t->ne[0], (long long)t->ne[1],
+                         (long long)t->ne[2], (long long)t->ne[3], (long long)r.ne0,
+                         r.ne1 == kAnyRows ? "n" : std::to_string(r.ne1).c_str());
+                err = msg;
+                return false;
+            }
+        }
+        /* The encoder adds row 0 of this table to every token as a view, which
+         * assumes single-precision rows. Refusing here is better than reading a
+         * quantised row as floats. */
+        const ggml_tensor* type_embd = ggml_get_tensor(blob_ctx_, "token_type_embd.weight");
+        if (type_embd->type != GGML_TYPE_F32) {
+            err = "token_type_embd.weight is not F32";
+            return false;
+        }
+        return true;
     }
 
     /* Token ids that must never reach the sparse vector: padding, and the
@@ -402,41 +498,44 @@ private:
     /* Every tensor the encoder or the head needs. A file missing any of them is
      * refused by name: a SPLADE vector computed from half an encoder is a
      * vector nobody can debug. */
-    void collect_required_names(std::vector<std::string>& names) {
-        add(names, "token_embd.weight");
-        add(names, "position_embd.weight");
-        add(names, "token_type_embd.weight");
-        add(names, "embd_ln.weight");
-        add(names, "embd_ln.bias");
+    void collect_required(std::vector<RequiredTensor>& out) {
+        const int64_t E = hp_.n_embd, F = hp_.n_ff;
+        /* Projections are stored [in, out]: ggml_mul_mat(weight, x) needs
+         * weight->ne[0] == x->ne[0]. */
+        add(out, "token_embd.weight", E, hp_.n_vocab);
+        add(out, "position_embd.weight", E, hp_.n_pos);
+        add(out, "token_type_embd.weight", E, kAnyRows);
+        add(out, "embd_ln.weight", E);
+        add(out, "embd_ln.bias", E);
         for (int il = 0; il < hp_.n_layer; il++) {
-            add_layer(names, il, "ln1.weight");
-            add_layer(names, il, "ln1.bias");
-            add_layer(names, il, "attn.q.weight");
-            add_layer(names, il, "attn.q.bias");
-            add_layer(names, il, "attn.k.weight");
-            add_layer(names, il, "attn.k.bias");
-            add_layer(names, il, "attn.v.weight");
-            add_layer(names, il, "attn.v.bias");
-            add_layer(names, il, "attn.o.weight");
-            add_layer(names, il, "attn.o.bias");
-            add_layer(names, il, "ln2.weight");
-            add_layer(names, il, "ln2.bias");
-            add_layer(names, il, "ffn.fc1.weight");
-            add_layer(names, il, "ffn.fc1.bias");
-            add_layer(names, il, "ffn.fc2.weight");
-            add_layer(names, il, "ffn.fc2.bias");
+            add_layer(out, il, "ln1.weight", E);
+            add_layer(out, il, "ln1.bias", E);
+            add_layer(out, il, "attn.q.weight", E, E);
+            add_layer(out, il, "attn.q.bias", E);
+            add_layer(out, il, "attn.k.weight", E, E);
+            add_layer(out, il, "attn.k.bias", E);
+            add_layer(out, il, "attn.v.weight", E, E);
+            add_layer(out, il, "attn.v.bias", E);
+            add_layer(out, il, "attn.o.weight", E, E);
+            add_layer(out, il, "attn.o.bias", E);
+            add_layer(out, il, "ln2.weight", E);
+            add_layer(out, il, "ln2.bias", E);
+            add_layer(out, il, "ffn.fc1.weight", E, F);
+            add_layer(out, il, "ffn.fc1.bias", F);
+            add_layer(out, il, "ffn.fc2.weight", F, E);
+            add_layer(out, il, "ffn.fc2.bias", E);
         }
-        add(names, "mlm_transform.weight");
-        add(names, "mlm_transform.bias");
-        add(names, "mlm_ln.weight");
-        add(names, "mlm_ln.bias");
-        add(names, "mlm_bias");
+        add(out, "mlm_transform.weight", E, E);
+        add(out, "mlm_transform.bias", E);
+        add(out, "mlm_ln.weight", E);
+        add(out, "mlm_ln.bias", E);
+        add(out, "mlm_bias", hp_.n_vocab);
 
         /* Report the first absent tensor rather than crashing later on a null
          * pointer, and say which one. */
-        for (const std::string& n : names) {
-            if (!probe_.has_tensor(n.c_str())) {
-                missing_ = n;
+        for (const RequiredTensor& r : out) {
+            if (!probe_.has_tensor(r.name.c_str())) {
+                missing_ = r.name;
                 return;
             }
         }
@@ -473,7 +572,7 @@ private:
     }
 
 /* Name of the first required tensor that was absent, empty when all were
-     * present. Set by collect_required_names(). */
+     * present. Set by collect_required(). */
     const std::string& missing_tensor() const { return missing_; }
 
 private:

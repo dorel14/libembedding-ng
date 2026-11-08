@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.11.0
+Version: 1.12.0
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -204,6 +204,27 @@ with minimal overhead (~13%).
 | **C++17 compiler** | Build only | GCC 7+, Clang 5+, MSVC 2017+ |
 
 No Rust toolchain required. The tokenizer is implemented natively in C++ (supports WordPiece and BPE models via `tokenizer.json`).
+
+### CPU requirements
+
+The x86-64 wheels and release binaries run on any x86-64 CPU; no AVX or AVX2 is
+assumed:
+
+- libembedding's own code (tokenizer, pooling, SPLADE pooling, similarity) is
+  compiled for the x86-64 baseline. CI runs the unit tests under Intel SDE as
+  Nehalem (SSE4.2), Sandy Bridge (AVX), Haswell (AVX2), Skylake-X (AVX-512) and
+  Ice Lake (AVX-512 VNNI).
+- GGUF models run on ggml, which ships one CPU library per instruction-set level
+  (`ggml-cpu-x64` … `ggml-cpu-alderlake`) and loads the best one for the machine
+  at run time. `libembedding.ggml_cpu_features()` (C: `lembed_ggml_cpu_features()`)
+  names the one it picked; record it with any GGUF benchmark.
+- ONNX models run on ONNX Runtime, which selects its own kernels at run time.
+
+The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
+a local build that will never leave the machine,
+`-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for AVX2; the
+hot paths are in ONNX Runtime and ggml, and on an i7-1065G7 the difference was
+within noise (dense, sparse ONNX and sparse GGUF, 0.98–1.01×).
 
 ### Windows: libcurl runtime DLL
 
@@ -2704,6 +2725,27 @@ This guide covers libembedding's advanced performance features: session pooling,
 4. [llama.cpp / GGUF Performance](#llamacpp--gguf-performance)
 5. [Benchmarks](#benchmarks)
 6. [Best Practices](#best-practices)
+7. [CPU Requirements](#cpu-requirements)
+
+---
+
+## CPU Requirements
+
+The x86-64 wheels and release binaries run on any x86-64 CPU; no AVX or AVX2 is assumed:
+
+- libembedding's own code (tokenizer, pooling, SPLADE pooling, similarity) is compiled for the
+  x86-64 baseline; CI runs the unit tests under Intel SDE as Nehalem (SSE4.2), Sandy Bridge (AVX),
+  Haswell (AVX2), Skylake-X (AVX-512) and Ice Lake (AVX-512 VNNI);
+- GGUF models run on ggml, which ships one CPU library per instruction-set level (`ggml-cpu-x64` …
+  `ggml-cpu-alderlake`) and loads the best one for the machine at run time;
+  `libembedding.ggml_cpu_features()` (C: `lembed_ggml_cpu_features()`) names it. Record it with any
+  GGUF benchmark;
+- ONNX models run on ONNX Runtime, which selects its own kernels at run time.
+
+The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For a local build that
+will never leave the machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for
+AVX2. The hot paths are in ONNX Runtime and ggml, and on an i7-1065G7 the difference stayed within
+noise (dense, sparse ONNX, sparse GGUF: 0.98–1.01×).
 
 ---
 
@@ -6466,6 +6508,27 @@ Ce guide couvre les fonctionnalités avancées de performance de libembedding : 
 4. [Performance llama.cpp / GGUF](#performance-llamacpp--gguf)
 5. [Benchmarks](#benchmarks)
 6. [Bonnes pratiques](#bonnes-pratiques)
+7. [Prérequis CPU](#prérequis-cpu)
+
+---
+
+## Prérequis CPU
+
+Les wheels et binaires x86-64 publiés tournent sur tout CPU x86-64, sans AVX ni AVX2 supposés :
+
+- le code propre à libembedding (tokenizer, pooling, pooling SPLADE, similarité) est compilé pour la
+  base x86-64 ; la CI exécute les tests unitaires sous Intel SDE en Nehalem (SSE4.2), Sandy Bridge
+  (AVX), Haswell (AVX2), Skylake-X (AVX-512) et Ice Lake (AVX-512 VNNI) ;
+- les modèles GGUF tournent sur ggml, livré avec une bibliothèque CPU par niveau de jeu
+  d'instructions (`ggml-cpu-x64` … `ggml-cpu-alderlake`) : la meilleure pour la machine est chargée à
+  l'exécution, et `libembedding.ggml_cpu_features()` (C : `lembed_ggml_cpu_features()`) indique
+  laquelle. À consigner avec tout benchmark GGUF ;
+- les modèles ONNX tournent sur ONNX Runtime, qui choisit ses noyaux à l'exécution.
+
+La wheel macOS est arm64 (Apple Silicon, macOS 14 ou plus), compilée nativement. Pour un build local
+qui ne quittera pas la machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compile le code de libembedding en
+AVX2. Les chemins chauds étant dans ONNX Runtime et ggml, l'écart mesuré sur un i7-1065G7 est resté
+dans le bruit (dense, sparse ONNX, sparse GGUF : 0,98 à 1,01×).
 
 ---
 
@@ -9640,11 +9703,12 @@ séquence plus longue indexerait hors de la table.
 
 ## 5. Mesures
 
-Critère LE-9.6 : cosinus ≥ 0.90 entre le sparse GGUF et le sparse ONNX, sur les
-mêmes textes.
+Critère : cosinus ≥ 0.995 entre le sparse GGUF et le sparse ONNX, sur les
+mêmes textes (le critère LE-9.6 d'origine, 0.90, laissait passer une LayerNorm
+cassée ; le seuil garde dix fois l'écart mesuré comme marge).
 
 ```
-sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.90)
+sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.995)
 ```
 
 Mesuré sur `cstr/splade-pp-en-v1-q8_0.gguf` (Q8_0, ~111 Mo) contre

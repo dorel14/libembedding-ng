@@ -15,6 +15,27 @@ Ce guide couvre les fonctionnalités avancées de performance de libembedding : 
 4. [Performance llama.cpp / GGUF](#performance-llamacpp--gguf)
 5. [Benchmarks](#benchmarks)
 6. [Bonnes pratiques](#bonnes-pratiques)
+7. [Prérequis CPU](#prérequis-cpu)
+
+---
+
+## Prérequis CPU
+
+Les wheels et binaires x86-64 publiés tournent sur tout CPU x86-64, sans AVX ni AVX2 supposés :
+
+- le code propre à libembedding (tokenizer, pooling, pooling SPLADE, similarité) est compilé pour la
+  base x86-64 ; la CI exécute les tests unitaires sous Intel SDE en Nehalem (SSE4.2), Sandy Bridge
+  (AVX), Haswell (AVX2), Skylake-X (AVX-512) et Ice Lake (AVX-512 VNNI) ;
+- les modèles GGUF tournent sur ggml, livré avec une bibliothèque CPU par niveau de jeu
+  d'instructions (`ggml-cpu-x64` … `ggml-cpu-alderlake`) : la meilleure pour la machine est chargée à
+  l'exécution, et `libembedding.ggml_cpu_features()` (C : `lembed_ggml_cpu_features()`) indique
+  laquelle. À consigner avec tout benchmark GGUF ;
+- les modèles ONNX tournent sur ONNX Runtime, qui choisit ses noyaux à l'exécution.
+
+La wheel macOS est arm64 (Apple Silicon, macOS 14 ou plus), compilée nativement. Pour un build local
+qui ne quittera pas la machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compile le code de libembedding en
+AVX2. Les chemins chauds étant dans ONNX Runtime et ggml, l'écart mesuré sur un i7-1065G7 est resté
+dans le bruit (dense, sparse ONNX, sparse GGUF : 0,98 à 1,01×).
 
 ---
 
