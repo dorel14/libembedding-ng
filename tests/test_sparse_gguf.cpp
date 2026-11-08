@@ -33,6 +33,7 @@
 #include <libembedding/detail/sparse_batching.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -108,6 +109,9 @@ const char* kVocabTable[kVocab] = {
 const uint32_t kF32  = 0;
 const uint32_t kF16  = 1;
 const uint32_t kQ8_0 = 8;
+/* A type ggml can read but this runtime never runs: only used to check that it
+ * is refused by name. Stored like F32, four bytes per element. */
+const uint32_t kI32  = 26;
 
 const uint32_t kAlign = 32;
 
@@ -234,7 +238,7 @@ Tensor filled(const std::string& name, std::vector<int64_t> ne, float v) {
  * (ne[0] / block) * sizeof(block), which is why a Q8_0 row is 34 bytes per 32
  * values and not 32. */
 size_t row_bytes(const Tensor& t) {
-    if (t.type == kF32) return (size_t)t.ne[0] * 4u;
+    if (t.type == kF32 || t.type == kI32) return (size_t)t.ne[0] * 4u;
     if (t.type == kF16) return (size_t)t.ne[0] * 2u;
     return (size_t)(t.ne[0] / 32) * 34u;
 }
@@ -327,7 +331,7 @@ bool write_gguf(const std::string& path, const std::vector<Kv>& kvs,
         const int64_t rows = tensor_rows(t);
         for (int64_t r = 0; r < rows; r++) {
             const float* row = t.values.data() + r * t.ne[0];
-            if (t.type == kF32) {
+            if (t.type == kF32 || t.type == kI32) {
                 fwrite(row, 4, (size_t)t.ne[0], f);
             } else if (t.type == kF16) {
                 for (int64_t c = 0; c < t.ne[0]; c++) put_f16(f, row[c]);
@@ -335,6 +339,9 @@ bool write_gguf(const std::string& path, const std::vector<Kv>& kvs,
                 for (int64_t c = 0; c < t.ne[0]; c += 32) put_q8_0_block(f, row + c, 32);
             }
         }
+        /* Pad up to the next tensor's offset, so a size that is not a multiple
+         * of the alignment still leaves the blob as long as the table says. */
+        for (size_t p = bytes[i]; p % kAlign != 0; p++) fputc(0, f);
     }
 
     fclose(f);
@@ -485,6 +492,55 @@ std::string fixture(const char* name, ModelVariant variant) {
         g_fail++;
         return std::string();
     }
+    return path;
+}
+
+/* A plain model with one deliberate defect, applied by `mutate` to the key/value
+ * list and the tensor list before the file is written. */
+template <typename Mutate>
+std::string mutated_fixture(const char* name, Mutate mutate) {
+    std::vector<Kv> kvs;
+    std::vector<Tensor> tensors;
+    build_model(kvs, tensors, VARIANT_PLAIN);
+    mutate(kvs, tensors);
+
+    const std::string path = tmpdir() + "/lembed_sparse_gguf_" + name + ".gguf";
+    if (!write_gguf(path, kvs, tensors)) {
+        fprintf(stderr, "fixture setup failure: cannot write %s\n", path.c_str());
+        g_fail++;
+        return std::string();
+    }
+    return path;
+}
+
+Tensor* find_tensor(std::vector<Tensor>& tensors, const std::string& name) {
+    for (Tensor& t : tensors) {
+        if (t.name == name) return &t;
+    }
+    return nullptr;
+}
+
+void set_u32(std::vector<Kv>& kvs, const std::string& key, int64_t v) {
+    for (Kv& kv : kvs) {
+        if (kv.key == key) kv.i = v;
+    }
+}
+
+/* A copy of a well-formed fixture cut to `keep` of its bytes. */
+std::string truncated_fixture(const std::string& src, double keep) {
+    FILE* in = fopen(src.c_str(), "rb");
+    if (!in) return std::string();
+    std::vector<char> data;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) data.insert(data.end(), buf, buf + n);
+    fclose(in);
+
+    const std::string path = tmpdir() + "/lembed_sparse_gguf_truncated.gguf";
+    FILE* out = fopen(path.c_str(), "wb");
+    if (!out) return std::string();
+    fwrite(data.data(), 1, (size_t)((double)data.size() * keep), out);
+    fclose(out);
     return path;
 }
 
@@ -1003,6 +1059,90 @@ static void test_missing_vocab_size_is_refused(void) {
     if (ctx) lembed_sparse_text_embedding_free(ctx);
 }
 
+/* Loads `path`, expects a refusal whose message contains `needle`, and expects
+ * it fast: every malformed header must be turned down before the runtime
+ * allocates or loops on what the header claims. */
+static void expect_refused(const std::string& path, const char* needle, const char* label) {
+    if (path.empty()) return;
+    lembed_sparse_options_t opts = lembed_sparse_options_default();
+    lembed_sparse_embedding_ctx_t* ctx = nullptr;
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const lembed_status_t s =
+        lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx);
+    const double secs =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+
+    CHECK(s != LEMBED_OK && ctx == nullptr, label);
+    const char* err = lembed_last_error();
+    const bool named = err != nullptr && std::string(err).find(needle) != std::string::npos;
+    if (!named) {
+        fprintf(stderr, "  expected '%s' in: %s\n", needle, err ? err : "(no message)");
+    }
+    CHECK(named, "the refusal says why");
+    CHECK(secs < 1.0, "the refusal is immediate");
+    if (ctx) lembed_sparse_text_embedding_free(ctx);
+}
+
+/* Malformed files are refused with a reason before anything is allocated: a
+ * wrong shape would otherwise abort the process inside ggml, and an absurd
+ * dimension would size an allocation or a loop. */
+static void test_malformed_files_are_refused(void) {
+    expect_refused(
+        mutated_fixture("badshape", [](std::vector<Kv>&, std::vector<Tensor>& t) {
+            Rng rng(1u);
+            Tensor* q = find_tensor(t, "enc.1.attn.q.weight");
+            if (q) *q = rnd(q->name, {kHidden, kHidden / 2}, rng);
+        }),
+        "enc.1.attn.q.weight", "a projection of the wrong shape is refused");
+
+    expect_refused(
+        mutated_fixture("badvocabrows", [](std::vector<Kv>&, std::vector<Tensor>& t) {
+            Tensor* b = find_tensor(t, "mlm_bias");
+            if (b) *b = filled(b->name, {kVocab - 1}, 0.0f);
+        }),
+        "mlm_bias", "a head bias that does not span the vocabulary is refused");
+
+    expect_refused(
+        mutated_fixture("badtype", [](std::vector<Kv>&, std::vector<Tensor>& t) {
+            Tensor* fc1 = find_tensor(t, "enc.0.ffn.fc1.weight");
+            if (fc1) fc1->type = kI32;
+        }),
+        "i32", "a tensor type the runtime does not support is refused by name");
+
+    expect_refused(
+        mutated_fixture("hugelayers", [](std::vector<Kv>& kv, std::vector<Tensor>&) {
+            set_u32(kv, "bert.num_hidden_layers", 2147483647);
+        }),
+        "block_count", "an absurd block_count is refused");
+
+    expect_refused(
+        mutated_fixture("unbackedlayers", [](std::vector<Kv>& kv, std::vector<Tensor>&) {
+            set_u32(kv, "bert.num_hidden_layers", 200);
+        }),
+        "layers but holds only", "a block_count the tensor table cannot back is refused");
+
+    expect_refused(
+        mutated_fixture("hugevocab", [](std::vector<Kv>& kv, std::vector<Tensor>&) {
+            set_u32(kv, "bert.vocab_size", 2000000000);
+        }),
+        "vocab_size", "an absurd vocab_size is refused");
+
+    expect_refused(
+        mutated_fixture("shortvocab", [](std::vector<Kv>& kv, std::vector<Tensor>&) {
+            for (Kv& k : kv) {
+                if (k.key == "tokenizer.ggml.tokens") k.arr_str.pop_back();
+            }
+        }),
+        "vocabulary holds", "a vocabulary shorter than vocab_size is refused");
+
+    const std::string plain = fixture("truncsrc", VARIANT_PLAIN);
+    if (!plain.empty()) {
+        expect_refused(truncated_fixture(plain, 0.5), "cannot read GGUF",
+                       "a truncated file is refused");
+    }
+}
+
 /* Nonsense input is a refusal with a message, never a crash. */
 static void test_bad_input(void) {
     lembed_sparse_options_t opts = lembed_sparse_options_default();
@@ -1138,6 +1278,7 @@ int main(void) {
     test_special_tokens_are_removed();
     test_headless_file_is_refused();
     test_missing_vocab_size_is_refused();
+    test_malformed_files_are_refused();
     test_bad_input();
     test_create_from_path_routes_gguf();
     test_quantised_weights();
