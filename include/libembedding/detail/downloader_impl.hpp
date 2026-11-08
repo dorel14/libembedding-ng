@@ -126,11 +126,64 @@ static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow
     return 0;
 }
 
-/* Download a single file from HuggingFace */
+/* CA certificates for TLS on Linux and Android.
+ *
+ * libcurl looks for CA certificates at a path fixed when it was built. The
+ * Linux wheels bundle the libcurl of their build image: AlmaLinux's points to
+ * /etc/pki/tls/certs/ca-bundle.crt, which Debian and Ubuntu do not have, so
+ * every HTTPS download failed there (measured on the aarch64 wheel). Instead,
+ * honour SSL_CERT_FILE / CURL_CA_BUNDLE, then use the first bundle that exists
+ * on this machine. Windows and macOS keep libcurl's own default. */
+struct CaSource {
+    std::string file;   /* for CURLOPT_CAINFO, empty if none */
+    std::string dir;    /* for CURLOPT_CAPATH, empty if none */
+};
+
+inline CaSource find_ca_source() {
+    CaSource ca;
+#if defined(__linux__) || defined(__ANDROID__)
+    for (const char* var : {"SSL_CERT_FILE", "CURL_CA_BUNDLE"}) {
+        const char* v = std::getenv(var);
+        if (v && v[0] && file_exists(v)) {
+            ca.file = v;
+            return ca;
+        }
+    }
+    static const char* const kBundles[] = {
+        "/etc/ssl/certs/ca-certificates.crt",                 /* Debian, Ubuntu, Alpine */
+        "/etc/pki/tls/certs/ca-bundle.crt",                   /* RHEL, Fedora, AlmaLinux */
+        "/etc/ssl/ca-bundle.pem",                             /* openSUSE */
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",  /* RHEL 7+ */
+        "/etc/ssl/cert.pem",                                  /* Alpine, others */
+    };
+    for (const char* path : kBundles) {
+        if (file_exists(path)) {
+            ca.file = path;
+            return ca;
+        }
+    }
+    /* Android ships hashed certificates in a directory, not a bundle file. */
+    std::error_code ec;
+    if (std::filesystem::is_directory("/system/etc/security/cacerts", ec)) {
+        ca.dir = "/system/etc/security/cacerts";
+    }
+#endif
+    return ca;
+}
+
+/* Resolved once: the bundle does not move while the process runs. */
+inline const CaSource& ca_source() {
+    static const CaSource ca = find_ca_source();
+    return ca;
+}
+
+/* Download a single file from HuggingFace.
+ * error_out, when not null, receives libcurl's reason for a failure. */
 inline bool download_hf_file(const std::string& repo, const std::string& filename,
                               const std::string& dest_path,
                               download_progress_fn progress_fn = nullptr,
-                              void* progress_userdata = nullptr) {
+                              void* progress_userdata = nullptr,
+                              std::string* error_out = nullptr) {
     static std::atomic<unsigned long long> temp_sequence(0);
     const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto thread_id = std::hash<std::thread::id>()(std::this_thread::get_id());
@@ -166,6 +219,14 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "libembedding/" LIBEMBEDDING_VERSION_STRING);
     curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
 
+    const CaSource& ca = ca_source();
+    if (!ca.file.empty()) curl_easy_setopt(curl, CURLOPT_CAINFO, ca.file.c_str());
+    if (!ca.dir.empty()) curl_easy_setopt(curl, CURLOPT_CAPATH, ca.dir.c_str());
+
+    char errbuf[CURL_ERROR_SIZE];
+    errbuf[0] = '\0';
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+
     ProgressData pd = { progress_fn, progress_userdata };
     if (progress_fn) {
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
@@ -178,6 +239,10 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
     fclose(fp);
 
     if (res != CURLE_OK) {
+        if (error_out) {
+            *error_out = curl_easy_strerror(res);
+            if (errbuf[0]) *error_out += std::string(": ") + errbuf;
+        }
         remove(tmp_path.c_str());
         return false;
     }
@@ -259,9 +324,11 @@ inline std::string ensure_model(const std::string& repo_code,
         }
 
         /* tokenizer/config files are optional */
-        bool ok = download_hf_file(repo_code, f, dest, pfn, nullptr);
+        std::string reason;
+        bool ok = download_hf_file(repo_code, f, dest, pfn, nullptr, &reason);
         if (!ok && !is_optional_file(f)) {
-            throw std::runtime_error("Failed to download: " + repo_code + "/" + f);
+            throw std::runtime_error("Failed to download: " + repo_code + "/" + f +
+                                     (reason.empty() ? "" : " (" + reason + ")"));
         }
     }
 

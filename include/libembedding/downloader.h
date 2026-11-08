@@ -248,9 +248,11 @@ lembed_status_t lembed_ensure_gguf_model(
 #ifndef LIBEMBEDDING_NO_DOWNLOAD
         /* Download the file with optional progress callback */
         lembed::detail::download_progress_fn pfn = show_progress ? &gguf_download_progress : nullptr;
-        bool ok = lembed::detail::download_hf_file(repo, filename, dest, pfn, nullptr);
+        std::string reason;
+        bool ok = lembed::detail::download_hf_file(repo, filename, dest, pfn, nullptr, &reason);
         if (!ok) {
-            lembed::detail::set_error(std::string("Failed to download GGUF model: ") + repo + "/" + filename);
+            lembed::detail::set_error(std::string("Failed to download GGUF model: ") + repo + "/" + filename +
+                                      (reason.empty() ? "" : " (" + reason + ")"));
             return LEMBED_ERROR_DOWNLOAD;
         }
 #else
