@@ -44,13 +44,27 @@ jobs:
           pyright python/src
 
       # ── Platform-specific system dependencies ────────────────────
+      # Linux aarch64 builds in a manylinux_2_28 container instead (below):
+      # ggml's armv9.2 variants need GCC 14, and a GCC 14 on this runner would
+      # link a libstdc++ that pushes the wheel to manylinux_2_39, which the
+      # runner itself cannot install.
       - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libcurl4-openssl-dev
-          curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
+          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
           echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
+          echo "CURL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
+
+      - name: Build and repair wheel in manylinux_2_28 (Linux aarch64)
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: |
+          docker run --rm -v "$PWD:/io" \
+            -e ONNXRUNTIME_VERSION="${{ env.ONNXRUNTIME_VERSION }}" \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            quay.io/pypa/manylinux_2_28_aarch64 \
+            bash /io/scripts/build_wheel_manylinux.sh
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -104,6 +118,7 @@ jobs:
 
       # ── Build the C++ shared library ─────────────────────────────
       - name: Build shared library
+        if: runner.os != 'Linux' || runner.arch == 'X64'
         shell: bash
         env:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
@@ -144,12 +159,12 @@ jobs:
 
       # ── Copy shared library into the Python package ──────────────
       - name: Copy shared libraries (Linux/macOS)
-        if: runner.os != 'Windows'
+        if: runner.os == 'macOS' || (runner.os == 'Linux' && runner.arch == 'X64')
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             ext=".so"
             ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
-            curl_lib_dir="/usr/lib/x86_64-linux-gnu"
+            curl_lib_dir="$CURL_LIB_DIR"
           else
             ext=".dylib"
             ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
@@ -272,6 +287,7 @@ jobs:
 
       # ── Build the Python wheel ───────────────────────────────────
       - name: Build wheel
+        if: runner.os != 'Linux' || runner.arch == 'X64'
         shell: bash
         run: |
           cd python
@@ -287,7 +303,7 @@ jobs:
 
       # ── Repair wheel: vendor onnxruntime into the wheel ──────────
       - name: Repair wheel with auditwheel (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
           # Install newer patchelf (>=0.14.5) for auditwheel 6.8+
           wget -q https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz
