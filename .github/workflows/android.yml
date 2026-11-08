@@ -105,6 +105,12 @@ jobs:
           CIBW_BUILD_FRONTEND: build
           CIBW_BEFORE_BUILD_ANDROID: bash {project}/scripts/build_android_libs.sh
           CIBW_ENVIRONMENT_ANDROID: PIP_EXTRA_INDEX_URL=https://chaquo.com/pypi-13.1
+          # No repair: every native library is already in the package, linked
+          # to its siblings through RUNPATH=$ORIGIN, and the wheel is already
+          # tagged android_24_*. auditwheel only searches the NDK and failed
+          # with "libggml-base.so could not be located". The emulator test
+          # catches any dependency that would really be missing.
+          CIBW_REPAIR_WHEEL_COMMAND_ANDROID: ""
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_SOURCES: python/tests
           CIBW_TEST_COMMAND: python -m pytest python/tests -m "not network" -q -p no:cacheprovider
