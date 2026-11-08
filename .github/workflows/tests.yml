@@ -135,3 +135,88 @@ jobs:
         run: |
           Set-Location build
           ctest --output-on-failure -C Release
+
+      # The shipped binaries must run on any x86-64 CPU (no AVX2 assumed in
+      # libembedding's own code; ggml picks its CPU variant at run time).
+      # Intel SDE emulates older and newer CPUs: an instruction the emulated
+      # CPU lacks stops the test with SDE-ERROR and a non-zero exit code.
+      # nhm = Nehalem (SSE4.2), snb = Sandy Bridge (AVX), hsw = Haswell (AVX2),
+      # skx = Skylake-X (AVX-512), icl = Ice Lake (AVX-512 VNNI).
+      # By using Intel SDE you accept its license (shipped in the archive).
+      - name: Run unit tests on emulated CPUs (Intel SDE, Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -fsSL -o sde.tar.xz https://downloadmirror.intel.com/859732/sde-external-9.58.0-2025-06-16-lin.tar.xz
+          echo "f849acecad4c9b108259c643b2688fd65c35723cd23368abe5dd64b917cc18c0  sde.tar.xz" | sha256sum -c -
+          tar -xf sde.tar.xz
+          sde=$(ls -d sde-external-*-lin)/sde64
+          failed=0
+          for cpu in nhm snb hsw skx icl; do
+            for t in test_similarity test_pooling test_tokenizer test_sparse_gguf; do
+              if out=$("$sde" -$cpu -- "build/tests/$t" 2>&1); then
+                echo "PASS  -$cpu  $t: $(echo "$out" | grep -E '[0-9]+ passed' | tail -1)"
+              else
+                echo "FAIL  -$cpu  $t"; echo "$out" | grep -E 'SDE-ERROR|FAIL' | head -5; failed=1
+              fi
+            done
+          done
+          exit $failed
+
+      - name: Run unit tests on emulated CPUs (Intel SDE, Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          # Every phase is timestamped and bounded: a silent hang must show
+          # where it happened instead of eating the step timeout.
+          function Log($msg) { Write-Host ("[{0:HH:mm:ss}] {1}" -f (Get-Date), $msg) }
+          $ProgressPreference = "SilentlyContinue"
+          Log "downloading Intel SDE"
+          curl.exe -fsSL --retry 3 --connect-timeout 30 --max-time 300 -o sde.tar.xz `
+            "https://downloadmirror.intel.com/859732/sde-external-9.58.0-2025-06-16-win.tar.xz"
+          if ($LASTEXITCODE -ne 0) { throw "Intel SDE download failed (curl exit $LASTEXITCODE)" }
+          if ((Get-FileHash sde.tar.xz -Algorithm SHA256).Hash -ne "EBB8B3B63FCB0B6C1F9721118BA4883703D2AED9E0DB2DEFED4E44FBA78D9CA9") {
+            throw "Intel SDE checksum mismatch"
+          }
+          # The runner's bsdtar hangs on .tar.xz (no built-in xz there), so
+          # 7-Zip decompresses and bsdtar only unpacks the plain tar.
+          Log "decompressing with 7z"
+          7z x -y sde.tar.xz | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Intel SDE decompression failed (7z exit $LASTEXITCODE)" }
+          Log "extracting sde.tar"
+          & "$env:SystemRoot\System32\tar.exe" -xf sde.tar
+          if ($LASTEXITCODE -ne 0) { throw "Intel SDE extraction failed (tar exit $LASTEXITCODE)" }
+          $sde = (Resolve-Path "sde-external-*-win\sde.exe").Path
+          $bin = (Resolve-Path "build\tests\Release").Path
+          Log "sde: $sde, tests: $bin"
+          # A failing or hung test is reported and counted, not thrown on.
+          # Each run gets its own timeout: a hang must not eat the job limit.
+          $ErrorActionPreference = "Continue"
+          $failed = $false
+          foreach ($cpu in "nhm", "snb", "hsw", "skx", "icl") {
+            foreach ($t in "test_similarity", "test_pooling", "test_tokenizer", "test_sparse_gguf") {
+              Log "start -$cpu $t"
+              $p = Start-Process -FilePath $sde -NoNewWindow -PassThru `
+                -ArgumentList "-$cpu", "--", "$bin\$t.exe" `
+                -RedirectStandardOutput "sde-out.txt" -RedirectStandardError "sde-err.txt"
+              if (-not $p.WaitForExit(180000)) {
+                $p.Kill($true)
+                Write-Host "FAIL  -$cpu  $t (timeout)"
+                Get-Content sde-out.txt, sde-err.txt -Tail 10 | ForEach-Object { Write-Host "  $_" }
+                $failed = $true
+                continue
+              }
+              $out = Get-Content sde-out.txt, sde-err.txt
+              if ($p.ExitCode -eq 0) {
+                $sum = $out | Select-String "\d+ passed" | Select-Object -Last 1
+                Write-Host "PASS  -$cpu  ${t}: $sum"
+              } else {
+                Write-Host "FAIL  -$cpu  $t (exit $($p.ExitCode))"
+                $out | Select-String "SDE-ERROR|FAIL" | Select-Object -First 5 | ForEach-Object { Write-Host "  $_" }
+                $failed = $true
+              }
+            }
+          }
+          if ($failed) { exit 1 }
+          exit 0
