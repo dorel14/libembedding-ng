@@ -36,7 +36,8 @@ def _preload_android_chaquopy_libs() -> None:
         lib_dir = Path(base) / "chaquopy" / "lib"
         if not lib_dir.is_dir():
             continue
-        pending = sorted(lib_dir.glob("*.so"))
+        # *.so* also matches versioned names: openblas needs libgfortran.so.3.
+        pending = sorted(lib_dir.glob("*.so*"))
         # The dependency order between them is unknown: retry until a pass
         # loads nothing new. A library that never loads is left to the
         # importing extension, whose error is the one users should see.
