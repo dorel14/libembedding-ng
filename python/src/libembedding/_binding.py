@@ -10,9 +10,53 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 import warnings
 from pathlib import Path
 
+
+def _preload_android_chaquopy_libs() -> None:
+    """Make Chaquopy's shared libraries visible on Android outside Chaquopy.
+
+    PyPI has no Android cffi or numpy; Chaquopy's index provides them, and
+    their extensions link libraries (libffi.so for cffi, libopenblas.so for
+    numpy) that companion wheels install under site-packages/chaquopy/lib.
+    Chaquopy's app runtime adds that directory to the loader path; plain
+    CPython on Android (PEP 738: BeeWare, cibuildwheel's testbed) does not,
+    and importing cffi or numpy fails with 'library "libffi.so" not found'.
+    Loaded once by absolute path with RTLD_GLOBAL, the Android linker reuses
+    them for the extensions' dependencies. This runs before libembedding
+    imports cffi or numpy; it cannot help a program that imported numpy first.
+    """
+    if sys.platform != "android":
+        return
+    import ctypes
+
+    for base in sys.path:
+        lib_dir = Path(base) / "chaquopy" / "lib"
+        if not lib_dir.is_dir():
+            continue
+        # *.so* also matches versioned names: openblas needs libgfortran.so.3.
+        pending = sorted(lib_dir.glob("*.so*"))
+        # The dependency order between them is unknown: retry until a pass
+        # loads nothing new. A library that never loads is left to the
+        # importing extension, whose error is the one users should see.
+        while pending:
+            failed = []
+            for path in pending:
+                try:
+                    ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL)
+                except OSError:
+                    failed.append(path)
+            if len(failed) == len(pending):
+                break
+            pending = failed
+        return
+
+
+_preload_android_chaquopy_libs()
+
+# Must follow the Android preload above.
 import cffi
 
 ffi = cffi.FFI()

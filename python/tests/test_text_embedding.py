@@ -175,6 +175,7 @@ def test_similarity_functions():
     assert abs(euclidean_distance(c, d) - 1.41421) < 1e-4
 
 
+@pytest.mark.network
 def test_text_embedding_from_mode():
     model = TextEmbedding.from_mode("balanced")
     assert model.dim == 384
@@ -183,6 +184,7 @@ def test_text_embedding_from_mode():
     model.close()
 
 
+@pytest.mark.network
 def test_text_embedding_from_mode_fast():
     model = TextEmbedding.from_mode("fast")
     assert model.dim > 0

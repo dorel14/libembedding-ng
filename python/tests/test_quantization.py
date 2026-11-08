@@ -56,6 +56,7 @@ def _family_with_kinds(*kinds):
     return None
 
 
+@pytest.mark.network
 class TestModelResolution:
     """A model name must load its own weights."""
 
@@ -80,6 +81,7 @@ class TestModelResolution:
         model.close()
 
 
+@pytest.mark.network
 class TestQuantizationSelection:
     """quantization= must select the weights, not just session options."""
 
