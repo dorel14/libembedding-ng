@@ -90,7 +90,17 @@ python="/opt/python/${PYTHON_TAG}/bin/python"
 raw_dir=$(mktemp -d)
 (cd python && "$python" -m build --wheel --outdir "$raw_dir")
 mkdir -p python/dist
-# auditwheel grafts libcurl and its dependencies and rewrites the rpaths; it
-# fails if any symbol exceeds the manylinux_2_28 policy.
-auditwheel repair --plat "manylinux_2_28_$(uname -m)" -w python/dist "$raw_dir"/*.whl
+# Highest glibc / libstdc++ symbol version each bundled library needs: the
+# wheel's manylinux tag is set by the most demanding one, which may be a
+# prebuilt dependency (ONNX Runtime) rather than our own code.
+echo "== symbol versions required per library"
+for lib in "$pkg"/*.so; do
+    glibc=$(objdump -T "$lib" | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -n 1 || true)
+    glibcxx=$(objdump -T "$lib" | grep -oE 'GLIBCXX_[0-9.]+' | sort -uV | tail -n 1 || true)
+    echo "$(basename "$lib"): ${glibc:-none} ${glibcxx:-}"
+done
+auditwheel show "$raw_dir"/*.whl
+# Without --plat, auditwheel tags the lowest policy the wheel satisfies; it
+# grafts libcurl and its dependencies and rewrites the rpaths.
+auditwheel repair -w python/dist "$raw_dir"/*.whl
 auditwheel show python/dist/*.whl
