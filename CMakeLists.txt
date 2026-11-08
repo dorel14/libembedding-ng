@@ -77,9 +77,10 @@ if(WIN32)
 
     # Disable conflicting min/max macros globally on Windows
     add_compile_definitions(NOMINMAX)
-else()
-    find_package(CURL REQUIRED)
 endif()
+# libcurl elsewhere is found below, only when downloading is enabled: an
+# unconditional find_package(CURL REQUIRED) here made -DLIBEMBEDDING_NO_DOWNLOAD=ON
+# fail to configure on platforms without libcurl (Android).
 
 # -------------------------------------------------------------------------
 # libcurl runtime DLL (Windows)
@@ -218,6 +219,14 @@ if(LIBEMBEDDING_CPU_DISPATCH)
 else()
     set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
     set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+endif()
+
+# Android: ggml's OpenMP build links the NDK's libomp.so, which is not on the
+# device ("library libomp.so not found", measured on an API 30 emulator) and
+# which upstream does not support shipping either (docs/android.md). Upstream's
+# Android release builds with GGML_OPENMP=OFF; ggml then uses its own threadpool.
+if(ANDROID)
+    set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 endif()
 
 # llama.cpp's upstream install rules assume the unpruned source tree layout.
