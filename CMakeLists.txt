@@ -39,6 +39,14 @@ else()
     set(_lembed_cpu_dispatch_default ON)
 endif()
 option(LIBEMBEDDING_CPU_DISPATCH "Build every ggml CPU variant and select one at run time" ${_lembed_cpu_dispatch_default})
+# libembedding's own code (pooling, similarity, SPLADE pooling, tokenizer...)
+# targets the x86-64 baseline so that the shipped binaries run on any x64 CPU,
+# as the ggml CPU dispatch above does: built with AVX2, they stop with an
+# illegal instruction on CPUs without it (verified under Intel SDE on Nehalem
+# and Sandy Bridge). The hot paths are in ONNX Runtime and ggml, which select
+# their kernels at run time. ON is for local builds that never leave the
+# machine, never for wheels or release binaries.
+option(LIBEMBEDDING_ARCH_AVX2 "Compile libembedding's own code for AVX2 (not portable)" OFF)
 
 # =========================================================================
 # Dependencies
@@ -356,9 +364,13 @@ if(MSVC)
         $<$<CONFIG:Release>:/Oi>
         $<$<CONFIG:Release>:/Ot>
         $<$<CONFIG:Release>:/fp:fast>
-        $<$<CONFIG:Release>:/arch:AVX2>
-        $<$<CONFIG:RelWithDebInfo>:/arch:AVX2>
     )
+    if(LIBEMBEDDING_ARCH_AVX2)
+        target_compile_options(libembedding PRIVATE
+            $<$<CONFIG:Release>:/arch:AVX2>
+            $<$<CONFIG:RelWithDebInfo>:/arch:AVX2>
+        )
+    endif()
     target_compile_definitions(libembedding PRIVATE
         $<$<CONFIG:Release>:NDEBUG>
     )
@@ -367,14 +379,9 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         -O3
         -ffast-math
     )
-    # Enable AVX2/AVX-512 where available
-    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        include(CheckCXXCompilerFlag)
-        check_cxx_compiler_flag("-mavx2" _has_avx2)
-        if(_has_avx2)
-            target_compile_options(libembedding INTERFACE -mavx2)
-        endif()
-    endif()
+    # No -mavx2 here: as an INTERFACE flag it reached every consumer of the
+    # header-only library and the Python shared library. See
+    # LIBEMBEDDING_ARCH_AVX2, applied to embedding_shared only.
 endif()
 
 # =========================================================================
@@ -593,6 +600,10 @@ if(LIBEMBEDDING_BUILD_SHARED)
         CXX_VISIBILITY_PRESET default
         VISIBILITY_INLINES_HIDDEN OFF
     )
+    if(LIBEMBEDDING_ARCH_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+        target_compile_options(embedding_shared PRIVATE -mavx2 -mfma)
+    endif()
     if(APPLE)
         set_target_properties(embedding_shared PROPERTIES INSTALL_RPATH "@loader_path")
     elseif(UNIX)
