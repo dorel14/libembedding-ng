@@ -81,6 +81,45 @@ jobs:
           path: stage/
           if-no-files-found: error
 
+  # Roadmap T33b: Python wheels for Android (PEP 738, CPython 3.13+). The
+  # native libraries are built per ABI by scripts/build_android_libs.sh as the
+  # before-build step; cibuildwheel tests the x86_64 wheel on its own emulator
+  # (arm64 is built only: no fast arm64 emulator on an x86_64 runner). cffi and
+  # numpy have no Android wheels on PyPI; Chaquopy's index provides them.
+  wheel:
+    name: Python wheels (Android)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build and test Android wheels
+        env:
+          CIBW_PLATFORM: android
+          CIBW_BUILD: cp313-*
+          CIBW_ARCHS_ANDROID: arm64_v8a x86_64
+          CIBW_BUILD_FRONTEND: build
+          CIBW_BEFORE_BUILD_ANDROID: bash {project}/scripts/build_android_libs.sh
+          CIBW_ENVIRONMENT_ANDROID: PIP_EXTRA_INDEX_URL=https://chaquo.com/pypi-13.1
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_SOURCES: python/tests
+          CIBW_TEST_COMMAND: python -m pytest python/tests -m "not network" -q -p no:cacheprovider
+          CIBW_BUILD_VERBOSITY: 1
+        run: |
+          python -m pip install cibuildwheel==4.3.5
+          cibuildwheel python --output-dir wheelhouse
+          ls -la wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-android
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
   test-emulator:
     name: unit tests (x86_64 emulator)
     needs: build
