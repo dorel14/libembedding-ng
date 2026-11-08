@@ -151,8 +151,13 @@ inline std::string autotune_cache_dir() {
     }
 #else
     const char* home = std::getenv("HOME");
-    if (home) {
+    if (home && home[0]) {
         return std::string(home) + "/.cache/libembedding/autotune";
+    }
+    /* Android apps have no HOME; the runtime points TMPDIR at their cache. */
+    const char* tmp = std::getenv("TMPDIR");
+    if (tmp && tmp[0]) {
+        return std::string(tmp) + "/libembedding/autotune";
     }
 #endif
     return "./libembedding_autotune_cache";
