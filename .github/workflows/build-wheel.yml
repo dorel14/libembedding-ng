@@ -56,6 +56,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install cmake curl
+          # Oldest macOS the wheel supports. ONNX Runtime 1.31's dylib is
+          # built for 14.0, so nothing lower can load it. Used by CMake
+          # (MACOSX_DEPLOYMENT_TARGET) and for the wheel's platform tag.
+          echo "MACOS_MIN_VERSION=14.0" >> "$GITHUB_ENV"
           if [ "$(uname -m)" = "arm64" ]; then
             curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-osx-arm64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
             echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-osx-arm64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
@@ -122,6 +126,13 @@ jobs:
           if [ -n "$CURL_LIBRARY" ]; then
             cmake_args+=("-DCURL_LIBRARY=$CURL_LIBRARY")
           fi
+          if [ "$(uname)" = "Darwin" ]; then
+            # Without a target, binaries require the runner's macOS version.
+            cmake_args+=(
+              "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_MIN_VERSION"
+              "-DCMAKE_OSX_ARCHITECTURES=$(uname -m)"
+            )
+          fi
           cmake .. "${cmake_args[@]}"
           # Limit parallel build on Linux/macOS to avoid OOM when compiling
           # the bundled llama.cpp with all models.
@@ -151,10 +162,14 @@ jobs:
 
           cp "build/libembedding${ext}" python/src/libembedding/
 
-          cp "${ort_lib_dir}/libonnxruntime${ext}" python/src/libembedding/ || true
-          cp "${ort_lib_dir}/libonnxruntime_providers_shared${ext}" python/src/libembedding/ || true
-
-          cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
+          # On macOS, delocate vendors ONNX Runtime and the ggml/llama dylibs
+          # under .dylibs/ from libembedding's own references; a copy here
+          # would be a second, unused ONNX Runtime. libcurl is the system one.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cp "${ort_lib_dir}/libonnxruntime${ext}" python/src/libembedding/ || true
+            cp "${ort_lib_dir}/libonnxruntime_providers_shared${ext}" python/src/libembedding/ || true
+            cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
+          fi
 
           # ggml CPU variants (CPU dispatch, default ON on Linux). They are
           # dlopen()ed, never linked, so auditwheel/delocate cannot find them
@@ -257,8 +272,17 @@ jobs:
 
       # ── Build the Python wheel ───────────────────────────────────
       - name: Build wheel
+        shell: bash
         run: |
           cd python
+          if [ "$(uname)" = "Darwin" ]; then
+            # setup-python's interpreter is universal2, so the wheel would be
+            # tagged universal2 although the binaries are single-architecture,
+            # and delocate refuses it. Tag the architecture actually built.
+            export MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN_VERSION"
+            export _PYTHON_HOST_PLATFORM="macosx-${MACOS_MIN_VERSION}-$(uname -m)"
+            export ARCHFLAGS="-arch $(uname -m)"
+          fi
           python -m build --wheel --outdir dist/
 
       # ── Repair wheel: vendor onnxruntime into the wheel ──────────
@@ -282,7 +306,23 @@ jobs:
         run: |
           pip install delocate
           cd python/dist
-          delocate-wheel -w . *.whl || true
+          # No `|| true`: a wheel delocate could not repair still loads its
+          # dylibs through absolute rpaths into this runner's build tree, so it
+          # passes every test here and is broken on any other machine.
+          delocate-wheel --require-archs "$(uname -m)" -w repaired -v *.whl
+          rm -f *.whl
+          mv repaired/*.whl .
+          rmdir repaired
+
+          # Nothing may still point into the runner (build tree, downloads).
+          mkdir check
+          unzip -q *.whl -d check
+          otool -l check/libembedding/*.dylib check/libembedding/.dylibs/*.dylib | grep -E "minos|path " || true
+          if otool -L -l check/libembedding/*.dylib check/libembedding/.dylibs/*.dylib | grep -n "/Users/runner"; then
+            echo "ERROR: the wheel still references the runner's file system"
+            exit 1
+          fi
+          rm -rf check
 
       # Windows: onnxruntime DLLs already copied into the package above
 
@@ -329,6 +369,17 @@ jobs:
           pip install "$WHEEL"
           # Reinstall pytest (uninstalled by wheel install which has no dev deps)
           pip install pytest pytest-timeout pytest-cov
+
+          # Test the installed wheel as a user gets it: without the build tree
+          # and the downloaded ONNX Runtime, which absolute rpaths left in a
+          # badly repaired wheel would otherwise still reach, and without the
+          # source package that conftest.py puts first on sys.path.
+          mv ../build ../build.moved
+          if [ -n "$ONNXRUNTIME_ROOT" ] && [ -d "$ONNXRUNTIME_ROOT" ]; then
+            mv "$ONNXRUNTIME_ROOT" "$ONNXRUNTIME_ROOT.moved"
+          fi
+          export LIBEMBEDDING_TEST_INSTALLED=1
+          (cd "$RUNNER_TEMP" && python -c "import libembedding, sys; print('Testing', libembedding.__file__); sys.exit('site-packages' not in libembedding.__file__)")
           pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
