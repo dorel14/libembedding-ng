@@ -32,6 +32,15 @@ Les wheels et binaires x86-64 publiés tournent sur tout CPU x86-64, sans AVX ni
   laquelle. À consigner avec tout benchmark GGUF ;
 - les modèles ONNX tournent sur ONNX Runtime, qui choisit ses noyaux à l'exécution.
 
+La wheel Linux aarch64 (`manylinux_2_31_aarch64`) tourne sous Linux ARM 64 bits avec glibc 2.31 ou
+plus : Raspberry Pi 3/4/5 sous Raspberry Pi OS 64 bits (bullseye, bookworm), Ubuntu 20.04 et
+suivants, AWS Graviton, Ampere. ggml fournit huit bibliothèques CPU ARM (`ggml-cpu-armv8.0_1` …
+`ggml-cpu-armv9.2_2`) et charge la meilleure à l'exécution. La CI la construit dans un conteneur
+`manylinux_2_28` et la teste sur les runners ARM de GitHub ; elle n'a pas encore été testée sur un
+Raspberry Pi physique. Raspberry Pi OS 32 bits (armv7l) n'est pas encore pris en charge. Sous Linux,
+les téléchargements HTTPS utilisent le bundle CA du système ; `SSL_CERT_FILE` ou `CURL_CA_BUNDLE`
+le remplacent.
+
 La wheel macOS est arm64 (Apple Silicon, macOS 14 ou plus), compilée nativement. Pour un build local
 qui ne quittera pas la machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compile le code de libembedding en
 AVX2. Les chemins chauds étant dans ONNX Runtime et ggml, l'écart mesuré sur un i7-1065G7 est resté
