@@ -9640,11 +9640,12 @@ séquence plus longue indexerait hors de la table.
 
 ## 5. Mesures
 
-Critère LE-9.6 : cosinus ≥ 0.90 entre le sparse GGUF et le sparse ONNX, sur les
-mêmes textes.
+Critère : cosinus ≥ 0.995 entre le sparse GGUF et le sparse ONNX, sur les
+mêmes textes (le critère LE-9.6 d'origine, 0.90, laissait passer une LayerNorm
+cassée ; le seuil garde dix fois l'écart mesuré comme marge).
 
 ```
-sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.90)
+sparse GGUF vs ONNX: min cos 0.9998, mean cos 0.9999 over 12 texts (bar 0.995)
 ```
 
 Mesuré sur `cstr/splade-pp-en-v1-q8_0.gguf` (Q8_0, ~111 Mo) contre

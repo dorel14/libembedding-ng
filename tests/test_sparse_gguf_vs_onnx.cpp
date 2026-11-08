@@ -65,7 +65,11 @@ const int kNumTexts = (int)(sizeof(kTexts) / sizeof(kTexts[0]));
 const char* kGgufRepo     = "cstr/splade-pp-en-v1-GGUF";
 const char* kGgufFilename = "splade-pp-en-v1-q8_0.gguf";
 
-const float kMinCosine = 0.90f;
+/* Measured: min 0.9998 over these texts, min 0.9995 over SciFact
+ * (docs/gguf_sparse_runtime.md, benchmarks/sparse/onnx_vs_gguf_results.md).
+ * The bar keeps ten times the measured gap as margin for Q8_0 rounding across
+ * CPUs; at 0.90 a broken LayerNorm or a missing bias would still pass. */
+const float kMinCosine = 0.995f;
 
 /* Sparse cosine over the shared ids. Neither vector is dense and neither is
  * normalised, so this has to be computed over the intersection. */
@@ -188,7 +192,7 @@ int main(void) {
 
     if (compared > 0) {
         printf("sparse GGUF vs ONNX: min cos %.4f, mean cos %.4f over %d texts "
-               "(bar %.2f)\n", worst, total / compared, compared, kMinCosine);
+               "(bar %.3f)\n", worst, total / compared, compared, kMinCosine);
     }
 
     lembed_sparse_embeddings_free(&onnx_out);
