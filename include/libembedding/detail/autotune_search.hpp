@@ -15,7 +15,7 @@
  * and make the choice depend on the visiting order.
  *
  * Auteur: David Orel
- * Version: 1.12.0
+ * Version: 1.12.1
  *
  * SPDX-License-Identifier: MIT
  */

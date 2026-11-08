@@ -3,7 +3,7 @@
  * Cross-encoder reranker C API (ONNX + llama.cpp backends)
  *
  * Auteur: David Orel
- * Version: 1.12.0
+ * Version: 1.12.1
  *
  * SPDX-License-Identifier: MIT
  */
