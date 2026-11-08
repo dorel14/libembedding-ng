@@ -1,6 +1,6 @@
 /* Flattened C declarations for cffi — derived from libembedding public headers.
  * No preprocessor directives, no C++ constructs.
- * Synced with headers in include/libembedding/ (v1.12.0). */
+ * Synced with headers in include/libembedding/ (v1.12.1). */
 
 /* ═══ Error handling ═══════════════════════════════════════════════ */
 

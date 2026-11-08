@@ -18,7 +18,7 @@
  * No semantics live here. What the keys *mean* belongs to gguf_spec.hpp.
  *
  * Auteur: David Orel
- * Version: 1.12.0
+ * Version: 1.12.1
  *
  * SPDX-License-Identifier: MIT
  */

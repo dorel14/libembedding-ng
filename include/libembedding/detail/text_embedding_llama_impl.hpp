@@ -4,7 +4,7 @@
  * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.12.0
+ * Version: 1.12.1
  *
  * SPDX-License-Identifier: MIT
  */

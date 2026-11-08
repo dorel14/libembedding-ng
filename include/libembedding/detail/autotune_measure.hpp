@@ -17,7 +17,7 @@
  * Nothing here knows about models: the caller supplies a callable.
  *
  * Auteur: David Orel
- * Version: 1.12.0
+ * Version: 1.12.1
  *
  * SPDX-License-Identifier: MIT
  */
