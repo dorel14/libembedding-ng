@@ -220,6 +220,15 @@ assumed:
   names the one it picked; record it with any GGUF benchmark.
 - ONNX models run on ONNX Runtime, which selects its own kernels at run time.
 
+The Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
+glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
+bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
+libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
+run time. CI builds it in a `manylinux_2_28` container and tests it on GitHub's
+ARM runners; it has not been tested on a physical Raspberry Pi yet. 32-bit
+Raspberry Pi OS (armv7l) is not supported yet. On Linux, HTTPS downloads use the
+system CA bundle; `SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it.
+
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
 `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for AVX2; the
@@ -2741,6 +2750,14 @@ The x86-64 wheels and release binaries run on any x86-64 CPU; no AVX or AVX2 is 
   `libembedding.ggml_cpu_features()` (C: `lembed_ggml_cpu_features()`) names it. Record it with any
   GGUF benchmark;
 - ONNX models run on ONNX Runtime, which selects its own kernels at run time.
+
+The Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with glibc 2.31 or
+later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye, bookworm), Ubuntu 20.04 and later,
+AWS Graviton, Ampere. ggml ships eight ARM CPU libraries (`ggml-cpu-armv8.0_1` …
+`ggml-cpu-armv9.2_2`) and loads the best one at run time. CI builds it in a `manylinux_2_28`
+container and tests it on GitHub's ARM runners; it has not been tested on a physical Raspberry Pi
+yet. 32-bit Raspberry Pi OS (armv7l) is not supported yet. On Linux, HTTPS downloads use the system
+CA bundle; `SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it.
 
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For a local build that
 will never leave the machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for
@@ -6524,6 +6541,15 @@ Les wheels et binaires x86-64 publiés tournent sur tout CPU x86-64, sans AVX ni
   l'exécution, et `libembedding.ggml_cpu_features()` (C : `lembed_ggml_cpu_features()`) indique
   laquelle. À consigner avec tout benchmark GGUF ;
 - les modèles ONNX tournent sur ONNX Runtime, qui choisit ses noyaux à l'exécution.
+
+La wheel Linux aarch64 (`manylinux_2_31_aarch64`) tourne sous Linux ARM 64 bits avec glibc 2.31 ou
+plus : Raspberry Pi 3/4/5 sous Raspberry Pi OS 64 bits (bullseye, bookworm), Ubuntu 20.04 et
+suivants, AWS Graviton, Ampere. ggml fournit huit bibliothèques CPU ARM (`ggml-cpu-armv8.0_1` …
+`ggml-cpu-armv9.2_2`) et charge la meilleure à l'exécution. La CI la construit dans un conteneur
+`manylinux_2_28` et la teste sur les runners ARM de GitHub ; elle n'a pas encore été testée sur un
+Raspberry Pi physique. Raspberry Pi OS 32 bits (armv7l) n'est pas encore pris en charge. Sous Linux,
+les téléchargements HTTPS utilisent le bundle CA du système ; `SSL_CERT_FILE` ou `CURL_CA_BUNDLE`
+le remplacent.
 
 La wheel macOS est arm64 (Apple Silicon, macOS 14 ou plus), compilée nativement. Pour un build local
 qui ne quittera pas la machine, `-DLIBEMBEDDING_ARCH_AVX2=ON` compile le code de libembedding en

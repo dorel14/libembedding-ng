@@ -209,6 +209,15 @@ assumed:
   names the one it picked; record it with any GGUF benchmark.
 - ONNX models run on ONNX Runtime, which selects its own kernels at run time.
 
+The Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
+glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
+bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
+libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
+run time. CI builds it in a `manylinux_2_28` container and tests it on GitHub's
+ARM runners; it has not been tested on a physical Raspberry Pi yet. 32-bit
+Raspberry Pi OS (armv7l) is not supported yet. On Linux, HTTPS downloads use the
+system CA bundle; `SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it.
+
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
 `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for AVX2; the

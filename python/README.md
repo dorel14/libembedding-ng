@@ -20,10 +20,13 @@ pip install libembedding-ng
 > `libembedding` on PyPI); it is imported as `libembedding`. The wheel already bundles the
 > native shared library and ONNX Runtime, so no separate system install is required.
 
-**Platforms:** wheels exist for Windows x86-64, Linux x86-64 (manylinux) and macOS arm64
-(Apple Silicon, macOS 14 or later). The x86-64 wheels run on any x86-64 CPU, no AVX/AVX2
-required: GGUF models load the ggml CPU library matching the machine at run time
-(`libembedding.ggml_cpu_features()` names it). The macOS wheel bundles its dependencies
+**Platforms:** wheels exist for Windows x86-64, Linux x86-64 (manylinux), Linux aarch64
+(`manylinux_2_31`: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS, Ubuntu 20.04+, Graviton)
+and macOS arm64 (Apple Silicon, macOS 14 or later). The x86-64 wheels run on any x86-64 CPU,
+no AVX/AVX2 required: GGUF models load the ggml CPU library matching the machine at run time
+(`libembedding.ggml_cpu_features()` names it), and the aarch64 wheel does the same across
+eight ARM levels (armv8.0 to armv9.2). 32-bit ARM (armv7l) is not supported yet. On Linux,
+HTTPS downloads use the system CA bundle (`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
 (ONNX Runtime, llama.cpp/ggml) under `libembedding/.dylibs/` and uses the system libcurl.
 
 **Requirements:** ONNX Runtime must be installed on your system **only if** you build the package from source.
