@@ -99,8 +99,21 @@ for lib in "$pkg"/*.so; do
     glibcxx=$(objdump -T "$lib" | grep -oE 'GLIBCXX_[0-9.]+' | sort -uV | tail -n 1 || true)
     echo "$(basename "$lib"): ${glibc:-none} ${glibcxx:-}"
 done
-auditwheel show "$raw_dir"/*.whl
-# Without --plat, auditwheel tags the lowest policy the wheel satisfies; it
-# grafts libcurl and its dependencies and rewrites the rpaths.
-auditwheel repair -w python/dist "$raw_dir"/*.whl
+show=$(auditwheel show "$raw_dir"/*.whl)
+echo "$show"
+# The image sets AUDITWHEEL_PLAT to its own policy (manylinux_2_28), which
+# `repair` uses by default, so pass the tag auditwheel itself computed. Our own
+# libraries stay within glibc 2.28; the system libraries grafted for libcurl
+# (OpenSSL, krb5, libssh...) are what raise it (2_31 measured on aarch64).
+plat=$(echo "$show" | tr '\n' ' ' | grep -oE 'constrains the platform tag to "[^"]+"' \
+       | grep -oE 'manylinux_[0-9]+_[0-9]+_[a-z0-9_]+' || true)
+plat="${plat:-$AUDITWHEEL_PLAT}"
+# Floor kept for Raspberry Pi OS bullseye (glibc 2.31): refuse anything newer.
+glibc_minor=$(echo "$plat" | sed -E 's/manylinux_2_([0-9]+)_.*/\1/')
+if [ "$glibc_minor" -gt 31 ]; then
+    echo "ERROR: wheel needs $plat, above the manylinux_2_31 floor" >&2
+    exit 1
+fi
+echo "== repairing to $plat"
+auditwheel repair --plat "$plat" -w python/dist "$raw_dir"/*.whl
 auditwheel show python/dist/*.whl
