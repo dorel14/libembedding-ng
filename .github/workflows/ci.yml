@@ -35,6 +35,8 @@ jobs:
         include:
           - os: ubuntu-22.04
             name: linux-x86_64
+          - os: ubuntu-22.04-arm
+            name: linux-aarch64
           - os: macos-15
             name: macos-arm64
           - os: windows-2022

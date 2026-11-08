@@ -49,8 +49,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libcurl4-openssl-dev
-          curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
+          # ORT names its Linux archives x64 / aarch64; the runner reports
+          # x86_64 / aarch64. libcurl lives under the multiarch triplet.
+          case "$(uname -m)" in
+            x86_64)  ort_arch=x64;     triplet=x86_64-linux-gnu ;;
+            aarch64) ort_arch=aarch64; triplet=aarch64-linux-gnu ;;
+            *) echo "ERROR: unsupported Linux architecture $(uname -m)"; exit 1 ;;
+          esac
+          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-${ort_arch}-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
+          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-${ort_arch}-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
+          echo "CURL_LIB_DIR=/usr/lib/${triplet}" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -149,7 +157,7 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             ext=".so"
             ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
-            curl_lib_dir="/usr/lib/x86_64-linux-gnu"
+            curl_lib_dir="$CURL_LIB_DIR"
           else
             ext=".dylib"
             ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
