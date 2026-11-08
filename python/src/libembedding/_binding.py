@@ -10,9 +10,39 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 import warnings
 from pathlib import Path
 
+
+def _preload_android_libffi() -> None:
+    """Make libffi visible to cffi's backend on Android outside Chaquopy.
+
+    PyPI has no Android cffi; Chaquopy's index provides one whose
+    _cffi_backend.so links libffi.so, which the chaquopy-libffi wheel installs
+    under site-packages/chaquopy/lib. Chaquopy's app runtime adds that
+    directory to the loader path, plain CPython on Android (PEP 738: BeeWare,
+    cibuildwheel's testbed) does not, and importing cffi then fails with
+    'library "libffi.so" not found'. Loaded once by absolute path with
+    RTLD_GLOBAL, the Android linker reuses it for _cffi_backend's dependency.
+    """
+    if sys.platform != "android":
+        return
+    import ctypes
+
+    for base in sys.path:
+        candidate = Path(base) / "chaquopy" / "lib" / "libffi.so"
+        if candidate.is_file():
+            try:
+                ctypes.CDLL(str(candidate), mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass  # cffi's own import error stays the one users see
+            return
+
+
+_preload_android_libffi()
+
+# Must follow the Android libffi preload above.
 import cffi
 
 ffi = cffi.FFI()
