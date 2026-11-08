@@ -179,8 +179,13 @@ jobs:
           if ((Get-FileHash sde.tar.xz -Algorithm SHA256).Hash -ne "EBB8B3B63FCB0B6C1F9721118BA4883703D2AED9E0DB2DEFED4E44FBA78D9CA9") {
             throw "Intel SDE checksum mismatch"
           }
-          Log "extracting with $((Get-Command tar).Source)"
-          & "$env:SystemRoot\System32\tar.exe" -xf sde.tar.xz
+          # The runner's bsdtar hangs on .tar.xz (no built-in xz there), so
+          # 7-Zip decompresses and bsdtar only unpacks the plain tar.
+          Log "decompressing with 7z"
+          7z x -y sde.tar.xz | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Intel SDE decompression failed (7z exit $LASTEXITCODE)" }
+          Log "extracting sde.tar"
+          & "$env:SystemRoot\System32\tar.exe" -xf sde.tar
           if ($LASTEXITCODE -ne 0) { throw "Intel SDE extraction failed (tar exit $LASTEXITCODE)" }
           $sde = (Resolve-Path "sde-external-*-win\sde.exe").Path
           $bin = (Resolve-Path "build\tests\Release").Path
