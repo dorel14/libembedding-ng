@@ -40,9 +40,11 @@ case "$(uname -m)" in
 esac
 
 echo "== toolchain"
-gcc --version | head -1
-cmake --version | head -1
-ldd --version | head -1
+# sed reads its whole input: `| head -1` would close the pipe early, and under
+# pipefail the writer's SIGPIPE (exit 141) aborts the script.
+gcc --version | sed -n 1p
+cmake --version | sed -n 1p
+ldd --version | sed -n 1p
 
 echo "== system dependencies"
 dnf install -y libcurl-devel
