@@ -77,9 +77,10 @@ if(WIN32)
 
     # Disable conflicting min/max macros globally on Windows
     add_compile_definitions(NOMINMAX)
-else()
-    find_package(CURL REQUIRED)
 endif()
+# libcurl elsewhere is found below, only when downloading is enabled: an
+# unconditional find_package(CURL REQUIRED) here made -DLIBEMBEDDING_NO_DOWNLOAD=ON
+# fail to configure on platforms without libcurl (Android).
 
 # -------------------------------------------------------------------------
 # libcurl runtime DLL (Windows)
