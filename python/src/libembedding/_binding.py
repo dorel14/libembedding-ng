@@ -1,7 +1,7 @@
 """Low-level cffi binding layer. Loads the shared library and exposes ffi/lib.
 
 Auteur: David Orel
-Version: 1.12.1
+Version: 1.12.2
 
 SPDX-License-Identifier: MIT
 """
