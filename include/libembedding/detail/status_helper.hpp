@@ -3,7 +3,7 @@
  * Common error handling helpers for C++ wrappers
  *
  * Auteur: David Orel
- * Version: 1.12.1
+ * Version: 1.12.2
  *
  * SPDX-License-Identifier: MIT
  */
