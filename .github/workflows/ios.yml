@@ -41,9 +41,15 @@ jobs:
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           failed=0
+          tests_dir="$PWD/build-ios/cmake-iphonesimulator/tests"
+          ls -la "$tests_dir"
           for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf; do
+            # CMake may build an iOS executable as an application bundle.
+            exe="$tests_dir/$t"
+            [ -d "$tests_dir/$t.app" ] && exe="$tests_dir/$t.app/$t"
+            file "$exe"
             # simctl spawn passes SIMCTL_CHILD_* to the process without the prefix.
-            if SIMCTL_CHILD_TMPDIR="$RUNNER_TEMP" xcrun simctl spawn "$udid" "$PWD/build-ios/cmake-iphonesimulator/tests/$t" > "$t.log" 2>&1; then
+            if SIMCTL_CHILD_TMPDIR="$RUNNER_TEMP" xcrun simctl spawn "$udid" "$exe" > "$t.log" 2>&1; then
               echo "PASS  $t: $(grep -oE '[0-9]+ passed[^[:cntrl:]]*' "$t.log" | tail -n 1)"
             else
               echo "FAIL  $t"; tail -n 30 "$t.log" | sed 's/^/  /'; failed=1
