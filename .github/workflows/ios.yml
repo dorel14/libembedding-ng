@@ -1,0 +1,82 @@
+name: iOS
+
+# Roadmap T33c (D10): libembedding as an iOS library. scripts/build_ios.sh
+# builds a self-contained libembedding.dylib for the device and for the
+# simulator (arm64 both); the unit tests run on a booted simulator through
+# `xcrun simctl spawn`, and both dylibs are packaged as libembedding.xcframework
+# with the public headers. ONNX Runtime is the onnxruntime-c pod archive 1.30.0,
+# the newest published for iOS. Downloading is off: models are passed by path.
+
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+jobs:
+  ios:
+    name: iOS (simulator tests + xcframework)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for the simulator, with unit tests
+        run: bash scripts/build_ios.sh iphonesimulator "$PWD/build-ios" tests
+
+      - name: Build for the device
+        run: bash scripts/build_ios.sh iphoneos "$PWD/build-ios"
+
+      - name: Run unit tests on a simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime, items in sorted(devices.items(), reverse=True):
+              if "iOS" in runtime:
+                  for d in items:
+                      if d["name"].startswith("iPhone"):
+                          print(d["udid"]); sys.exit(0)
+          sys.exit("no iPhone simulator available")')
+          echo "simulator: $udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          failed=0
+          tests_dir="$PWD/build-ios/cmake-iphonesimulator/tests"
+          ls -la "$tests_dir"
+          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf; do
+            # CMake may build an iOS executable as an application bundle.
+            exe="$tests_dir/$t"
+            [ -d "$tests_dir/$t.app" ] && exe="$tests_dir/$t.app/$t"
+            file "$exe"
+            # simctl spawn passes SIMCTL_CHILD_* to the process without the prefix.
+            if SIMCTL_CHILD_TMPDIR="$RUNNER_TEMP" xcrun simctl spawn "$udid" "$exe" > "$t.log" 2>&1; then
+              echo "PASS  $t: $(grep -oE '[0-9]+ passed[^[:cntrl:]]*' "$t.log" | tail -n 1)"
+            else
+              echo "FAIL  $t"; tail -n 30 "$t.log" | sed 's/^/  /'; failed=1
+            fi
+          done
+          xcrun simctl shutdown "$udid"
+          exit $failed
+
+      - name: Package libembedding.xcframework
+        run: |
+          headers="$PWD/build-ios/headers"
+          rm -rf "$headers" build-ios/libembedding.xcframework
+          mkdir -p "$headers"
+          cp -R include/libembedding "$headers/"
+          xcodebuild -create-xcframework \
+            -library build-ios/cmake-iphoneos/libembedding.dylib -headers "$headers" \
+            -library build-ios/cmake-iphonesimulator/libembedding.dylib -headers "$headers" \
+            -output build-ios/libembedding.xcframework
+          # Licence texts of everything linked into the dylib.
+          cp LICENSE build-ios/libembedding.xcframework/LICENSE
+          cp build-ios/ort/LICENSE build-ios/libembedding.xcframework/LICENSE.onnxruntime
+          cp third_party/llama.cpp/LICENSE build-ios/libembedding.xcframework/LICENSE.llama.cpp
+          (cd build-ios && zip -qry libembedding-ios.xcframework.zip libembedding.xcframework)
+          ls -la build-ios/libembedding.xcframework build-ios/*.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libembedding-ios-xcframework
+          path: build-ios/libembedding-ios.xcframework.zip
+          if-no-files-found: error

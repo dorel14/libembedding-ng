@@ -218,6 +218,15 @@ ARM runners; it has not been tested on a physical Raspberry Pi yet. 32-bit
 Raspberry Pi OS (armv7l) is not supported yet. On Linux, HTTPS downloads use the
 system CA bundle; `SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it.
 
+The Android wheels (`android_24_arm64_v8a`, `android_24_x86_64`) target CPython
+3.13 on Android 7.0 (API 24) and later, the PEP 738 builds used by BeeWare and
+Chaquopy. PyPI has no Android cffi or numpy: install them from Chaquopy's index
+(`pip install --extra-index-url https://chaquo.com/pypi-13.1 libembedding-ng`).
+Models download as on other platforms, through a libcurl linked statically over
+mbedTLS that reads the system certificate store. CI tests the x86_64 wheel on an
+emulator, including a model download; the arm64 wheel is built from the same
+sources but has not been run on a device yet.
+
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
 `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for AVX2; the
