@@ -75,8 +75,9 @@ if [ "$tests" = tests ]; then
               test_struct_sizes test_sparse_gguf)
 fi
 
-# The static ORT library needs the frameworks its CoreML provider uses.
-apple_libs="-framework Foundation -framework CoreML"
+# The static ORT library needs the frameworks its CoreML provider uses:
+# UIDevice (UIKit) and nw_path_* (Network) come from its prelinked objects.
+apple_libs="-framework Foundation -framework CoreML -framework UIKit -framework Network"
 cmake -S "$root" -B "$build" \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_SYSROOT="$sdk" \
