@@ -301,6 +301,90 @@ int main(void) {
                "last table slot is the appended BGE INT8 entry");
     }
 
+    /* Test: every registry entry has a download size. The mobile limit can
+     * only refuse a model whose size it knows, so a new entry without one
+     * would silently slip through on phones. */
+    {
+        typedef lembed_status_t (*list_fn)(const lembed_model_info_t**, int*);
+        const list_fn lists[] = {
+            lembed_list_text_models, lembed_list_sparse_models,
+#ifndef LIBEMBEDDING_NO_IMAGE
+            lembed_list_image_models,
+#endif
+            lembed_list_reranker_models,
+        };
+        int missing = 0;
+        for (list_fn fn : lists) {
+            const lembed_model_info_t* models = nullptr;
+            int count = 0;
+            fn(&models, &count);
+            for (int i = 0; i < count; i++) {
+                if (lembed_model_download_size_mb(models[i].model_code, models[i].model_file) <= 0) {
+                    fprintf(stderr, "no download size for %s / %s\n",
+                            models[i].model_code, models[i].model_file);
+                    missing++;
+                }
+            }
+        }
+        ASSERT(missing == 0, "every registry model has a download size");
+        ASSERT(lembed_model_download_size_mb("Xenova/bge-small-en-v1.5", "onnx/model.onnx") == 133,
+               "bge-small fp32 is 133 MB");
+        ASSERT(lembed_model_download_size_mb("no/such-model", "model.onnx") == -1,
+               "unknown model has size -1");
+        ASSERT(lembed_model_download_size_mb(nullptr, nullptr) == -1, "NULL gives -1");
+    }
+
+    /* Test: mobile model limit. LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT applies
+     * the Android/iOS rule here; offline=1 keeps everything off the network,
+     * so a light model fails with "not in cache", never with the limit. */
+    {
+#ifdef _WIN32
+#define LEMBED_TEST_SETENV(k, v) _putenv_s(k, v)
+#else
+#define LEMBED_TEST_SETENV(k, v) setenv(k, v, 1)
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+        const bool mobile = true;
+#else
+        const bool mobile = false;
+#endif
+        LEMBED_TEST_SETENV("LIBEMBEDDING_ALLOW_LARGE_MODELS", "");
+        LEMBED_TEST_SETENV("LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT", "");
+        ASSERT(lembed_mobile_model_limit_mb() == (mobile ? LEMBED_MOBILE_MODEL_LIMIT_MB : 0),
+               "limit is 150 on mobile, 0 elsewhere");
+
+        LEMBED_TEST_SETENV("LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT", "1");
+        ASSERT(lembed_mobile_model_limit_mb() == LEMBED_MOBILE_MODEL_LIMIT_MB,
+               "FORCE_MOBILE_MODEL_LIMIT applies the limit");
+
+        char* dir = nullptr;
+        lembed_status_t s = lembed_ensure_text_model(LEMBED_TEXT_BGE_LARGE_EN_V15, nullptr, 0, 1, &dir);
+        ASSERT(s == LEMBED_ERROR_UNSUPPORTED, "heavy model refused with UNSUPPORTED");
+        const char* err = lembed_last_error();
+        ASSERT(err && strstr(err, "limit for models on mobile devices") &&
+                   strstr(err, "Xenova/bge-small-en-v1.5"),
+               "refusal names the limit and a light alternative");
+        if (dir) { lembed_free_string(dir); dir = nullptr; }
+
+        s = lembed_ensure_text_model(LEMBED_TEXT_ALL_MINILM_L6_V2, nullptr, 0, 1, &dir);
+        ASSERT(s != LEMBED_ERROR_UNSUPPORTED, "light model is not refused");
+        if (dir) { lembed_free_string(dir); dir = nullptr; }
+
+        s = lembed_ensure_reranker_model(LEMBED_RERANKER_BGE_BASE, nullptr, 0, 1, &dir);
+        ASSERT(s == LEMBED_ERROR_UNSUPPORTED, "heavy reranker refused");
+        if (dir) { lembed_free_string(dir); dir = nullptr; }
+
+        LEMBED_TEST_SETENV("LIBEMBEDDING_ALLOW_LARGE_MODELS", "1");
+        ASSERT(lembed_mobile_model_limit_mb() == 0, "ALLOW_LARGE_MODELS lifts the limit");
+        s = lembed_ensure_text_model(LEMBED_TEXT_BGE_LARGE_EN_V15, nullptr, 0, 1, &dir);
+        ASSERT(s != LEMBED_ERROR_UNSUPPORTED, "heavy model allowed with ALLOW_LARGE_MODELS");
+        if (dir) { lembed_free_string(dir); dir = nullptr; }
+
+        LEMBED_TEST_SETENV("LIBEMBEDDING_ALLOW_LARGE_MODELS", "");
+        LEMBED_TEST_SETENV("LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT", "");
+#undef LEMBED_TEST_SETENV
+    }
+
     printf("\n%d passed, %d failed\n", passes, failures);
     return failures > 0 ? 1 : 0;
 }

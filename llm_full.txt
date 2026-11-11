@@ -238,6 +238,18 @@ mbedTLS that reads the system certificate store. CI tests the x86_64 wheel on an
 emulator, including a model download; the arm64 wheel is built from the same
 sources but has not been run on a device yet.
 
+On Android and iOS, only light registry models load by name: a model whose files
+exceed 150 MB (`LEMBED_MOBILE_MODEL_LIMIT_MB`) is refused before any download
+with `LEMBED_ERROR_UNSUPPORTED` (`UnsupportedError` in Python), and the error
+lists the light models of the same kind. The light text models include
+bge-small-en-v1.5, all-MiniLM-L6/L12-v2, snowflake-arctic-embed-xs/s and the
+quantized variants of several base models. No sparse model is light: SPLADE++
+is 532 MB. `list_*_models()` only returns the light ones there, and
+`ModelInfo.download_size_mb` gives every model's size.
+`LIBEMBEDDING_ALLOW_LARGE_MODELS=1` lifts the limit. A model passed by local path
+is never checked. `LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1` applies the limit on
+a desktop, to test an app's behaviour.
+
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
 `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for AVX2; the
