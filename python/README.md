@@ -35,6 +35,14 @@ HTTPS downloads use the system CA bundle (`SSL_CERT_FILE` or `CURL_CA_BUNDLE` ov
 normally (static libcurl over mbedTLS, system certificate store). The x86_64 wheel is tested
 on an emulator in CI; the arm64 wheel has not been run on a device yet.
 
+**Mobile model limit:** on Android and iOS, only light registry models load by name. A model
+above 150 MB raises `UnsupportedError` before any download, with the light alternatives in
+the message. `list_text_models()` and the other listing functions return only the light
+models, and `ModelInfo.download_size_mb` gives each model's size. No sparse model is light
+(SPLADE++ is 532 MB). `LIBEMBEDDING_ALLOW_LARGE_MODELS=1` lifts the limit, and a local model
+path is never checked. `mobile_model_limit_mb()` returns the active limit (0 = none), and
+`LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1` applies the limit on a desktop for testing.
+
 **Requirements:** ONNX Runtime must be installed on your system **only if** you build the package from source.
 
 ```bash

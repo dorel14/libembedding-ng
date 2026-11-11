@@ -111,6 +111,8 @@ lembed_ggml_cpu_features
 lembed_resolve_text_model
 lembed_resolve_reranker_model
 lembed_resolve_sparse_model
+    lembed_model_download_size_mb
+    lembed_mobile_model_limit_mb
 
     ; ---- Downloader ----
     lembed_ensure_text_model
