@@ -71,8 +71,10 @@ targets=(embedding_shared)
 test_flag=OFF
 if [ "$tests" = tests ]; then
     test_flag=ON
+    # test_embedding_parity is an integration test (it needs bge-small); the
+    # workflow fills its model cache on the host, the simulator reads it.
     targets+=(test_similarity test_pooling test_tokenizer test_model_registry
-              test_struct_sizes test_sparse_gguf)
+              test_struct_sizes test_sparse_gguf test_embedding_parity)
 fi
 
 # The static ORT library needs the frameworks its CoreML provider uses:
@@ -92,6 +94,7 @@ cmake -S "$root" -B "$build" \
     -DLIBEMBEDDING_NO_DOWNLOAD=ON \
     -DLIBEMBEDDING_BUILD_SHARED=ON \
     -DLIBEMBEDDING_BUILD_TESTS="$test_flag" \
+    -DLIBEMBEDDING_INTEGRATION_TESTS="$test_flag" \
     -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
     -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
     -DONNXRuntime_INCLUDE_DIR="$ort/Headers" \

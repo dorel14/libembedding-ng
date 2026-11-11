@@ -26,6 +26,18 @@ jobs:
       - name: Build for the device
         run: bash scripts/build_ios.sh iphoneos "$PWD/build-ios"
 
+      # The iOS build does not download yet: the host fills the model cache
+      # that test_embedding_parity reads (LEMBED_PARITY_CACHE, offline), in
+      # libembedding's layout. The simulator reads host paths directly.
+      - name: Fill the parity model cache
+        run: |
+          dir="$RUNNER_TEMP/lembed-cache/models--Xenova-bge-small-en-v1.5"
+          mkdir -p "$dir/onnx"
+          for f in onnx/model.onnx tokenizer.json config.json tokenizer_config.json special_tokens_map.json; do
+            curl -fsSL --retry 3 -o "$dir/$f" "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/$f"
+          done
+          ls -laR "$dir"
+
       - name: Run unit tests on a simulator
         run: |
           udid=$(xcrun simctl list devices available -j | python3 -c '
@@ -43,13 +55,16 @@ jobs:
           failed=0
           tests_dir="$PWD/build-ios/cmake-iphonesimulator/tests"
           ls -la "$tests_dir"
-          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf; do
+          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_embedding_parity; do
             # CMake may build an iOS executable as an application bundle.
             exe="$tests_dir/$t"
             [ -d "$tests_dir/$t.app" ] && exe="$tests_dir/$t.app/$t"
             file "$exe"
             # simctl spawn passes SIMCTL_CHILD_* to the process without the prefix.
-            if SIMCTL_CHILD_TMPDIR="$RUNNER_TEMP" xcrun simctl spawn "$udid" "$exe" > "$t.log" 2>&1; then
+            if SIMCTL_CHILD_TMPDIR="$RUNNER_TEMP" \
+               SIMCTL_CHILD_LEMBED_PARITY_CACHE="$RUNNER_TEMP/lembed-cache" \
+               SIMCTL_CHILD_LEMBED_PARITY_REF="$PWD/python/tests/data/parity_bge_small_en_v15.json" \
+               xcrun simctl spawn "$udid" "$exe" > "$t.log" 2>&1; then
               echo "PASS  $t: $(grep -oE '[0-9]+ passed[^[:cntrl:]]*' "$t.log" | tail -n 1)"
             else
               echo "FAIL  $t"; tail -n 30 "$t.log" | sed 's/^/  /'; failed=1
