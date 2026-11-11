@@ -5,7 +5,9 @@ name: Android
 # ABI an emulator runs at usable speed on a GitHub runner (KVM), so the unit
 # tests exercise bionic, dlopen of the ggml CPU variants and the missing /tmp
 # there. ONNX Runtime comes from its official Android AAR on Maven Central.
-# Downloading is off (LIBEMBEDDING_NO_DOWNLOAD): models are passed by path.
+# Android has no libcurl: scripts/build_android_curl.sh builds a static one
+# over mbedTLS, and test_text_embedding downloads a model on the emulator to
+# prove HTTPS and the system certificate store work.
 # CMakeLists.txt gives Android binaries RUNPATH=$ORIGIN: the linker of the ARM
 # translation layer on x86_64 emulators ignores LD_LIBRARY_PATH, so without it
 # arm64 binaries cannot find libllama.so.
@@ -41,6 +43,11 @@ jobs:
           cp "ort-aar/jni/${{ matrix.abi }}/libonnxruntime.so" ort/lib/
           ls -la ort/include ort/lib
 
+      - name: Build static libcurl (mbedTLS)
+        run: |
+          bash scripts/build_android_curl.sh ${{ matrix.abi }} "$ANDROID_API" \
+            "$ANDROID_NDK_LATEST_HOME" "$PWD/build-curl"
+
       - name: Configure
         run: |
           echo "NDK: $ANDROID_NDK_LATEST_HOME"
@@ -49,9 +56,11 @@ jobs:
             -DANDROID_ABI=${{ matrix.abi }} \
             -DANDROID_PLATFORM=android-${ANDROID_API} \
             -DCMAKE_BUILD_TYPE=Release \
-            -DLIBEMBEDDING_NO_DOWNLOAD=ON \
+            -DCMAKE_FIND_ROOT_PATH="$PWD/build-curl/curl-prefix" \
+            -DCMAKE_PREFIX_PATH="$PWD/build-curl/curl-prefix" \
             -DLIBEMBEDDING_BUILD_SHARED=ON \
             -DLIBEMBEDDING_BUILD_TESTS=ON \
+            -DLIBEMBEDDING_INTEGRATION_TESTS=ON \
             -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
             -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
             -DONNXRuntime_INCLUDE_DIR="$PWD/ort/include" \
@@ -61,12 +70,12 @@ jobs:
         run: |
           cmake --build build --parallel 4 --target embedding_shared \
             test_similarity test_pooling test_tokenizer test_model_registry \
-            test_struct_sizes test_sparse_gguf
+            test_struct_sizes test_sparse_gguf test_text_embedding
 
       - name: Stage binaries
         run: |
           mkdir -p stage
-          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf; do
+          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_text_embedding; do
             cp "build/tests/$t" stage/
           done
           find build -name '*.so' -exec cp {} stage/ \;
@@ -81,56 +90,9 @@ jobs:
           path: stage/
           if-no-files-found: error
 
-  # Roadmap T33b: Python wheels for Android (PEP 738, CPython 3.13+). The
-  # native libraries are built per ABI by scripts/build_android_libs.sh as the
-  # before-build step; cibuildwheel tests the x86_64 wheel on its own emulator
-  # (arm64 is built only: no fast arm64 emulator on an x86_64 runner). cffi and
-  # numpy have no Android wheels on PyPI; Chaquopy's index provides them.
+  # Roadmap T33b: Python wheels for Android, shared with release.yml.
   wheel:
-    name: Python wheels (Android)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Build and test Android wheels
-        env:
-          CIBW_PLATFORM: android
-          CIBW_BUILD: cp313-*
-          CIBW_ARCHS_ANDROID: arm64_v8a x86_64
-          # cibuildwheel takes the minimum API level, hence the android_<N>
-          # wheel tag, from ANDROID_API_LEVEL (default 24), and the
-          # before-build script compiles the native libraries for the same
-          # variable: both follow the workflow's ANDROID_API. The before-build
-          # step runs on the host and inherits ONNXRUNTIME_VERSION from env.
-          ANDROID_API_LEVEL: ${{ env.ANDROID_API }}
-          CIBW_BUILD_FRONTEND: build
-          CIBW_BEFORE_BUILD_ANDROID: bash {project}/scripts/build_android_libs.sh
-          CIBW_ENVIRONMENT_ANDROID: PIP_EXTRA_INDEX_URL=https://chaquo.com/pypi-13.1
-          # No repair: every native library is already in the package, linked
-          # to its siblings through RUNPATH=$ORIGIN, and the wheel is already
-          # tagged android_24_*. auditwheel only searches the NDK and failed
-          # with "libggml-base.so could not be located". The emulator test
-          # catches any dependency that would really be missing.
-          CIBW_REPAIR_WHEEL_COMMAND_ANDROID: ""
-          CIBW_TEST_REQUIRES: pytest
-          CIBW_TEST_SOURCES: python/tests
-          CIBW_TEST_COMMAND: python -m pytest python/tests -m "not network" -q -p no:cacheprovider
-          CIBW_BUILD_VERBOSITY: 1
-        run: |
-          python -m pip install cibuildwheel==4.3.5
-          cibuildwheel python --output-dir wheelhouse
-          ls -la wheelhouse
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-android
-          path: wheelhouse/*.whl
-          if-no-files-found: error
+    uses: ./.github/workflows/build-wheel-android.yml
 
   test-emulator:
     name: unit tests (x86_64 emulator)

@@ -78,6 +78,7 @@ libembedding = [
 testpaths = ["tests"]
 markers = [
     "network: test requires network access (model download)",
+    "download_smoke: minimal download check, selected on platforms that build their own libcurl (Android)",
 ]
 
 [tool.ruff]

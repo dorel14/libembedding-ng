@@ -10,8 +10,9 @@
 # ANDROID_NDK_LATEST_HOME (GitHub runners) or ANDROID_NDK_HOME. ONNX Runtime
 # comes from its official Android AAR. The API level is ANDROID_API_LEVEL, the
 # variable cibuildwheel derives the wheel tag from, so the libraries and the tag
-# cannot disagree. Downloading is disabled
-# (LIBEMBEDDING_NO_DOWNLOAD): Android has no libcurl, models are passed by path.
+# cannot disagree. Android has no libcurl: build_android_curl.sh builds a static
+# one over mbedTLS, linked into libembedding.so, so models download as on any
+# other platform.
 #
 # Auteur: David Orel
 # Version: 1.12.2
@@ -58,6 +59,11 @@ if [ ! -f "$ort/lib/libonnxruntime.so" ]; then
     cp "$work/aar/jni/$abi/libonnxruntime.so" "$ort/lib/"
 fi
 
+# ---- static libcurl over mbedTLS ---------------------------------------------
+env -u CC -u CXX -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS -u AR -u RANLIB \
+    bash "$root/scripts/build_android_curl.sh" "$abi" "$ANDROID_API" "$ndk" "$work"
+curl_prefix="$work/curl-prefix"
+
 # ---- native build ------------------------------------------------------------
 # The cross-compilation variables cibuildwheel exports for the Python build
 # would override the NDK toolchain file: CMake must see a clean environment.
@@ -67,7 +73,8 @@ env -u CC -u CXX -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS -u AR -u RANLIB \
         -DANDROID_ABI="$abi" \
         -DANDROID_PLATFORM="android-$ANDROID_API" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DLIBEMBEDDING_NO_DOWNLOAD=ON \
+        -DCMAKE_FIND_ROOT_PATH="$curl_prefix" \
+        -DCMAKE_PREFIX_PATH="$curl_prefix" \
         -DLIBEMBEDDING_BUILD_SHARED=ON \
         -DLIBEMBEDDING_BUILD_TESTS=OFF \
         -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \

@@ -10,7 +10,8 @@
 #   (libonnxruntime.so, libggml*.so, ...).
 #
 # Android has no /tmp and no HOME: TMPDIR points at a writable directory under
-# /data/local/tmp so tests that write fixtures (test_sparse_gguf) can run.
+# /data/local/tmp so tests that write fixtures (test_sparse_gguf) and the model
+# cache can live there.
 #
 # Auteur: David Orel
 # Version: 1.12.1
@@ -21,7 +22,9 @@ set -euo pipefail
 
 stage="${1:?usage: android_run_tests.sh <staging-dir>}"
 dest=/data/local/tmp/libembedding
-tests=(test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf)
+# test_text_embedding downloads its model: it checks libcurl, mbedTLS and the
+# system certificate store (/system/etc/security/cacerts) on the device.
+tests=(test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_text_embedding)
 
 adb wait-for-device
 adb shell "getprop ro.product.cpu.abi; getprop ro.build.version.sdk"

@@ -279,13 +279,24 @@ jobs:
             name: windows-x86_64
             python: "3.12"
 
+  # Android wheels (cp313, android_24 arm64_v8a + x86_64), built and tested by
+  # cibuildwheel. Published with the others: a release never ships without
+  # them, since adding them later would hit the "already on PyPI" skip below.
+  build-android:
+    name: Build wheel (android)
+    needs: [version]
+    if: needs.version.outputs.released == 'true'
+    uses: ./.github/workflows/build-wheel-android.yml
+    with:
+      ref: ${{ needs.version.outputs.tag }}
+
   # -----------------------------------------------------------------------
   # 5) Collect every wheel and publish them to PyPI
   # -----------------------------------------------------------------------
   publish:
     name: Publish to PyPI
-    needs: [version, build]
-    if: always() && needs.build.result == 'success' && needs.version.outputs.released == 'true'
+    needs: [version, build, build-android]
+    if: always() && needs.build.result == 'success' && needs.build-android.result == 'success' && needs.version.outputs.released == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download wheel artifacts

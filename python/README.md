@@ -29,6 +29,12 @@ eight ARM levels (armv8.0 to armv9.2). 32-bit ARM (armv7l) is not supported yet.
 HTTPS downloads use the system CA bundle (`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
 (ONNX Runtime, llama.cpp/ggml) under `libembedding/.dylibs/` and uses the system libcurl.
 
+**Android:** wheels for CPython 3.13 on Android 7.0+ (`android_24_arm64_v8a`,
+`android_24_x86_64`, PEP 738: BeeWare, Chaquopy). cffi and numpy come from Chaquopy's index:
+`pip install --extra-index-url https://chaquo.com/pypi-13.1 libembedding-ng`. Models download
+normally (static libcurl over mbedTLS, system certificate store). The x86_64 wheel is tested
+on an emulator in CI; the arm64 wheel has not been run on a device yet.
+
 **Requirements:** ONNX Runtime must be installed on your system **only if** you build the package from source.
 
 ```bash
