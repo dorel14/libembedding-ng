@@ -23,7 +23,7 @@
  * configuration can neither win nor distort the reference values.
  *
  * Auteur: David Orel
- * Version: 1.12.2
+ * Version: 1.13.0
  *
  * SPDX-License-Identifier: MIT
  */

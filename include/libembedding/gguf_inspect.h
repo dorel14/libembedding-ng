@@ -11,7 +11,7 @@
  * a caller can classify a model before deciding whether to load it.
  *
  * Auteur: David Orel
- * Version: 1.12.2
+ * Version: 1.13.0
  *
  * SPDX-License-Identifier: MIT
  */
