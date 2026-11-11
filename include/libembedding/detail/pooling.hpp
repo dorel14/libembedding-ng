@@ -3,7 +3,7 @@
  * CLS and Mean pooling implementations
  *
  * Auteur: David Orel
- * Version: 1.12.2
+ * Version: 1.13.0
  *
  * SPDX-License-Identifier: MIT
  */

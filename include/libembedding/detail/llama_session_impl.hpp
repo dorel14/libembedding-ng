@@ -3,7 +3,7 @@
  * llama.cpp backend for GGUF embedding models
  *
  * Auteur: David Orel
- * Version: 1.12.2
+ * Version: 1.13.0
  *
  * SPDX-License-Identifier: MIT
  */
