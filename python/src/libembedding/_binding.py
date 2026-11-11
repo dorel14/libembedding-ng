@@ -31,24 +31,34 @@ def _preload_android_chaquopy_libs() -> None:
     if sys.platform != "android":
         return
     import ctypes
+    import logging
 
+    log = logging.getLogger(__name__)
     for base in sys.path:
         lib_dir = Path(base) / "chaquopy" / "lib"
         if not lib_dir.is_dir():
             continue
-        # *.so* also matches versioned names: openblas needs libgfortran.so.3.
+        # Every library is loaded, not a fixed list: the directory only holds
+        # Chaquopy companion libraries, and its content depends on the
+        # packages installed. *.so* also matches versioned names: openblas
+        # needs libgfortran.so.3, which a narrower pattern once missed.
         pending = sorted(lib_dir.glob("*.so*"))
         # The dependency order between them is unknown: retry until a pass
         # loads nothing new. A library that never loads is left to the
         # importing extension, whose error is the one users should see.
+        errors: dict[Path, OSError] = {}
         while pending:
             failed = []
             for path in pending:
                 try:
                     ctypes.CDLL(str(path), mode=ctypes.RTLD_GLOBAL)
-                except OSError:
+                    log.debug("preloaded %s", path)
+                except OSError as exc:
                     failed.append(path)
+                    errors[path] = exc
             if len(failed) == len(pending):
+                for path in failed:
+                    log.debug("could not preload %s: %s", path, errors[path])
                 break
             pending = failed
         return

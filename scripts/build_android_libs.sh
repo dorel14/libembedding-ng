@@ -8,7 +8,9 @@
 # The target ABI is taken from _PYTHON_HOST_PLATFORM (android-24-arm64_v8a),
 # else from the cross compiler cibuildwheel exports in CC. The NDK is
 # ANDROID_NDK_LATEST_HOME (GitHub runners) or ANDROID_NDK_HOME. ONNX Runtime
-# comes from its official Android AAR. Downloading is disabled
+# comes from its official Android AAR. The API level is ANDROID_API_LEVEL, the
+# variable cibuildwheel derives the wheel tag from, so the libraries and the tag
+# cannot disagree. Downloading is disabled
 # (LIBEMBEDDING_NO_DOWNLOAD): Android has no libcurl, models are passed by path.
 #
 # Auteur: David Orel

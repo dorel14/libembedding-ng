@@ -102,6 +102,12 @@ jobs:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-*
           CIBW_ARCHS_ANDROID: arm64_v8a x86_64
+          # cibuildwheel takes the minimum API level, hence the android_<N>
+          # wheel tag, from ANDROID_API_LEVEL (default 24), and the
+          # before-build script compiles the native libraries for the same
+          # variable: both follow the workflow's ANDROID_API. The before-build
+          # step runs on the host and inherits ONNXRUNTIME_VERSION from env.
+          ANDROID_API_LEVEL: ${{ env.ANDROID_API }}
           CIBW_BUILD_FRONTEND: build
           CIBW_BEFORE_BUILD_ANDROID: bash {project}/scripts/build_android_libs.sh
           CIBW_ENVIRONMENT_ANDROID: PIP_EXTRA_INDEX_URL=https://chaquo.com/pypi-13.1
