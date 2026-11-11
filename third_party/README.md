@@ -70,6 +70,22 @@ backend optionnel.
 5. Documenter le bump : `README.md` (table des dépendances), `AGENTS.md`
    (§3.3) et régénérer `llm.txt` / `llm_full.txt`.
 
+## Android : libcurl et mbedTLS compilés depuis les sources
+
+Android ne fournit ni libcurl ni OpenSSL au code NDK. Rien n'est vendorisé ici :
+`scripts/build_android_curl.sh` télécharge les sources officielles, vérifie
+leur SHA-256 épinglé, puis les compile en bibliothèques statiques liées dans
+`libembedding.so`. Il est utilisé par `.github/workflows/android.yml` et par
+`scripts/build_android_libs.sh`.
+
+| Composant | Version | Source | Licence |
+|---|---|---|---|
+| curl (HTTP/HTTPS seulement) | 8.21.0, celle des en-têtes de `curl/` | `curl.se/download`, archive signée par Daniel Stenberg | curl (type MIT) |
+| mbedTLS (branche LTS) | 3.6.7 | releases GitHub `Mbed-TLS/mbedtls`, somme SHA-256 publiée | Apache-2.0 (double licence avec GPL-2.0-or-later, utilisé sous Apache-2.0) |
+
+Les certificats viennent du magasin système `/system/etc/security/cacerts`,
+via `CURLOPT_CAPATH` (voir `detail/downloader_impl.hpp`).
+
 ## Attribution
 
 `llama.cpp/LICENSE`, `llama.cpp/AUTHORS` et `llama.cpp/licenses/` sont
