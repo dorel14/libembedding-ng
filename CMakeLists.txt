@@ -77,9 +77,10 @@ if(WIN32)
 
     # Disable conflicting min/max macros globally on Windows
     add_compile_definitions(NOMINMAX)
-else()
-    find_package(CURL REQUIRED)
 endif()
+# libcurl elsewhere is found below, only when downloading is enabled: an
+# unconditional find_package(CURL REQUIRED) here made -DLIBEMBEDDING_NO_DOWNLOAD=ON
+# fail to configure on platforms without libcurl (Android).
 
 # -------------------------------------------------------------------------
 # libcurl runtime DLL (Windows)
@@ -218,6 +219,21 @@ if(LIBEMBEDDING_CPU_DISPATCH)
 else()
     set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
     set(GGML_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+endif()
+
+# Android: ggml's OpenMP build links the NDK's libomp.so, which is not on the
+# device ("library libomp.so not found", measured on an API 30 emulator) and
+# which upstream does not support shipping either (docs/android.md). Upstream's
+# Android release builds with GGML_OPENMP=OFF; ggml then uses its own threadpool.
+if(ANDROID)
+    set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+    # Libraries and tests find their sibling .so (libllama, libggml-base, ...)
+    # through RUNPATH=$ORIGIN. CMake's Android platform module drops its own
+    # RPATH flags (INSTALL_RPATH has no effect), and the linker of the ARM
+    # translation layer on x86_64 emulators ignores LD_LIBRARY_PATH, so it is
+    # passed to the linker directly. RUNPATH needs API 24, our minimum.
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-rpath,\$ORIGIN")
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-rpath,\$ORIGIN")
 endif()
 
 # llama.cpp's upstream install rules assume the unpruned source tree layout.

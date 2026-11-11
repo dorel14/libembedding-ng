@@ -36,10 +36,18 @@ inline std::string get_cache_dir(const char* override_dir = nullptr) {
 
     /* Default: ~/.cache/libembedding */
     const char* home = std::getenv("HOME");
-    if (!home) home = std::getenv("USERPROFILE");
-    if (!home) home = "/tmp";
+    if (!home || !home[0]) home = std::getenv("USERPROFILE");
+    if (home && home[0]) return std::string(home) + "/.cache/libembedding";
 
-    return std::string(home) + "/.cache/libembedding";
+    /* No home directory. Android apps have none and no /tmp either, but the
+     * runtime (and Python on Android) points TMPDIR at the app's cache dir. */
+    const char* tmp = std::getenv("TMPDIR");
+    if (tmp && tmp[0]) return std::string(tmp) + "/libembedding";
+#if defined(__ANDROID__)
+    return "/data/local/tmp/libembedding";
+#else
+    return "/tmp/.cache/libembedding";
+#endif
 }
 
 /* Check if file exists */
