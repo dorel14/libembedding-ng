@@ -3,6 +3,8 @@
   url: en/index.html
 - title: Getting started
   url: en/getting_started.html
+- title: Platforms
+  url: en/platforms.html
 - title: Python API Reference
   url: en/api_reference.html
 - title: Similarity Functions

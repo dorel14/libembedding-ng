@@ -227,6 +227,21 @@ mbedTLS that reads the system certificate store. CI tests the x86_64 wheel on an
 emulator, including a model download; the arm64 wheel is built from the same
 sources but has not been run on a device yet.
 
+iOS (15.1 and later, arm64 device and simulator) is supported as a native
+library, not as a Python wheel. `scripts/build_ios.sh <iphoneos|iphonesimulator>
+<work-dir>` builds a self-contained `libembedding.dylib` that links ONNX Runtime
+1.30.0 (the newest onnxruntime-c pod), a static ggml/llama, and a static libcurl
+over mbedTLS (`scripts/build_curl_mbedtls.sh`). The `iOS` workflow packages both
+dylibs as `libembedding.xcframework`, with the licence texts of everything linked
+in, and uploads it as the `libembedding-ios-xcframework` artifact. Models download
+as on other platforms into `$HOME/Library/Caches/libembedding`. iOS exposes no
+certificate file, and curl offers SecTrust only with OpenSSL or GnuTLS, so
+Mozilla's CA bundle (curl.se/ca, pinned by SHA-256) is compiled into the dylib
+(`-DLIBEMBEDDING_CA_BUNDLE_EMBED=<pem>`); `SSL_CERT_FILE` or `CURL_CA_BUNDLE`
+override it. CI runs the unit tests on a simulator, including a model download
+checked against the x86_64 reference embeddings; nothing has run on a physical
+iPhone yet.
+
 On Android and iOS, only light registry models load by name: a model whose files
 exceed 150 MB (`LEMBED_MOBILE_MODEL_LIMIT_MB`) is refused before any download
 with `LEMBED_ERROR_UNSUPPORTED` (`UnsupportedError` in Python), and the error
@@ -238,6 +253,10 @@ is 532 MB. `list_*_models()` only returns the light ones there, and
 `LIBEMBEDDING_ALLOW_LARGE_MODELS=1` lifts the limit. A model passed by local path
 is never checked. `LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1` applies the limit on
 a desktop, to test an app's behaviour.
+
+The full platform matrix, the Android and iOS build details and the numerical
+parity check are in the documentation:
+[docs/en/platforms.md](docs/en/platforms.md) (French: [docs/platforms.md](docs/platforms.md)).
 
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
@@ -786,6 +805,7 @@ Use `lembed_text_options_default_v2()` / `lembed_reranker_options_default_v2()` 
 | `LIBEMBEDDING_BUILD_EXAMPLES` | ON | Build examples |
 | `LIBEMBEDDING_BUILD_BENCHMARKS` | OFF | Build benchmarks |
 | `LIBEMBEDDING_BUILD_SHARED` | OFF | Build shared library for bindings (Windows: always SHARED) |
+| `LIBEMBEDDING_CA_BUNDLE_EMBED` | empty | PEM file compiled into the library and used when no system CA file or directory is found (iOS) |
 
 ---
 

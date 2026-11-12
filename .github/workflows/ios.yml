@@ -5,7 +5,8 @@ name: iOS
 # simulator (arm64 both); the unit tests run on a booted simulator through
 # `xcrun simctl spawn`, and both dylibs are packaged as libembedding.xcframework
 # with the public headers. ONNX Runtime is the onnxruntime-c pod archive 1.30.0,
-# the newest published for iOS. Downloading is off: models are passed by path.
+# the newest published for iOS. Models download through a static libcurl over
+# mbedTLS, with Mozilla's CA bundle compiled in.
 
 on:
   pull_request:
@@ -26,18 +27,8 @@ jobs:
       - name: Build for the device
         run: bash scripts/build_ios.sh iphoneos "$PWD/build-ios"
 
-      # The iOS build does not download yet: the host fills the model cache
-      # that test_embedding_parity reads (LEMBED_PARITY_CACHE, offline), in
-      # libembedding's layout. The simulator reads host paths directly.
-      - name: Fill the parity model cache
-        run: |
-          dir="$RUNNER_TEMP/lembed-cache/models--Xenova-bge-small-en-v1.5"
-          mkdir -p "$dir/onnx"
-          for f in onnx/model.onnx tokenizer.json config.json tokenizer_config.json special_tokens_map.json; do
-            curl -fsSL --retry 3 -o "$dir/$f" "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/$f"
-          done
-          ls -laR "$dir"
-
+      # test_embedding_parity downloads bge-small on the simulator: it checks
+      # the static libcurl, mbedTLS and the embedded CA bundle end to end.
       - name: Run unit tests on a simulator
         run: |
           udid=$(xcrun simctl list devices available -j | python3 -c '
@@ -62,7 +53,6 @@ jobs:
             file "$exe"
             # simctl spawn passes SIMCTL_CHILD_* to the process without the prefix.
             if SIMCTL_CHILD_TMPDIR="$RUNNER_TEMP" \
-               SIMCTL_CHILD_LEMBED_PARITY_CACHE="$RUNNER_TEMP/lembed-cache" \
                SIMCTL_CHILD_LEMBED_PARITY_REF="$PWD/python/tests/data/parity_bge_small_en_v15.json" \
                xcrun simctl spawn "$udid" "$exe" > "$t.log" 2>&1; then
               echo "PASS  $t: $(grep -oE '[0-9]+ passed[^[:cntrl:]]*' "$t.log" | tail -n 1)"
@@ -87,6 +77,13 @@ jobs:
           cp LICENSE build-ios/libembedding.xcframework/LICENSE
           cp build-ios/ort/LICENSE build-ios/libembedding.xcframework/LICENSE.onnxruntime
           cp third_party/llama.cpp/LICENSE build-ios/libembedding.xcframework/LICENSE.llama.cpp
+          cp build-ios/curl-iphoneos/curl-src/curl-*/COPYING build-ios/libembedding.xcframework/LICENSE.curl
+          cp build-ios/curl-iphoneos/curl-src/mbedtls-*/LICENSE build-ios/libembedding.xcframework/LICENSE.mbedtls
+          printf '%s\n' \
+            "The CA certificates compiled into libembedding.dylib are Mozilla's root store," \
+            "as published by curl.se/ca (cacert-2026-11-05.pem), under the Mozilla Public" \
+            "License 2.0: https://www.mozilla.org/MPL/2.0/" \
+            > build-ios/libembedding.xcframework/NOTICE.ca-certificates
           (cd build-ios && zip -qry libembedding-ios.xcframework.zip libembedding.xcframework)
           ls -la build-ios/libembedding.xcframework build-ios/*.zip
 

@@ -70,21 +70,32 @@ backend optionnel.
 5. Documenter le bump : `README.md` (table des dépendances), `AGENTS.md`
    (§3.3) et régénérer `llm.txt` / `llm_full.txt`.
 
-## Android : libcurl et mbedTLS compilés depuis les sources
+## Android et iOS : libcurl et mbedTLS compilés depuis les sources
 
-Android ne fournit ni libcurl ni OpenSSL au code NDK. Rien n'est vendorisé ici :
-`scripts/build_android_curl.sh` télécharge les sources officielles, vérifie
+Ni Android (code NDK) ni le SDK iOS ne fournissent libcurl. Rien n'est vendorisé
+ici : `scripts/build_curl_mbedtls.sh` télécharge les sources officielles, vérifie
 leur SHA-256 épinglé, puis les compile en bibliothèques statiques liées dans
-`libembedding.so`. Il est utilisé par `.github/workflows/android.yml` et par
-`scripts/build_android_libs.sh`.
+`libembedding.so` / `libembedding.dylib`. Il est appelé par
+`scripts/build_android_curl.sh` (Android : `android.yml`,
+`scripts/build_android_libs.sh`) et par `scripts/build_ios.sh` (`ios.yml`).
 
 | Composant | Version | Source | Licence |
 |---|---|---|---|
 | curl (HTTP/HTTPS seulement) | 8.21.0, celle des en-têtes de `curl/` | `curl.se/download`, archive signée par Daniel Stenberg | curl (type MIT) |
 | mbedTLS (branche LTS) | 3.6.7 | releases GitHub `Mbed-TLS/mbedtls`, somme SHA-256 publiée | Apache-2.0 (double licence avec GPL-2.0-or-later, utilisé sous Apache-2.0) |
 
-Les certificats viennent du magasin système `/system/etc/security/cacerts`,
-via `CURLOPT_CAPATH` (voir `detail/downloader_impl.hpp`).
+Certificats :
+
+- **Android** : magasin système `/system/etc/security/cacerts`, via
+  `CURLOPT_CAPATH` (voir `detail/downloader_impl.hpp`).
+- **iOS** : aucun fichier de certificats n'est exposé, et curl ne sait utiliser
+  SecTrust qu'avec OpenSSL ou GnuTLS. Le bundle CA de Mozilla publié par
+  `curl.se/ca` (fichier daté, SHA-256 épinglé dans `build_ios.sh`, licence
+  MPL-2.0) est donc compilé dans la bibliothèque : l'option CMake
+  `LIBEMBEDDING_CA_BUNDLE_EMBED=<pem>` génère `lembed_embedded_ca_bundle.h`,
+  passé à curl via `CURLOPT_CAINFO_BLOB`. Pour le mettre à jour, changer
+  `CA_BUNDLE_DATE` et `CA_BUNDLE_SHA256` dans `build_ios.sh` et la date citée
+  dans `ios.yml` (`NOTICE.ca-certificates`).
 
 ## Attribution
 

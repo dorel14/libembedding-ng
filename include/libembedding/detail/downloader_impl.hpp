@@ -21,6 +21,17 @@
 #include <thread>
 #include <vector>
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>  /* TARGET_OS_IPHONE */
+#endif
+
+/* iOS (device and simulator), where the app sandbox and the certificate store
+ * differ from every other platform. */
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define LEMBED_DETAIL_IOS 1
+#else
+#define LEMBED_DETAIL_IOS 0
+#endif
 
 namespace lembed { namespace detail {
 
@@ -37,6 +48,12 @@ inline std::string get_cache_dir(const char* override_dir = nullptr) {
     /* Default: ~/.cache/libembedding */
     const char* home = std::getenv("HOME");
     if (!home || !home[0]) home = std::getenv("USERPROFILE");
+#if LEMBED_DETAIL_IOS
+    /* HOME is the app container, whose root an app may not write to; caches
+     * belong in Library/Caches, which the system may purge when space runs
+     * low (a purged model is downloaded again). */
+    if (home && home[0]) return std::string(home) + "/Library/Caches/libembedding";
+#endif
     if (home && home[0]) return std::string(home) + "/.cache/libembedding";
 
     /* No home directory. Android apps have none and no /tmp either, but the
@@ -92,6 +109,11 @@ inline std::string repo_to_dirname(const std::string& repo_code) {
 #ifndef LIBEMBEDDING_NO_DOWNLOAD
 
 #include <curl/curl.h>
+#ifdef LIBEMBEDDING_EMBEDDED_CA_BUNDLE
+/* Generated at configure time from LIBEMBEDDING_CA_BUNDLE_EMBED: defines
+ * lembed_embedded_ca_bundle[], the PEM bundle as bytes. */
+#include "lembed_embedded_ca_bundle.h"
+#endif
 
 /* Correction pour le support de S_ISREG sous Windows (MSVC) */
 #if defined(_WIN32) || defined(WIN32)
@@ -141,7 +163,12 @@ static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow
  * /etc/pki/tls/certs/ca-bundle.crt, which Debian and Ubuntu do not have, so
  * every HTTPS download failed there (measured on the aarch64 wheel). Instead,
  * honour SSL_CERT_FILE / CURL_CA_BUNDLE, then use the first bundle that exists
- * on this machine. Windows and macOS keep libcurl's own default. */
+ * on this machine. Windows and macOS keep libcurl's own default.
+ *
+ * iOS exposes no certificate file and its native verifier (SecTrust) is not
+ * available with mbedTLS, so the iOS build embeds Mozilla's CA bundle
+ * (LIBEMBEDDING_EMBEDDED_CA_BUNDLE, see CMakeLists.txt). SSL_CERT_FILE /
+ * CURL_CA_BUNDLE still take precedence there. */
 struct CaSource {
     std::string file;   /* for CURLOPT_CAINFO, empty if none */
     std::string dir;    /* for CURLOPT_CAPATH, empty if none */
@@ -149,7 +176,7 @@ struct CaSource {
 
 inline CaSource find_ca_source() {
     CaSource ca;
-#if defined(__linux__) || defined(__ANDROID__)
+#if defined(__linux__) || defined(__ANDROID__) || LEMBED_DETAIL_IOS
     for (const char* var : {"SSL_CERT_FILE", "CURL_CA_BUNDLE"}) {
         const char* v = std::getenv(var);
         if (v && v[0] && file_exists(v)) {
@@ -157,6 +184,8 @@ inline CaSource find_ca_source() {
             return ca;
         }
     }
+#endif
+#if defined(__linux__) || defined(__ANDROID__)
     static const char* const kBundles[] = {
         "/etc/ssl/certs/ca-certificates.crt",                 /* Debian, Ubuntu, Alpine */
         "/etc/pki/tls/certs/ca-bundle.crt",                   /* RHEL, Fedora, AlmaLinux */
@@ -230,6 +259,15 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
     const CaSource& ca = ca_source();
     if (!ca.file.empty()) curl_easy_setopt(curl, CURLOPT_CAINFO, ca.file.c_str());
     if (!ca.dir.empty()) curl_easy_setopt(curl, CURLOPT_CAPATH, ca.dir.c_str());
+#ifdef LIBEMBEDDING_EMBEDDED_CA_BUNDLE
+    if (ca.file.empty() && ca.dir.empty()) {
+        struct curl_blob blob;
+        blob.data = (void*)lembed_embedded_ca_bundle;
+        blob.len = sizeof(lembed_embedded_ca_bundle);
+        blob.flags = CURL_BLOB_NOCOPY;  /* static storage, outlives the transfer */
+        curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
+    }
+#endif
 
     char errbuf[CURL_ERROR_SIZE];
     errbuf[0] = '\0';
