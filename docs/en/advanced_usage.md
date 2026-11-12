@@ -47,17 +47,8 @@ from libembedding import TextEmbedding
 # CPU (default, always available)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# NVIDIA CUDA
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda", device_id=0)
-
-# Apple CoreML (macOS/iOS)
+# Apple CoreML (macOS/iOS), falls back to CPU if unavailable
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
-
-# DirectML (Windows)
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="directml")
-
-# NVIDIA TensorRT
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 ```
 
 **Supported providers:**
@@ -65,11 +56,13 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 | Provider | Backend | Platform |
 |----------|---------|----------|
 | `cpu` | CPU | All |
-| `cuda` | CUDA | NVIDIA GPU |
 | `coreml` | CoreML | macOS, iOS |
-| `directml` | DirectML | Windows |
-| `tensorrt` | TensorRT | NVIDIA GPU |
-| `llamacpp` | llama.cpp | All |
+| `llamacpp` | llama.cpp (CPU) | All |
+| `cuda`, `directml`, `tensorrt` | reserved: run on CPU | — |
+
+GPU acceleration is out of scope before 1.x. The `cuda`, `directml` and
+`tensorrt` values are accepted to keep the API stable, but no build enables
+them: the model then runs on the CPU.
 
 ### GGUF models (llama.cpp)
 
@@ -323,7 +316,7 @@ For optimal performance:
 
 1. **Reuse the model** — create it once and embed multiple batches
 2. **Tune `batch_size`** — increase until memory saturation
-3. **Use a GPU provider** — `cuda`, `coreml`, or `directml`
+3. **Try CoreML on Apple** — `provider="coreml"` (benchmark it: the gain depends on the model)
 4. **Enable quantization** — choose `_Q` models to cut on-disk size by 2-4x (throughput effect is model-dependent: benchmark it, see [Performance](performance_tuning.html#quantization-fp32-vs-int8))
 5. **Disable progress** — `show_download_progress=False` for scripts
 
