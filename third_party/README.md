@@ -94,8 +94,8 @@ Certificats :
   MPL-2.0) est donc compilé dans la bibliothèque : l'option CMake
   `LIBEMBEDDING_CA_BUNDLE_EMBED=<pem>` génère `lembed_embedded_ca_bundle.h`,
   passé à curl via `CURLOPT_CAINFO_BLOB`. Pour le mettre à jour, changer
-  `CA_BUNDLE_DATE` et `CA_BUNDLE_SHA256` dans `build_ios.sh` et la date citée
-  dans `ios.yml` (`NOTICE.ca-certificates`).
+  `CA_BUNDLE_DATE` et `CA_BUNDLE_SHA256` dans `build_ios.sh` (la date est
+  aussi reprise dans `NOTICE.ca-certificates`, écrit par le même script).
 
 ## Attribution
 

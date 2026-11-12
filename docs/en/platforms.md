@@ -115,28 +115,45 @@ bash scripts/build_ios.sh <iphoneos|iphonesimulator> <work-dir> [tests]
   ggml/llama (static, `BUILD_SHARED_LIBS=OFF`) and libcurl/mbedTLS (static) are
   linked in; only system libraries and frameworks remain as dependencies
   (checked with `otool -L` at the end of the script). ggml's CPU dispatch
-  (`LIBEMBEDDING_CPU_DISPATCH=OFF`) and Metal are off. The install name is
-  `@rpath/libembedding.dylib`.
+  (`LIBEMBEDDING_CPU_DISPATCH=OFF`) and Metal are off.
+- An iOS app embeds a dynamic library only inside a framework, so the script
+  wraps the dylib as `<work-dir>/framework-<sdk>/libembedding.framework`. The
+  framework holds the binary (install name
+  `@rpath/libembedding.framework/libembedding`), the `include/libembedding`
+  headers in `Headers/`, and a C module map in `Modules/` (module
+  `libembedding`, umbrella `libembedding.h`). It also holds an `Info.plist` and
+  the licence texts. It is signed ad hoc; Xcode re-signs it with the app's
+  identity when it embeds it.
 
 ### xcframework
 
 The `.github/workflows/ios.yml` workflow (on pull requests to `dev`/`main` or
-manual dispatch, `macos-15` runner) builds both slices, runs the tests on an
-iPhone simulator, then assembles `libembedding.xcframework` (both dylibs plus
-the public headers from `include/libembedding`) and uploads it as the
+manual dispatch, `macos-15` runner) builds both slices and runs the unit tests
+on an iPhone simulator. It then assembles `libembedding.xcframework` from the
+two `libembedding.framework`, runs the tests of the `examples/ios` Swift package
+(see below), and uploads the xcframework as the
 **`libembedding-ios-xcframework`** artifact (`libembedding-ios.xcframework.zip`).
-The xcframework includes the licence texts of everything linked in: `LICENSE`,
+Each framework includes the licence texts of everything linked in: `LICENSE`,
 `LICENSE.onnxruntime`, `LICENSE.llama.cpp`, `LICENSE.curl`, `LICENSE.mbedtls`,
 and `NOTICE.ca-certificates` (Mozilla CA bundle, MPL 2.0).
 
-### Using it in an Xcode project
+### Using it from Swift
 
-Add `libembedding.xcframework` to the frameworks and libraries of the app
-target. The dylib's install name is `@rpath/libembedding.dylib`
-(`scripts/build_ios.sh`), so the app must embed it somewhere its rpaths cover.
-The headers are the C API ones (`libembedding/libembedding.h`). This procedure
-has not been validated in a real Xcode project, and the repository does not yet
-contain a Swift example or an Xcode project.
+`examples/ios/` is a SwiftPM package that uses the xcframework:
+
+- `binaryTarget(name: "libembedding", path: "libembedding.xcframework")`: the
+  xcframework is not versioned, copy it next to `Package.swift`;
+- `import libembedding` exposes the C API (`lembed_*`);
+- `LibEmbeddingSwift` is a small Swift wrapper (`TextEmbedder`: create, `embed`,
+  `cosine`, freed in `deinit`);
+- `LibEmbeddingSmokeTests` (XCTest) downloads bge-small, checks dimension,
+  normalisation and ranking, compares against the x86_64 reference JSON, and
+  checks that bge-large is refused by the mobile limit.
+
+CI runs `xcodebuild test` on a simulator. In an Xcode app, add
+`libembedding.xcframework` to the target's "Frameworks, Libraries, and Embedded
+Content" as **Embed & Sign**. This path has only been validated by the SwiftPM
+package on a simulator, not in a signed app on an iPhone.
 
 ### Cache and certificates
 

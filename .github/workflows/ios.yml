@@ -6,7 +6,9 @@ name: iOS
 # `xcrun simctl spawn`, and both dylibs are packaged as libembedding.xcframework
 # with the public headers. ONNX Runtime is the onnxruntime-c pod archive 1.30.0,
 # the newest published for iOS. Models download through a static libcurl over
-# mbedTLS, with Mozilla's CA bundle compiled in.
+# mbedTLS, with Mozilla's CA bundle compiled in. The xcframework holds one
+# dynamic libembedding.framework per SDK; the Swift package in examples/ios
+# runs its XCTest suite against it with `xcodebuild test`.
 
 on:
   pull_request:
@@ -63,29 +65,51 @@ jobs:
           xcrun simctl shutdown "$udid"
           exit $failed
 
+      # build_ios.sh wraps each SDK's dylib as libembedding.framework (headers,
+      # module map, Info.plist, licence texts): an iOS app embeds a dynamic
+      # library only inside a framework.
       - name: Package libembedding.xcframework
         run: |
-          headers="$PWD/build-ios/headers"
-          rm -rf "$headers" build-ios/libembedding.xcframework
-          mkdir -p "$headers"
-          cp -R include/libembedding "$headers/"
+          rm -rf build-ios/libembedding.xcframework
           xcodebuild -create-xcframework \
-            -library build-ios/cmake-iphoneos/libembedding.dylib -headers "$headers" \
-            -library build-ios/cmake-iphonesimulator/libembedding.dylib -headers "$headers" \
+            -framework build-ios/framework-iphoneos/libembedding.framework \
+            -framework build-ios/framework-iphonesimulator/libembedding.framework \
             -output build-ios/libembedding.xcframework
-          # Licence texts of everything linked into the dylib.
-          cp LICENSE build-ios/libembedding.xcframework/LICENSE
-          cp build-ios/ort/LICENSE build-ios/libembedding.xcframework/LICENSE.onnxruntime
-          cp third_party/llama.cpp/LICENSE build-ios/libembedding.xcframework/LICENSE.llama.cpp
-          cp build-ios/curl-iphoneos/curl-src/curl-*/COPYING build-ios/libembedding.xcframework/LICENSE.curl
-          cp build-ios/curl-iphoneos/curl-src/mbedtls-*/LICENSE build-ios/libembedding.xcframework/LICENSE.mbedtls
-          printf '%s\n' \
-            "The CA certificates compiled into libembedding.dylib are Mozilla's root store," \
-            "as published by curl.se/ca (cacert-2026-11-05.pem), under the Mozilla Public" \
-            "License 2.0: https://www.mozilla.org/MPL/2.0/" \
-            > build-ios/libembedding.xcframework/NOTICE.ca-certificates
           (cd build-ios && zip -qry libembedding-ios.xcframework.zip libembedding.xcframework)
-          ls -la build-ios/libembedding.xcframework build-ios/*.zip
+          find build-ios/libembedding.xcframework -maxdepth 3 | sort
+          ls -la build-ios/*.zip
+
+      # examples/ios is a Swift package whose binaryTarget is the xcframework:
+      # it proves Swift can import the C module, link the framework and embed
+      # text on a simulator (download, parity, mobile model limit).
+      - name: Swift package tests on a simulator (xcodebuild test)
+        run: |
+          rm -rf examples/ios/libembedding.xcframework
+          cp -R build-ios/libembedding.xcframework examples/ios/
+          cd examples/ios
+          scheme=$(xcodebuild -list -json | python3 -c '
+          import json, sys
+          schemes = json.load(sys.stdin)["workspace"]["schemes"]
+          print(next((s for s in schemes if s.endswith("-Package")), schemes[0]))')
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime, items in sorted(devices.items(), reverse=True):
+              if "iOS" in runtime:
+                  for d in items:
+                      if d["name"].startswith("iPhone"):
+                          print(d["udid"]); sys.exit(0)
+          sys.exit("no iPhone simulator available")')
+          echo "scheme: $scheme, simulator: $udid"
+          # TEST_RUNNER_* reaches the test process without the prefix.
+          TEST_RUNNER_LEMBED_PARITY_REF="$GITHUB_WORKSPACE/python/tests/data/parity_bge_small_en_v15.json" \
+          xcodebuild test \
+            -scheme "$scheme" \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath "$RUNNER_TEMP/swift-dd" \
+            | tee "$RUNNER_TEMP/xcodebuild-test.log" \
+            | grep -E "Test Case|Test Suite|error:|warning: .*libembedding|\*\* TEST" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" "$RUNNER_TEMP/xcodebuild-test.log"
 
       - uses: actions/upload-artifact@v4
         with:

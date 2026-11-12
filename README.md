@@ -231,9 +231,12 @@ iOS (15.1 and later, arm64 device and simulator) is supported as a native
 library, not as a Python wheel. `scripts/build_ios.sh <iphoneos|iphonesimulator>
 <work-dir>` builds a self-contained `libembedding.dylib` that links ONNX Runtime
 1.30.0 (the newest onnxruntime-c pod), a static ggml/llama, and a static libcurl
-over mbedTLS (`scripts/build_curl_mbedtls.sh`). The `iOS` workflow packages both
-dylibs as `libembedding.xcframework`, with the licence texts of everything linked
-in, and uploads it as the `libembedding-ios-xcframework` artifact. Models download
+over mbedTLS (`scripts/build_curl_mbedtls.sh`), and wraps it as a dynamic
+`libembedding.framework` with a C module map, so Swift can `import libembedding`.
+The `iOS` workflow joins both SDKs' frameworks into `libembedding.xcframework`,
+with the licence texts of everything linked in, runs the Swift package in
+`examples/ios` against it with `xcodebuild test`, and uploads it as the
+`libembedding-ios-xcframework` artifact. Models download
 as on other platforms into `$HOME/Library/Caches/libembedding`. iOS exposes no
 certificate file, and curl offers SecTrust only with OpenSSL or GnuTLS, so
 Mozilla's CA bundle (curl.se/ca, pinned by SHA-256) is compiled into the dylib
