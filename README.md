@@ -254,6 +254,10 @@ is 532 MB. `list_*_models()` only returns the light ones there, and
 is never checked. `LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1` applies the limit on
 a desktop, to test an app's behaviour.
 
+The full platform matrix, the Android and iOS build details and the numerical
+parity check are in the documentation:
+[docs/en/platforms.md](docs/en/platforms.md) (French: [docs/platforms.md](docs/platforms.md)).
+
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
 `-DLIBEMBEDDING_ARCH_AVX2=ON` compiles libembedding's own code for AVX2; the

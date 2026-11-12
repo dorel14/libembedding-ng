@@ -121,6 +121,7 @@ lembed_text_embedding_free(embedder);
 - [Registre de modèles GGUF C API](https://dorel14.github.io/libembedding-ng/c_api/gguf_registry.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/gguf_registry.md)
 - [GGUF sparse embedding convention](https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md)
 - [Runtime sparse GGUF](https://dorel14.github.io/libembedding-ng/gguf_sparse_runtime.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_runtime.md)
+- [Plateformes supportées](https://dorel14.github.io/libembedding-ng/platforms.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/platforms.md)
 
 ## Code examples
 

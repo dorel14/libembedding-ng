@@ -12,6 +12,8 @@ pip install libembedding-ng
 
 > The PyPI package is **`libembedding-ng`** (imported in Python as `libembedding`).
 
+Wheels exist for Windows x64, Linux x86_64, Linux aarch64 (including 64-bit Raspberry Pi), macOS arm64 and Android (CPython 3.13, through Chaquopy's index); iOS ships as a native library (xcframework). See [Platforms](platforms.html) for the full matrix, Android installation, the iOS build and the model size limit on mobile.
+
 ## Prerequisites
 
 libembedding requires **ONNX Runtime** to be installed on your system:
