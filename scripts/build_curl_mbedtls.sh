@@ -86,6 +86,9 @@ common=(
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     -DCMAKE_INSTALL_PREFIX="$prefix"
+    # GNUInstallDirs picks lib64/ on RHEL-like hosts (the manylinux container);
+    # everything below expects lib/.
+    -DCMAKE_INSTALL_LIBDIR=lib
     # Cross toolchains restrict find_*() to their sysroot: let them see the
     # prefix too, where curl looks for mbedTLS.
     -DCMAKE_FIND_ROOT_PATH="$prefix"
