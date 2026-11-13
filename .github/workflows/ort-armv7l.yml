@@ -15,6 +15,11 @@ name: ORT armv7l (cost measurement)
 # GitHub's ARM runners cannot run AArch32 code natively. Nothing is
 # published; the library is kept 7 days as an artifact.
 #
+# --no_telemetry: since 1.31 a source build enables ORT's 1DS telemetry by
+# default (hashed device id, model file name and hashes, run durations, sent
+# to mobile.events.data.microsoft.com), along with its own copies of curl and
+# mbedTLS. A library embedded in users' applications must not phone home.
+#
 # Ubuntu 22.04: its cross toolchain is GCC 11 over glibc 2.35, below the 2.36
 # of Raspberry Pi OS 12 (bookworm).
 
@@ -64,7 +69,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: out
-          key: ort-armv7l-${{ env.ONNXRUNTIME_VERSION }}-${{ hashFiles('armhf.cmake') }}-ubuntu22.04
+          # Bump the trailing number when the build.py arguments change.
+          key: ort-armv7l-${{ env.ONNXRUNTIME_VERSION }}-${{ hashFiles('armhf.cmake') }}-ubuntu22.04-2
 
       - name: Fetch ONNX Runtime sources and a host protoc
         if: steps.cache.outputs.cache-hit != 'true'
@@ -84,6 +90,7 @@ jobs:
             --build_dir ort-build --config Release \
             --update --build --parallel --skip_tests \
             --build_shared_lib --compile_no_warning_as_error \
+            --no_telemetry \
             --cmake_generator Ninja \
             --path_to_protoc_exe "$PWD/protoc/bin/protoc" \
             --cmake_extra_defines \
@@ -102,6 +109,9 @@ jobs:
           file "$lib"
           arm-linux-gnueabihf-readelf -A "$lib" | grep -E "Tag_CPU_arch|Tag_FP_arch|Tag_Advanced_SIMD|Tag_ABI_VFP_args"
           arm-linux-gnueabihf-objdump -p "$lib" | grep NEEDED
+          if grep -q -a "events.data.microsoft.com" "$lib"; then
+            echo "::error::$lib still contains the telemetry collector URL"; exit 1
+          fi
           glibc=$(arm-linux-gnueabihf-objdump -T "$lib" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
           cxx=$(arm-linux-gnueabihf-objdump -T "$lib" | grep -o 'GLIBCXX_[0-9.]*' | sort -uV | tail -1)
           arm-linux-gnueabihf-strip -o /tmp/stripped.so "$lib"
