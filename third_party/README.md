@@ -70,14 +70,24 @@ backend optionnel.
 5. Documenter le bump : `README.md` (table des dépendances), `AGENTS.md`
    (§3.3) et régénérer `llm.txt` / `llm_full.txt`.
 
-## Android et iOS : libcurl et mbedTLS compilés depuis les sources
+## Android, iOS et wheels Linux : libcurl et mbedTLS compilés depuis les sources
 
-Ni Android (code NDK) ni le SDK iOS ne fournissent libcurl. Rien n'est vendorisé
-ici : `scripts/build_curl_mbedtls.sh` télécharge les sources officielles, vérifie
+Ni Android (code NDK) ni le SDK iOS ne fournissent libcurl. Sous Linux, le
+libcurl du système ferait greffer par auditwheel une trentaine de bibliothèques
+(OpenSSL, krb5, LDAP, libssh, plusieurs sous LGPL). Rien n'est vendorisé ici :
+`scripts/build_curl_mbedtls.sh` télécharge les sources officielles, vérifie
 leur SHA-256 épinglé, puis les compile en bibliothèques statiques liées dans
-`libembedding.so` / `libembedding.dylib`. Il est appelé par
-`scripts/build_android_curl.sh` (Android : `android.yml`,
-`scripts/build_android_libs.sh`) et par `scripts/build_ios.sh` (`ios.yml`).
+`libembedding.so` / `libembedding.dylib`. Il est appelé :
+
+- par `scripts/build_android_curl.sh` (Android : `android.yml`,
+  `scripts/build_android_libs.sh`) ;
+- par `scripts/build_ios.sh` (`ios.yml`) ;
+- en natif pour les wheels Linux (`build-wheel.yml`,
+  `scripts/build_wheel_manylinux.sh`).
+
+Les deux textes de licence sont installés dans
+`curl-prefix/share/licenses/{curl,mbedtls}/`, d'où
+`scripts/collect_wheel_licenses.sh` les copie dans les wheels.
 
 | Composant | Version | Source | Licence |
 |---|---|---|---|

@@ -655,6 +655,12 @@ if(LIBEMBEDDING_BUILD_SHARED)
         set_target_properties(embedding_shared PROPERTIES INSTALL_RPATH "@loader_path")
     elseif(UNIX)
         set_target_properties(embedding_shared PROPERTIES INSTALL_RPATH "$ORIGIN")
+        # The Linux and Android wheels link curl and mbedTLS statically: keep
+        # their symbols out of the dynamic table, so they can never interpose
+        # with, or be interposed by, another libcurl or TLS library loaded in
+        # the same process. The lembed_* API is compiled from this target's own
+        # source, not from an archive, and stays exported.
+        target_link_options(embedding_shared PRIVATE "LINKER:--exclude-libs,ALL")
     endif()
     if(WIN32)
         # libembedding.dll keeps its dependencies PRIVATE, and this target

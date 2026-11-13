@@ -186,7 +186,7 @@ with minimal overhead (~13%).
 |---|---|---|
 | **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
 | **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. The snapshot is trimmed to what the `llama`/`ggml` targets need (`cmake/`, `ggml/`, `include/`, `src/`, `vendor/`, `LICENSE`); see `third_party/README.md`. |
-| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). |
+| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). The Linux, Android and iOS packages link a static libcurl over mbedTLS instead (`scripts/build_curl_mbedtls.sh`). |
 | **cJSON** | Bundled | Included in `third_party/` |
 | **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
 | **CMake** >= 3.18 | Build only | |
@@ -215,8 +215,15 @@ bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CP
 libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
 run time. CI builds it in a `manylinux_2_28` container and tests it on GitHub's
 ARM runners; it has not been tested on a physical Raspberry Pi yet. 32-bit
-Raspberry Pi OS (armv7l) is not supported yet. On Linux, HTTPS downloads use the
-system CA bundle; `SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it.
+Raspberry Pi OS (armv7l) is not supported yet. The Linux wheels download through
+a libcurl linked statically over mbedTLS (HTTP only), so they bundle no system
+libcurl or TLS library; HTTPS uses the system CA bundle, and `SSL_CERT_FILE` or
+`CURL_CA_BUNDLE` override it.
+
+Every wheel ships the licence texts of the native code it bundles (ONNX Runtime,
+llama.cpp/ggml, cJSON, stb, and curl, mbedTLS or zlib where linked) in its
+`.dist-info/licenses/` directory; `python/licenses/THIRD_PARTY_NOTICES.md` lists
+which wheel bundles what.
 
 The Android wheels (`android_24_arm64_v8a`, `android_24_x86_64`) target CPython
 3.13 on Android 7.0 (API 24) and later, the PEP 738 builds used by BeeWare and

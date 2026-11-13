@@ -4,11 +4,13 @@
 # Build a static libcurl over mbedTLS for a platform that ships neither
 # (Android, iOS), so the library can download models there.
 #
-#   build_curl_mbedtls.sh <work-dir> <cmake toolchain arguments...>
+#   build_curl_mbedtls.sh <work-dir> [<cmake toolchain arguments...>]
 #
 # The toolchain arguments select the target (an NDK toolchain file for
 # Android, CMAKE_SYSTEM_NAME=iOS and a sysroot for iOS); see
-# build_android_curl.sh and build_ios.sh. Both libraries are built static and
+# build_android_curl.sh and build_ios.sh. Without any, the build is native: the
+# Linux wheels use it (build-wheel.yml, build_wheel_manylinux.sh) so they graft
+# no system libcurl and none of its dependencies. Both libraries are built static and
 # position independent, then linked into libembedding. HTTP only: models come
 # from HuggingFace over HTTPS, nothing else is needed.
 #
@@ -18,7 +20,8 @@
 # is the one of the bundled Windows headers (third_party/curl/include/curl/curlver.h).
 #
 # The result is installed in <work-dir>/curl-prefix, which holds a CMake
-# package for find_package(CURL); a second run reuses it.
+# package for find_package(CURL); a second run reuses it. Both licence texts
+# are installed in <work-dir>/curl-prefix/share/licenses/{curl,mbedtls}/.
 #
 # Licences: curl is under the curl licence (MIT-style), mbedTLS under
 # Apache-2.0 (dual-licensed with GPL-2.0-or-later; used under Apache-2.0).
@@ -30,8 +33,8 @@
 
 set -euo pipefail
 
-if [ $# -lt 2 ]; then
-    echo "usage: $0 <work-dir> <cmake toolchain arguments...>" >&2
+if [ $# -lt 1 ]; then
+    echo "usage: $0 <work-dir> [<cmake toolchain arguments...>]" >&2
     exit 2
 fi
 work="$1"
@@ -44,7 +47,8 @@ MBEDTLS_VERSION=3.6.7
 MBEDTLS_SHA256=a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
 
 prefix="$work/curl-prefix"
-if [ -f "$prefix/lib/libcurl.a" ] && [ -f "$prefix/lib/libmbedtls.a" ]; then
+if [ -f "$prefix/lib/libcurl.a" ] && [ -f "$prefix/lib/libmbedtls.a" ] \
+   && [ -f "$prefix/share/licenses/curl/COPYING" ]; then
     echo "== libcurl already built in $prefix"
     exit 0
 fi
@@ -78,10 +82,13 @@ tar -xjf "$src/mbedtls-$MBEDTLS_VERSION.tar.bz2" -C "$src"
 tar -xJf "$src/curl-$CURL_VERSION.tar.xz" -C "$src"
 
 common=(
-    "${toolchain[@]}"
+    ${toolchain[@]+"${toolchain[@]}"}
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     -DCMAKE_INSTALL_PREFIX="$prefix"
+    # GNUInstallDirs picks lib64/ on RHEL-like hosts (the manylinux container);
+    # everything below expects lib/.
+    -DCMAKE_INSTALL_LIBDIR=lib
     # Cross toolchains restrict find_*() to their sysroot: let them see the
     # prefix too, where curl looks for mbedTLS.
     -DCMAKE_FIND_ROOT_PATH="$prefix"
@@ -129,5 +136,10 @@ cmake -S "$src/curl-$CURL_VERSION" -B "$work/curl-build" "${common[@]}" \
     -DMBEDCRYPTO_LIBRARY="$prefix/lib/libmbedcrypto.a"
 cmake --build "$work/curl-build" --parallel "$jobs"
 cmake --install "$work/curl-build"
+
+# Licence texts, for the packages that redistribute the static libraries.
+mkdir -p "$prefix/share/licenses/curl" "$prefix/share/licenses/mbedtls"
+cp "$src/curl-$CURL_VERSION/COPYING" "$prefix/share/licenses/curl/COPYING"
+cp "$src/mbedtls-$MBEDTLS_VERSION/LICENSE" "$prefix/share/licenses/mbedtls/LICENSE"
 
 ls -la "$prefix/lib"

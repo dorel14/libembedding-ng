@@ -29,8 +29,9 @@ Sources : `.github/workflows/ci.yml` (matrice `python-tests`),
 `.github/workflows/build-wheel-android.yml`, `.github/workflows/android.yml`,
 `.github/workflows/ios.yml`.
 
-Sur iOS, ggml est compilé sans Metal (`-DGGML_METAL=OFF` dans
-`scripts/build_ios.sh`) : le GPU est hors périmètre.
+Sur macOS et iOS, ggml est compilé sans Metal (`-DGGML_METAL=OFF` dans
+`.github/workflows/build-wheel.yml` et `scripts/build_ios.sh`) : le GPU est
+hors périmètre avant la 1.x.
 
 ## Linux aarch64 et Raspberry Pi
 
@@ -47,6 +48,9 @@ glibc 2.31 ou plus : Raspberry Pi 3/4/5 sous Raspberry Pi OS 64 bits
 - La CI construit la wheel dans un conteneur `manylinux_2_28` et la teste sur
   les runners ARM de GitHub. Elle n'a **pas** été testée sur un Raspberry Pi
   physique.
+- Les wheels Linux (x86_64 et aarch64) téléchargent par une libcurl liée
+  statiquement sur mbedTLS (`scripts/build_curl_mbedtls.sh`, HTTP seulement) :
+  elles n'embarquent ni libcurl ni bibliothèque TLS du système.
 - Les téléchargements HTTPS utilisent le bundle de certificats du système
   (`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`,
   `/etc/ssl/ca-bundle.pem`, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`,
@@ -260,6 +264,27 @@ Deux tests lisent ce fichier :
   `download_smoke`) ; exécuté dans le job de test des wheels sur Linux x64,
   Linux aarch64, macOS et Windows (`ci.yml` → `build-wheel.yml`), et sur
   l'émulateur Android via `download_smoke`.
+
+## Licences des composants embarqués
+
+Chaque wheel contient, dans `.dist-info/licenses/`, la licence MIT du projet
+et celles du code natif qu'elle embarque (PEP 639, `license-files` dans
+`python/pyproject.toml`) :
+
+- toutes : ONNX Runtime (`LICENSE` et `ThirdPartyNotices.txt` de la version
+  embarquée), llama.cpp/ggml, cJSON, stb ;
+- Linux et Android : curl et mbedTLS (liés statiquement) ;
+- Windows : curl et zlib (DLL de vcpkg) ;
+- Linux : libgomp (runtime OpenMP de GCC, GPL-3.0 avec l'exception GCC Runtime
+  Library 3.1, qui autorise sa redistribution).
+
+`python/licenses/THIRD_PARTY_NOTICES.md` détaille la répartition. Les textes
+stables sont versionnés dans `python/licenses/`. Les autres sont ajoutés au
+build par `scripts/collect_wheel_licenses.sh`. La CI vérifie que chaque wheel
+les contient (`build-wheel.yml`, étape « Check licence texts »).
+
+Le xcframework iOS porte les siennes dans chaque `libembedding.framework`
+(voir [xcframework](#xcframework)).
 
 ## Voir aussi
 
