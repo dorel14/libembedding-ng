@@ -27,8 +27,9 @@ Sources: `.github/workflows/ci.yml` (`python-tests` matrix),
 `.github/workflows/build-wheel-android.yml`, `.github/workflows/android.yml`,
 `.github/workflows/ios.yml`.
 
-On iOS, ggml is built without Metal (`-DGGML_METAL=OFF` in
-`scripts/build_ios.sh`): GPU is out of scope.
+On macOS and iOS, ggml is built without Metal (`-DGGML_METAL=OFF` in
+`.github/workflows/build-wheel.yml` and `scripts/build_ios.sh`): GPU is out of
+scope before 1.x.
 
 ## Linux aarch64 and Raspberry Pi
 
@@ -44,6 +45,9 @@ floor").
 - **32-bit Raspberry Pi OS (armv7l) is not supported.**
 - CI builds the wheel in a `manylinux_2_28` container and tests it on GitHub's
   ARM runners. It has **not** been tested on a physical Raspberry Pi.
+- The Linux wheels (x86_64 and aarch64) download through a libcurl linked
+  statically over mbedTLS (`scripts/build_curl_mbedtls.sh`, HTTP only): they
+  bundle no system libcurl or TLS library.
 - HTTPS downloads use the system CA bundle
   (`/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`,
   `/etc/ssl/ca-bundle.pem`, `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`,
@@ -248,6 +252,27 @@ Two tests read that file:
   `download_smoke`); run in the wheel test job on Linux x64, Linux aarch64,
   macOS and Windows (`ci.yml` → `build-wheel.yml`), and on the Android
   emulator through `download_smoke`.
+
+## Licences of the bundled components
+
+Each wheel holds, in `.dist-info/licenses/`, the project's MIT licence and
+those of the native code it bundles (PEP 639, `license-files` in
+`python/pyproject.toml`):
+
+- all: ONNX Runtime (`LICENSE` and `ThirdPartyNotices.txt` of the bundled
+  version), llama.cpp/ggml, cJSON, stb;
+- Linux and Android: curl and mbedTLS (linked statically);
+- Windows: curl and zlib (vcpkg DLLs);
+- Linux: libgomp (GCC's OpenMP runtime, GPL-3.0 with the GCC Runtime Library
+  Exception 3.1, which allows redistributing it).
+
+`python/licenses/THIRD_PARTY_NOTICES.md` details which wheel bundles what. The
+stable texts are versioned in `python/licenses/`. The others are added at build
+time by `scripts/collect_wheel_licenses.sh`. CI checks that every wheel carries
+them (`build-wheel.yml`, step "Check licence texts").
+
+The iOS xcframework carries its own in each `libembedding.framework` (see
+[xcframework](#xcframework)).
 
 ## See also
 

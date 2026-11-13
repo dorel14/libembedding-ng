@@ -8,7 +8,7 @@
 
 Fast ONNX-based text, image, and sparse embeddings for Python. Dynamic INT8 ONNX models are ~4x smaller, ~2x lighter in memory and ~1.7-2.0x faster than FP32 on CPU (measured; see Benchmarks below).
 
-Built on a C/C++ backend using ONNX Runtime, exposed to Python via zero-overhead cffi bindings. The wheel bundles the **compiled shared library** (`libembedding.so` / `.dylib` / `.dll`) together with ONNX Runtime and libcurl, so no system ONNX Runtime install is required at runtime. Supports 44 text embedding models, 5 image models, 2 sparse models, and 4 rerankers with automatic model downloading from HuggingFace Hub.
+Built on a C/C++ backend using ONNX Runtime, exposed to Python via zero-overhead cffi bindings. The wheel bundles the **compiled shared library** (`libembedding.so` / `.dylib` / `.dll`) together with ONNX Runtime (and, except on macOS, libcurl), so no system ONNX Runtime install is required at runtime. The licence texts of the bundled native code are in the wheel's `.dist-info/licenses/`. Supports 44 text embedding models, 5 image models, 2 sparse models, and 4 rerankers with automatic model downloading from HuggingFace Hub.
 
 ## Installation
 
@@ -26,8 +26,9 @@ and macOS arm64 (Apple Silicon, macOS 14 or later). The x86-64 wheels run on any
 no AVX/AVX2 required: GGUF models load the ggml CPU library matching the machine at run time
 (`libembedding.ggml_cpu_features()` names it), and the aarch64 wheel does the same across
 eight ARM levels (armv8.0 to armv9.2). 32-bit ARM (armv7l) is not supported yet. On Linux,
-HTTPS downloads use the system CA bundle (`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
-(ONNX Runtime, llama.cpp/ggml) under `libembedding/.dylibs/` and uses the system libcurl.
+downloads go through a libcurl linked statically over mbedTLS, and HTTPS uses the system CA bundle
+(`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
+(ONNX Runtime, llama.cpp/ggml, built without Metal) under `libembedding/.dylibs/` and uses the system libcurl.
 
 **Android:** wheels for CPython 3.13 on Android 7.0+ (`android_24_arm64_v8a`,
 `android_24_x86_64`, PEP 738: BeeWare, Chaquopy). cffi and numpy come from Chaquopy's index:
