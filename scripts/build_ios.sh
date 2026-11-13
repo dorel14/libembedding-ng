@@ -27,6 +27,12 @@
 # (LIBEMBEDDING_CA_BUNDLE_EMBED). SSL_CERT_FILE / CURL_CA_BUNDLE override it.
 # Models are cached in $HOME/Library/Caches/libembedding.
 #
+# Packaging: an iOS app embeds a dynamic library only inside a framework, so
+# the dylib is also wrapped as <work-dir>/framework-<sdk>/libembedding.framework
+# (headers, a C module map for Swift, Info.plist, licence texts, ad hoc
+# signature). .github/workflows/ios.yml joins both SDKs' frameworks into
+# libembedding.xcframework; examples/ios/ is a Swift package that uses it.
+#
 # Auteur: David Orel
 # Version: 1.13.0
 #
@@ -43,8 +49,8 @@ work="$2"
 tests="${3:-}"
 
 case "$sdk" in
-    iphoneos)        slice=ios-arm64 ;;
-    iphonesimulator) slice=ios-arm64_x86_64-simulator ;;
+    iphoneos)        slice=ios-arm64;                  platform=iPhoneOS ;;
+    iphonesimulator) slice=ios-arm64_x86_64-simulator; platform=iPhoneSimulator ;;
     *) echo "ERROR: unknown SDK '$sdk'" >&2; exit 2 ;;
 esac
 
@@ -134,3 +140,57 @@ if otool -L "$dylib" | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/|@r
     echo "ERROR: libembedding.dylib depends on a non-system library" >&2
     exit 1
 fi
+
+# ---- libembedding.framework ------------------------------------------------------
+# iOS frameworks are flat: binary, Info.plist, Headers/ and Modules/ at the root.
+# The umbrella header is plain C (the C++ parts sit behind
+# LIBEMBEDDING_IMPLEMENTATION), so Swift imports it as a Clang module.
+version="$(sed -n 's/^#define LIBEMBEDDING_VERSION_STRING "\(.*\)"$/\1/p' "$root/include/libembedding/config.h")"
+fw="$work/framework-$sdk/libembedding.framework"
+rm -rf "$fw"
+mkdir -p "$fw/Headers" "$fw/Modules"
+cp "$dylib" "$fw/libembedding"
+install_name_tool -id @rpath/libembedding.framework/libembedding "$fw/libembedding"
+cp -R "$root/include/libembedding/." "$fw/Headers/"
+cat > "$fw/Modules/module.modulemap" <<'EOF'
+framework module libembedding {
+    umbrella header "libembedding.h"
+    export *
+}
+EOF
+cat > "$fw/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleExecutable</key><string>libembedding</string>
+    <key>CFBundleIdentifier</key><string>io.github.dorel14.libembedding</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>libembedding</string>
+    <key>CFBundlePackageType</key><string>FMWK</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$version</string>
+    <key>CFBundleSupportedPlatforms</key><array><string>$platform</string></array>
+    <key>MinimumOSVersion</key><string>$IOS_DEPLOYMENT_TARGET</string>
+</dict>
+</plist>
+EOF
+plutil -lint "$fw/Info.plist"
+
+# Licence texts of everything linked into the binary.
+cp "$root/LICENSE" "$fw/LICENSE"
+cp "$ort/LICENSE" "$fw/LICENSE.onnxruntime"
+cp "$root/third_party/llama.cpp/LICENSE" "$fw/LICENSE.llama.cpp"
+cp "$curl_work"/curl-src/curl-*/COPYING "$fw/LICENSE.curl"
+cp "$curl_work"/curl-src/mbedtls-*/LICENSE "$fw/LICENSE.mbedtls"
+printf '%s\n' \
+    "The CA certificates compiled into libembedding are Mozilla's root store," \
+    "as published by curl.se/ca (cacert-$CA_BUNDLE_DATE.pem), under the Mozilla" \
+    "Public License 2.0: https://www.mozilla.org/MPL/2.0/" \
+    > "$fw/NOTICE.ca-certificates"
+
+# install_name_tool invalidated the linker's signature; Xcode re-signs the
+# framework with the app's identity when it embeds it.
+codesign --force --sign - "$fw"
+echo "== $fw"
