@@ -214,38 +214,62 @@ inline const CaSource& ca_source() {
     return ca;
 }
 
-/* Download a single file from HuggingFace.
- * error_out, when not null, receives libcurl's reason for a failure. */
-inline bool download_hf_file(const std::string& repo, const std::string& filename,
-                              const std::string& dest_path,
-                              download_progress_fn progress_fn = nullptr,
-                              void* progress_userdata = nullptr,
-                              std::string* error_out = nullptr) {
-    static std::atomic<unsigned long long> temp_sequence(0);
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto thread_id = std::hash<std::thread::id>()(std::this_thread::get_id());
-    const auto sequence = temp_sequence.fetch_add(1, std::memory_order_relaxed);
+/* Number of tries for one file: the first request plus two retries. */
+constexpr int kDownloadAttempts = 3;
 
-    /* Construct URL */
-    std::string url = get_hf_endpoint() + "/" + repo + "/resolve/main/" + filename;
-
-    /* Ensure destination directory exists */
-    const std::string parent = std::filesystem::path(dest_path).parent_path().string();
-    if (!parent.empty()) {
-        if (!mkdirs(parent)) return false;
+/* Seconds without a single byte received after which a transfer is aborted
+ * (and retried). Without it a connection that stops sending, while staying
+ * open, blocks the download forever: seen on the Windows CI runners, stuck at
+ * 0 % until the test timeout. LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT overrides
+ * the 30 s default; slow links are not affected, only silent ones. */
+inline long download_stall_seconds() {
+    const char* env = std::getenv("LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT");
+    if (env && env[0]) {
+        char* end = nullptr;
+        const long value = std::strtol(env, &end, 10);
+        if (end && *end == '\0' && value > 0) return value;
     }
+    return 30;
+}
 
-    /* Open temp file */
-    std::string tmp_path = dest_path + ".tmp-" + std::to_string(tick) + "-" +
-                           std::to_string(thread_id) + "-" +
-                           std::to_string(sequence);
+/* Failures worth another request: the network or the server side, not the
+ * request itself (404, 401, a bad certificate). */
+inline bool is_transient_download_error(CURLcode res, long http_code) {
+    switch (res) {
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_OPERATION_TIMEDOUT:
+    case CURLE_SEND_ERROR:
+    case CURLE_RECV_ERROR:
+    case CURLE_PARTIAL_FILE:
+    case CURLE_GOT_NOTHING:
+    case CURLE_HTTP2:
+    case CURLE_HTTP2_STREAM:
+        return true;
+    case CURLE_HTTP_RETURNED_ERROR:
+        return http_code == 429 || http_code >= 500;
+    default:
+        return false;
+    }
+}
+
+/* One request for url into tmp_path (truncated first). On failure, reason
+ * receives libcurl's message and retry whether another request may succeed. */
+inline bool download_attempt(const std::string& url, const std::string& tmp_path,
+                             long stall_seconds,
+                             download_progress_fn progress_fn, void* progress_userdata,
+                             std::string* reason, bool* retry) {
+    if (retry) *retry = false;
     FILE* fp = fopen(tmp_path.c_str(), "wb");
-    if (!fp) return false;
+    if (!fp) {
+        if (reason) *reason = "cannot create " + tmp_path;
+        return false;
+    }
 
     CURL* curl = curl_easy_init();
     if (!curl) {
         fclose(fp);
-        remove(tmp_path.c_str());
+        if (reason) *reason = "curl_easy_init failed";
         return false;
     }
 
@@ -255,6 +279,10 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "libembedding/" LIBEMBEDDING_VERSION_STRING);
     curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+    /* Below 1 byte/s for stall_seconds: the connection is dead, not slow. */
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, stall_seconds);
 
     const CaSource& ca = ca_source();
     if (!ca.file.empty()) curl_easy_setopt(curl, CURLOPT_CAINFO, ca.file.c_str());
@@ -280,17 +308,73 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     }
 
-    CURLcode res = curl_easy_perform(curl);
+    const CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     curl_easy_cleanup(curl);
-    fclose(fp);
+    const bool closed = fclose(fp) == 0;
 
     if (res != CURLE_OK) {
-        if (error_out) {
-            *error_out = curl_easy_strerror(res);
-            if (errbuf[0]) *error_out += std::string(": ") + errbuf;
+        if (reason) {
+            *reason = curl_easy_strerror(res);
+            if (errbuf[0]) *reason += std::string(": ") + errbuf;
+        }
+        if (retry) *retry = is_transient_download_error(res, http_code);
+        return false;
+    }
+    if (!closed) {
+        if (reason) *reason = "cannot write the downloaded file: " + tmp_path;
+        return false;
+    }
+    return true;
+}
+
+/* Download a single file from HuggingFace, retrying transient failures.
+ * error_out, when not null, receives libcurl's reason for a failure. */
+inline bool download_hf_file(const std::string& repo, const std::string& filename,
+                              const std::string& dest_path,
+                              download_progress_fn progress_fn = nullptr,
+                              void* progress_userdata = nullptr,
+                              std::string* error_out = nullptr) {
+    static std::atomic<unsigned long long> temp_sequence(0);
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto thread_id = std::hash<std::thread::id>()(std::this_thread::get_id());
+    const auto sequence = temp_sequence.fetch_add(1, std::memory_order_relaxed);
+
+    /* Construct URL */
+    std::string url = get_hf_endpoint() + "/" + repo + "/resolve/main/" + filename;
+
+    /* Ensure destination directory exists */
+    const std::string parent = std::filesystem::path(dest_path).parent_path().string();
+    if (!parent.empty()) {
+        if (!mkdirs(parent)) return false;
+    }
+
+    std::string tmp_path = dest_path + ".tmp-" + std::to_string(tick) + "-" +
+                           std::to_string(thread_id) + "-" +
+                           std::to_string(sequence);
+
+    const long stall = download_stall_seconds();
+    std::string reason;
+    for (int attempt = 1;; attempt++) {
+        bool retry = false;
+        if (download_attempt(url, tmp_path, stall, progress_fn, progress_userdata,
+                             &reason, &retry)) {
+            break;
         }
         remove(tmp_path.c_str());
-        return false;
+        if (!retry || attempt >= kDownloadAttempts) {
+            if (error_out) {
+                *error_out = reason;
+                if (attempt > 1) {
+                    *error_out += " (after " + std::to_string(attempt) + " attempts)";
+                }
+            }
+            return false;
+        }
+        /* A short pause: a stalled or reset connection is often a CDN node
+         * going away, and the next request lands on another one. */
+        std::this_thread::sleep_for(std::chrono::seconds(attempt));
     }
 
     /* Publish atomically; another downloader may have completed this file. */

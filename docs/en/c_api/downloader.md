@@ -63,6 +63,13 @@ The default cache directory is `~/.cache/libembedding`, or
 `$HOME/Library/Caches/libembedding` on iOS; `LIBEMBEDDING_CACHE_DIR` and
 `FASTEMBED_CACHE_DIR` take precedence.
 
+Each file is requested at most 3 times. A new attempt follows a network error
+(connection refused or reset, incomplete transfer), an HTTP 429 or 5xx, or a
+transfer that received no byte at all for `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT`
+seconds (30 by default). A slow but active connection is never cut. A 404, a
+401 or a certificate error fail at once. The error message gives the number of
+attempts.
+
 ## Size limit on mobile
 
 On Android and iOS, a registry model larger than `LEMBED_MOBILE_MODEL_LIMIT_MB`
