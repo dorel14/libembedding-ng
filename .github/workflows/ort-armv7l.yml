@@ -1,0 +1,130 @@
+name: ORT armv7l (cost measurement)
+
+# Roadmap T33d (D10), step 0: ONNX Runtime publishes no armv7l build, so a
+# 32-bit Raspberry Pi OS wheel needs ORT compiled from source. ORT supports
+# ARM32 only by cross-compiling (cmake/detect_onnxruntime_target_platform.cmake),
+# so this job cross-compiles the release used everywhere else for
+# arm-linux-gnueabihf (ARMv7-A, NEON, hard float) on an x64 runner, then loads
+# the result under qemu-arm. It measures what the decision needs: build time,
+# library size and the glibc symbol versions it requires (hence the
+# manylinux tag). Nothing is published; the library is kept 7 days as an
+# artifact.
+#
+# Ubuntu 22.04: its cross toolchain is GCC 11 over glibc 2.35, below the 2.36
+# of Raspberry Pi OS 12 (bookworm).
+
+on:
+  push:
+    branches: ["ci/armv7l-*"]
+    paths: [".github/workflows/ort-armv7l.yml"]
+  workflow_dispatch:
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+  # protoc runs on the build machine; ORT 1.31.0 pins protobuf 33.6 (cmake/deps.txt).
+  PROTOC_VERSION: "33.6"
+
+jobs:
+  ort:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 330
+    steps:
+      - name: Install the armhf cross toolchain and qemu-user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-arm-linux-gnueabihf qemu-user ninja-build
+          arm-linux-gnueabihf-g++ --version | head -1
+          cmake --version | head -1
+          nproc; free -g
+
+      - name: Fetch ONNX Runtime sources and a host protoc
+        run: |
+          git clone --depth 1 --branch "v$ONNXRUNTIME_VERSION" \
+            https://github.com/microsoft/onnxruntime.git ort
+          curl -fsSL --retry 3 -o protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-linux-x86_64.zip"
+          unzip -q protoc.zip -d protoc
+          protoc/bin/protoc --version
+
+      - name: Write the toolchain file
+        run: |
+          cat > armhf.cmake <<'EOF'
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR armv7l)
+          set(CMAKE_C_COMPILER arm-linux-gnueabihf-gcc)
+          set(CMAKE_CXX_COMPILER arm-linux-gnueabihf-g++)
+          set(CMAKE_C_FLAGS_INIT "-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard")
+          set(CMAKE_CXX_FLAGS_INIT "-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard")
+          set(CMAKE_FIND_ROOT_PATH /usr/arm-linux-gnueabihf)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          EOF
+
+      - name: Cross-compile ONNX Runtime (timed)
+        run: |
+          start=$(date +%s)
+          python3 ort/tools/ci_build/build.py \
+            --build_dir ort-build --config Release \
+            --update --build --parallel --skip_tests \
+            --build_shared_lib --compile_no_warning_as_error \
+            --cmake_generator Ninja \
+            --path_to_protoc_exe "$PWD/protoc/bin/protoc" \
+            --cmake_extra_defines \
+              CMAKE_TOOLCHAIN_FILE="$PWD/armhf.cmake" \
+              onnxruntime_BUILD_UNIT_TESTS=OFF
+          end=$(date +%s)
+          echo "ORT_BUILD_SECONDS=$((end - start))" >> "$GITHUB_ENV"
+
+      - name: Inspect the library
+        run: |
+          lib=$(ls ort-build/Release/libonnxruntime.so.* | head -1)
+          file "$lib"
+          ls -la "$lib"
+          arm-linux-gnueabihf-readelf -A "$lib" | grep -E "Tag_CPU_arch|Tag_FP_arch|Tag_Advanced_SIMD|Tag_ABI_VFP_args"
+          echo "Highest glibc symbol version:"
+          arm-linux-gnueabihf-objdump -T "$lib" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+          arm-linux-gnueabihf-objdump -p "$lib" | grep NEEDED
+          {
+            echo "### ONNX Runtime $ONNXRUNTIME_VERSION for armv7l"
+            echo ""
+            echo "- build: $((ORT_BUILD_SECONDS / 60)) min $((ORT_BUILD_SECONDS % 60)) s on $(nproc) cores"
+            echo "- size: $(stat -c %s "$lib") bytes (stripped: $(arm-linux-gnueabihf-strip -o /tmp/s.so "$lib" && stat -c %s /tmp/s.so))"
+            echo "- highest glibc: $(arm-linux-gnueabihf-objdump -T "$lib" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Load it under qemu-arm
+        run: |
+          cat > smoke.c <<'EOF'
+          #include <stdio.h>
+          #include "onnxruntime_c_api.h"
+          int main(void) {
+              const OrtApiBase* base = OrtGetApiBase();
+              const OrtApi* api = base->GetApi(ORT_API_VERSION);
+              if (!api) { puts("GetApi failed"); return 1; }
+              OrtEnv* env = NULL;
+              OrtStatus* st = api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "smoke", &env);
+              if (st) { puts(api->GetErrorMessage(st)); return 1; }
+              printf("ONNX Runtime %s loaded, env created\n", base->GetVersionString());
+              api->ReleaseEnv(env);
+              return 0;
+          }
+          EOF
+          arm-linux-gnueabihf-gcc -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
+            -I ort/include/onnxruntime/core/session smoke.c \
+            -L ort-build/Release -lonnxruntime -o smoke
+          LD_LIBRARY_PATH=ort-build/Release qemu-arm -L /usr/arm-linux-gnueabihf ./smoke
+
+      - name: Keep the library
+        run: |
+          mkdir -p out/lib out/include
+          cp -P ort-build/Release/libonnxruntime.so* out/lib/
+          cp ort/include/onnxruntime/core/session/*.h out/include/
+          cp ort/LICENSE ort/ThirdPartyNotices.txt out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-linux-armv7l-${{ env.ONNXRUNTIME_VERSION }}
+          path: out/
+          retention-days: 7
