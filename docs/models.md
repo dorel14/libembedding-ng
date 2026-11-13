@@ -7,6 +7,10 @@ nav_order: 4
 
 libembedding intègre un registre de modèles pré-configurés. Vous pouvez les lister dynamiquement depuis Python :
 
+> **Android et iOS :** seuls les modèles légers (≤ 150 Mo) se chargent par nom,
+> et `list_*_models()` ne renvoie qu'eux. Voir
+> [Plateformes — limite des modèles sur mobile](platforms.html).
+
 ```python
 import libembedding
 

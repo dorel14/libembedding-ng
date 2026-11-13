@@ -36,7 +36,7 @@ TextEmbedding(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `"BAAI/bge-small-en-v1.5"` | HuggingFace model name, ONNX repo code, or local directory path containing `model.onnx` + `tokenizer.json` |
-| `provider` | `str` | `"cpu"` | Execution provider: `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`, `"llamacpp"` |
+| `provider` | `str` | `"cpu"` | Execution provider: `"cpu"`, `"coreml"` (Apple), `"llamacpp"`; `"cuda"`, `"directml"`, `"tensorrt"` are accepted but run on CPU (GPU planned after 1.x) |
 | `threads` | `int` | `0` | Number of threads (`0` = auto) |
 | `batch_size` | `int` | `256` | Internal batch size for inference |
 | `offline` | `bool` | `False` | `True` = use cache only, never download |

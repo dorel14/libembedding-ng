@@ -124,7 +124,7 @@ for m in libembedding.list_text_models():
 ```python
 TextEmbedding(
     model_name="BAAI/bge-small-en-v1.5",  # HuggingFace model name, repo code, or local dir path
-    provider="cpu",  # "cpu", "cuda", "coreml", "directml", "tensorrt", "llamacpp"
+    provider="cpu",  # "cpu", "coreml" (Apple), "llamacpp"; "cuda"/"directml"/"tensorrt" run on CPU (GPU planned after 1.x)
     device_id=0,
     cache_dir=None,  # None = ~/.cache/libembedding
     max_length=0,  # 0 = model default
@@ -250,7 +250,7 @@ with TextEmbedding("BAAI/bge-small-en-v1.5") as model:
 | `pooling` | `str` | "cls" or "mean" |
 | `num_threads` | `int` | Threads configured |
 | `batch_size` | `int` | Batch size configured |
-| `provider` | `str` | Execution provider ("cpu", "cuda", "directml", "coreml", "llamacpp") |
+| `provider` | `str` | Execution provider requested ("cpu", "coreml", "llamacpp"; "cuda", "directml", "tensorrt" are accepted but run on CPU) |
 | `device_id` | `int` | Device ID |
 
 **`Stats`** — runtime statistics (returned by `stats()`):

@@ -108,8 +108,8 @@ gguf_model = TextEmbedding.from_gguf(                          # llama.cpp
 ```
 
 This matters because GGUF quantized models are smaller, faster on CPU, and avoid
-ONNX Runtime dependencies — while ONNX remains the best choice for GPU and
-maximum throughput.
+ONNX Runtime dependencies — while ONNX remains the best choice for maximum
+throughput.
 
 ### Native performance, two languages
 
@@ -167,7 +167,7 @@ with minimal overhead (~13%).
 - **Dual distribution**: header-only `INTERFACE` library on Linux/macOS (STB-style `#define LIBEMBEDDING_IMPLEMENTATION`), plus a **compiled shared library** for FFI/bindings and a native **Windows DLL** (built by CMake, exposed to Python through cffi)
 - CLS and Mean pooling with L2 normalization
 - Batch processing with configurable batch sizes
-- CPU, CUDA, CoreML, DirectML, TensorRT execution providers
+- CPU inference (plus CoreML on Apple platforms); GPU providers are planned after 1.x
 - Custom/user-defined model support (bring your own ONNX)
 - Local model loading from a directory (`model.onnx` + `tokenizer.json`, optional `config.json`)
 - Runtime introspection: `desc()`, `model_name()`, `max_length()`, `stats()` (texts, batches, latency)
@@ -755,7 +755,7 @@ typedef struct {
     int                         dim;            // default: 0 (for local models without config.json)
     /* llama.cpp backend options (only used when provider = LEMBED_PROVIDER_LLAMACPP) */
     int                         llama_n_ctx;    // context size (0 = model default)
-    int                         llama_n_gpu_layers; // GPU layers (-1 = all, 0 = CPU only)
+    int                         llama_n_gpu_layers; // GPU layers; ignored: ggml is built CPU-only
     int                         llama_verbose;  // 1 = enable llama.cpp logging
     int                         llama_n_batch;  // max tokens per llama_encode (0 = model default)
     int                         auto_workers;   // 1 = auto-detect optimal workers/sessions
@@ -774,13 +774,17 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | Enum | Backend |
 |---|---|
 | `LEMBED_PROVIDER_CPU` | CPU (default, always available) |
-| `LEMBED_PROVIDER_CUDA` | NVIDIA CUDA (requires `USE_CUDA` + ORT CUDA provider) |
-| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS) |
-| `LEMBED_PROVIDER_DIRECTML` | DirectML (Windows, requires `USE_DML` + ORT DML provider) |
-| `LEMBED_PROVIDER_TENSORRT` | NVIDIA TensorRT (requires `USE_TENSORRT`) |
-| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled) |
+| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), falls back to CPU if unavailable |
+| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU) |
+| `LEMBED_PROVIDER_CUDA` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_DIRECTML` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_TENSORRT` | Reserved: runs on CPU (GPU support is planned after 1.x) |
 
-Providers are configured via `configure_provider()` and gracefully fall back to CPU if the provider library is unavailable.
+GPU acceleration is out of scope before 1.x. The CUDA, DirectML and TensorRT
+values exist so the enum stays stable, but no build enables them
+(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`): a
+model created with one of them runs on the CPU. ggml is built without GPU
+backends, so `llama_n_gpu_layers` has no effect.
 
 ### Versioned options (v2)
 

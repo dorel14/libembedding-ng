@@ -119,8 +119,8 @@ gguf_model = TextEmbedding.from_gguf(                          # llama.cpp
 ```
 
 This matters because GGUF quantized models are smaller, faster on CPU, and avoid
-ONNX Runtime dependencies — while ONNX remains the best choice for GPU and
-maximum throughput.
+ONNX Runtime dependencies — while ONNX remains the best choice for maximum
+throughput.
 
 ### Native performance, two languages
 
@@ -178,7 +178,7 @@ with minimal overhead (~13%).
 - **Dual distribution**: header-only `INTERFACE` library on Linux/macOS (STB-style `#define LIBEMBEDDING_IMPLEMENTATION`), plus a **compiled shared library** for FFI/bindings and a native **Windows DLL** (built by CMake, exposed to Python through cffi)
 - CLS and Mean pooling with L2 normalization
 - Batch processing with configurable batch sizes
-- CPU, CUDA, CoreML, DirectML, TensorRT execution providers
+- CPU inference (plus CoreML on Apple platforms); GPU providers are planned after 1.x
 - Custom/user-defined model support (bring your own ONNX)
 - Local model loading from a directory (`model.onnx` + `tokenizer.json`, optional `config.json`)
 - Runtime introspection: `desc()`, `model_name()`, `max_length()`, `stats()` (texts, batches, latency)
@@ -766,7 +766,7 @@ typedef struct {
     int                         dim;            // default: 0 (for local models without config.json)
     /* llama.cpp backend options (only used when provider = LEMBED_PROVIDER_LLAMACPP) */
     int                         llama_n_ctx;    // context size (0 = model default)
-    int                         llama_n_gpu_layers; // GPU layers (-1 = all, 0 = CPU only)
+    int                         llama_n_gpu_layers; // GPU layers; ignored: ggml is built CPU-only
     int                         llama_verbose;  // 1 = enable llama.cpp logging
     int                         llama_n_batch;  // max tokens per llama_encode (0 = model default)
     int                         auto_workers;   // 1 = auto-detect optimal workers/sessions
@@ -785,13 +785,17 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | Enum | Backend |
 |---|---|
 | `LEMBED_PROVIDER_CPU` | CPU (default, always available) |
-| `LEMBED_PROVIDER_CUDA` | NVIDIA CUDA (requires `USE_CUDA` + ORT CUDA provider) |
-| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS) |
-| `LEMBED_PROVIDER_DIRECTML` | DirectML (Windows, requires `USE_DML` + ORT DML provider) |
-| `LEMBED_PROVIDER_TENSORRT` | NVIDIA TensorRT (requires `USE_TENSORRT`) |
-| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled) |
+| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), falls back to CPU if unavailable |
+| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU) |
+| `LEMBED_PROVIDER_CUDA` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_DIRECTML` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_TENSORRT` | Reserved: runs on CPU (GPU support is planned after 1.x) |
 
-Providers are configured via `configure_provider()` and gracefully fall back to CPU if the provider library is unavailable.
+GPU acceleration is out of scope before 1.x. The CUDA, DirectML and TensorRT
+values exist so the enum stays stable, but no build enables them
+(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`): a
+model created with one of them runs on the CPU. ggml is built without GPU
+backends, so `llama_n_gpu_layers` has no effect.
 
 ### Versioned options (v2)
 
@@ -1819,7 +1823,7 @@ TextEmbedding(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `"BAAI/bge-small-en-v1.5"` | HuggingFace model name, ONNX repo code, or local directory path containing `model.onnx` + `tokenizer.json` |
-| `provider` | `str` | `"cpu"` | Execution provider: `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`, `"llamacpp"` |
+| `provider` | `str` | `"cpu"` | Execution provider: `"cpu"`, `"coreml"` (Apple), `"llamacpp"`; `"cuda"`, `"directml"`, `"tensorrt"` are accepted but run on CPU (GPU planned after 1.x) |
 | `threads` | `int` | `0` | Number of threads (`0` = auto) |
 | `batch_size` | `int` | `256` | Internal batch size for inference |
 | `offline` | `bool` | `False` | `True` = use cache only, never download |
@@ -2542,6 +2546,10 @@ Rendered: https://dorel14.github.io/libembedding-ng/en/models.html
 # Available models
 
 libembedding ships with a registry of pre-configured models. You can list them dynamically from Python:
+
+> **Android and iOS:** only light models (≤ 150 MB) load by name, and
+> `list_*_models()` returns only those. See
+> [Platforms — mobile model limit](platforms.html).
 
 ```python
 import libembedding
@@ -3585,17 +3593,8 @@ from libembedding import TextEmbedding
 # CPU (default, always available)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# NVIDIA CUDA
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda", device_id=0)
-
-# Apple CoreML (macOS/iOS)
+# Apple CoreML (macOS/iOS), falls back to CPU if unavailable
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
-
-# DirectML (Windows)
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="directml")
-
-# NVIDIA TensorRT
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 ```
 
 **Supported providers:**
@@ -3603,11 +3602,13 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 | Provider | Backend | Platform |
 |----------|---------|----------|
 | `cpu` | CPU | All |
-| `cuda` | CUDA | NVIDIA GPU |
 | `coreml` | CoreML | macOS, iOS |
-| `directml` | DirectML | Windows |
-| `tensorrt` | TensorRT | NVIDIA GPU |
-| `llamacpp` | llama.cpp | All |
+| `llamacpp` | llama.cpp (CPU) | All |
+| `cuda`, `directml`, `tensorrt` | reserved: run on CPU | — |
+
+GPU acceleration is out of scope before 1.x. The `cuda`, `directml` and
+`tensorrt` values are accepted to keep the API stable, but no build enables
+them: the model then runs on the CPU.
 
 ### GGUF models (llama.cpp)
 
@@ -3861,7 +3862,7 @@ For optimal performance:
 
 1. **Reuse the model** — create it once and embed multiple batches
 2. **Tune `batch_size`** — increase until memory saturation
-3. **Use a GPU provider** — `cuda`, `coreml`, or `directml`
+3. **Try CoreML on Apple** — `provider="coreml"` (benchmark it: the gain depends on the model)
 4. **Enable quantization** — choose `_Q` models to cut on-disk size by 2-4x (throughput effect is model-dependent: benchmark it, see [Performance](performance_tuning.html#quantization-fp32-vs-int8))
 5. **Disable progress** — `show_download_progress=False` for scripts
 
@@ -5672,7 +5673,7 @@ TextEmbedding(
 | Paramètre | Type | Défaut | Description |
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `"BAAI/bge-small-en-v1.5"` | Nom HuggingFace, code de repo, ou chemin local vers un répertoire contenant `model.onnx` + `tokenizer.json` |
-| `provider` | `str` | `"cpu"` | Provider d'exécution : `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`, `"llamacpp"` |
+| `provider` | `str` | `"cpu"` | Provider d'exécution : `"cpu"`, `"coreml"` (Apple), `"llamacpp"` ; `"cuda"`, `"directml"`, `"tensorrt"` sont acceptés mais tournent sur CPU (GPU prévu après la 1.x) |
 | `threads` | `int` | `0` | Nombre de threads (`0` = auto) |
 | `batch_size` | `int` | `256` | Taille de batch interne pour l'inférence |
 | `offline` | `bool` | `False` | `True` = utilise uniquement le cache, pas de téléchargement |
@@ -6399,6 +6400,10 @@ Rendu: https://dorel14.github.io/libembedding-ng/models.html
 # Modèles disponibles
 
 libembedding intègre un registre de modèles pré-configurés. Vous pouvez les lister dynamiquement depuis Python :
+
+> **Android et iOS :** seuls les modèles légers (≤ 150 Mo) se chargent par nom,
+> et `list_*_models()` ne renvoie qu'eux. Voir
+> [Plateformes — limite des modèles sur mobile](platforms.html).
 
 ```python
 import libembedding
@@ -7437,17 +7442,8 @@ from libembedding import TextEmbedding
 # CPU (défaut, toujours disponible)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# NVIDIA CUDA
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda", device_id=0)
-
-# Apple CoreML (macOS/iOS)
+# Apple CoreML (macOS/iOS), repli sur le CPU s'il est indisponible
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
-
-# DirectML (Windows)
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="directml")
-
-# NVIDIA TensorRT
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 ```
 
 **Providers supportés :**
@@ -7455,11 +7451,13 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 | Provider | Backend | Plateforme |
 |----------|---------|-----------|
 | `cpu` | CPU | Toutes |
-| `cuda` | CUDA | NVIDIA GPU |
 | `coreml` | CoreML | macOS, iOS |
-| `directml` | DirectML | Windows |
-| `tensorrt` | TensorRT | NVIDIA GPU |
-| `llamacpp` | llama.cpp | Toutes |
+| `llamacpp` | llama.cpp (CPU) | Toutes |
+| `cuda`, `directml`, `tensorrt` | réservés : exécution sur CPU | — |
+
+L'accélération GPU est hors périmètre avant la 1.x. Les valeurs `cuda`,
+`directml` et `tensorrt` sont acceptées pour garder l'API stable, mais aucune
+build ne les active : le modèle tourne alors sur le CPU.
 
 ### Modèles GGUF (llama.cpp)
 
@@ -7713,7 +7711,7 @@ Pour des performances optimales :
 
 1. **Réutilisez le modèle** — créez-le une fois et embeds plusieurs batchs
 2. **Ajustez `batch_size`** — augmentez jusqu'à saturation mémoire
-3. **Utilisez un provider GPU** — `cuda`, `coreml`, ou `directml`
+3. **Essayez CoreML sur Apple** — `provider="coreml"` (mesurez : le gain dépend du modèle)
 4. **Activez la quantification** — choisissez les modèles `_Q` pour diviser la taille sur disque par 2 à 4 (l'effet sur le débit dépend du modèle : mesurez-le, voir [Performance](performance_tuning.html#quantification--fp32-vs-int8))
 5. **Désactivez la progression** — `show_download_progress=False` pour les scripts
 
