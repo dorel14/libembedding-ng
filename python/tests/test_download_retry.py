@@ -69,37 +69,58 @@ class _Server:
         self.httpd.server_close()
 
 
-# Runs in a child process: the library reads HF_ENDPOINT with getenv(), and a
-# Debug build on Windows links the debug CRT, whose environment is a copy made
-# when the DLL loads, so os.environ changes in this process never reach it.
-_CHILD = """
-import json, sys
-sys.path.insert(0, sys.argv[1])
-from libembedding._binding import ffi, lib
-out = ffi.new("char **")
-status = lib.lembed_ensure_gguf_model(
-    b"org/repo", b"model.gguf", sys.argv[2].encode(), 0, 0, out)
-if status == 0:
+def _download(cache_dir):
+    """Call lembed_ensure_gguf_model for org/repo/model.gguf: (status, path or error)."""
+    from libembedding._binding import ffi, lib
+
+    out = ffi.new("char **")
+    status = lib.lembed_ensure_gguf_model(
+        b"org/repo", b"model.gguf", str(cache_dir).encode(), 0, 0, out
+    )
+    if status != 0:
+        return status, ffi.string(lib.lembed_last_error()).decode("utf-8", "replace")
     text = ffi.string(out[0]).decode("utf-8")
     lib.lembed_free_string(out[0])
-else:
-    text = ffi.string(lib.lembed_last_error()).decode("utf-8", "replace")
-print(json.dumps([status, text]))
+    return status, text
+
+
+# On Windows the download runs in a child process: the library reads
+# HF_ENDPOINT with getenv(), and a Debug build links the debug CRT, whose
+# environment is a copy made when the DLL loads, so os.environ changes in this
+# process never reach it. Elsewhere getenv() sees them, and a child process is
+# not always possible (embedded CPython on Android has no sys.executable).
+_CHILD = """
+import json, sys
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+from test_download_retry import _download
+print(json.dumps(_download(sys.argv[3])))
 """
 
 
 def _ensure(server, cache_dir):
     """Download org/repo/model.gguf from server through lembed_ensure_gguf_model."""
-    env = dict(os.environ)
-    env.update(
-        HF_ENDPOINT=server.url,
-        LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT="1",
-        NO_PROXY="127.0.0.1",
-    )
+    overrides = {
+        "HF_ENDPOINT": server.url,
+        "LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT": "1",
+        "NO_PROXY": "127.0.0.1",
+    }
+    if sys.platform != "win32":
+        saved = {name: os.environ.get(name) for name in overrides}
+        os.environ.update(overrides)
+        try:
+            return _download(cache_dir)
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
     package_root = str(Path(libembedding.__file__).resolve().parent.parent)
+    tests_dir = str(Path(__file__).resolve().parent)
     proc = subprocess.run(
-        [sys.executable, "-c", _CHILD, package_root, str(cache_dir)],
-        env=env,
+        [sys.executable, "-c", _CHILD, package_root, tests_dir, str(cache_dir)],
+        env={**os.environ, **overrides},
         capture_output=True,
         text=True,
         timeout=60,
