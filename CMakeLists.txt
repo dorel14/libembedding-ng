@@ -309,8 +309,8 @@ if(WIN32)
     # add it here instead of ""
     add_library(libembedding SHARED "${CMAKE_CURRENT_SOURCE_DIR}/python/csrc/libembedding_shlib.cpp")
 
-    # Use explicit .def file for exports instead of WINDOWS_EXPORT_ALL_SYMBOLS
-    # This allows LTCG (/GL /LTCG) to be used if desired
+    # Use explicit .def file for exports instead of WINDOWS_EXPORT_ALL_SYMBOLS.
+    # /GL (LTCG) stays off all the same (CLAUDE.md, AGENTS.md section 3.5).
     #
     # The .def is filtered first: it names every public symbol, but a backend
     # compiled out (LIBEMBEDDING_NO_IMAGE) has no definition, and the linker
@@ -401,9 +401,9 @@ add_library(libembedding::libembedding ALIAS libembedding)
 # =========================================================================
 # CPU Optimizations
 # =========================================================================
-# Note: /GL (whole-program opt) and /LTCG can now be used on MSVC
-# because we use an explicit .def file for exports instead of
-# WINDOWS_EXPORT_ALL_SYMBOLS.
+# /GL (whole-program optimisation) and /LTCG are deliberately not used on
+# MSVC (CLAUDE.md, AGENTS.md section 3.5), even though exports go through an
+# explicit .def file.
 if(MSVC)
     target_compile_options(libembedding PRIVATE
         $<$<CONFIG:Release>:/O2>
