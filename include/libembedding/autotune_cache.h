@@ -32,7 +32,7 @@ typedef struct {
 /* Software fingerprint for tuning cache */
 typedef struct {
      char        libembedding[32];  /* e.g. "1.4.0" */
-    char        llama_cpp[32];     /* e.g. "b5434" */
+    char        llama_cpp[32];     /* bundled ggml version, e.g. "ggml 0.26.0" */
 } lembed_cache_software_info_t;
 
 /* Model fingerprint for tuning cache */

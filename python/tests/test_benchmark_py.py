@@ -31,6 +31,22 @@ def test_hardware_detection():
     assert hw.os_name, "os_name must not be empty"
 
 
+def test_hardware_detection_is_real():
+    """The fingerprint keys the tuning cache: placeholders would let a result
+    tuned on one machine be served to another. Linux and macOS used to report
+    "unknown", 1 core and 0 MB."""
+    import os
+
+    from libembedding.benchmark import detect_hardware
+
+    hw = detect_hardware()
+    assert hw.cpu_name != "unknown"
+    assert hw.os_name != "unknown"
+    assert hw.ram_mb > 0
+    assert 1 <= hw.physical_cores <= hw.logical_cores
+    assert hw.logical_cores == os.cpu_count()
+
+
 def test_cache_path():
     """Test cache path retrieval."""
     from libembedding.benchmark import cache_path

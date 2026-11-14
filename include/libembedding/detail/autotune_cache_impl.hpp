@@ -26,11 +26,21 @@
 #include <string>
 #include <vector>
 
+#include <initializer_list>
+#include <set>
+
+#include "ggml.h"   /* ggml_version(): the software fingerprint */
+
 #ifdef _WIN32
 #include <windows.h>
 #include <intrin.h>
 #else
 #include <unistd.h>
+#include <sys/utsname.h>
+#endif
+#ifdef __APPLE__
+#include <TargetConditionals.h>  /* TARGET_OS_IPHONE */
+#include <sys/sysctl.h>
 #endif
 
 namespace lembed {
@@ -69,6 +79,87 @@ static bool write_file(const std::string& path, const std::string& content) {
     return true;
 }
 
+/* Hardware detection helpers. The fingerprint keys the tuning cache, so a
+ * wrong value is not cosmetic: before these, every Linux and macOS machine
+ * reported "unknown", 1 core and 0 MB, and a result tuned on one CPU was
+ * served to any other. */
+
+static void copy_field(char* dst, size_t size, const std::string& value) {
+    if (size == 0) return;
+    const size_t n = value.size() < size - 1 ? value.size() : size - 1;
+    memcpy(dst, value.data(), n);
+    dst[n] = '\0';
+}
+
+static std::string trim_copy(const std::string& s) {
+    const char* ws = " \t\r\n";
+    const size_t b = s.find_first_not_of(ws);
+    if (b == std::string::npos) return "";
+    return s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
+
+static void append_feature(std::string& list, const char* name) {
+    if (!list.empty()) list += ",";
+    list += name;
+}
+
+#if defined(__linux__)
+/* First "key : value" line of /proc/cpuinfo whose key is one of `keys`. */
+static std::string proc_cpuinfo_value(std::initializer_list<const char*> keys) {
+    std::ifstream in("/proc/cpuinfo");
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        const std::string key = trim_copy(line.substr(0, colon));
+        for (const char* k : keys) {
+            if (key == k) return trim_copy(line.substr(colon + 1));
+        }
+    }
+    return "";
+}
+
+/* Physical cores = distinct sibling sets among the online CPUs. Works on x86
+ * (SMT pairs share a set) and on ARM (one CPU per set); falls back to the
+ * logical count when sysfs is not readable (some sandboxes, old Android). */
+static int linux_physical_cores(int logical) {
+    std::set<std::string> cores;
+    for (int cpu = 0; cpu < logical; cpu++) {
+        const std::string base = "/sys/devices/system/cpu/cpu" + std::to_string(cpu) + "/topology/";
+        std::ifstream in(base + "core_cpus_list");
+        if (!in) in.open(base + "thread_siblings_list");
+        std::string siblings;
+        if (!in || !std::getline(in, siblings)) return logical;
+        cores.insert(trim_copy(siblings));
+    }
+    return cores.empty() ? logical : (int)cores.size();
+}
+#endif
+
+#if defined(__APPLE__)
+static std::string sysctl_string(const char* name) {
+    size_t size = 0;
+    if (sysctlbyname(name, nullptr, &size, nullptr, 0) != 0 || size == 0) return "";
+    std::string value(size, '\0');
+    if (sysctlbyname(name, &value[0], &size, nullptr, 0) != 0) return "";
+    value.resize(strnlen(value.c_str(), size));
+    return value;
+}
+
+static long long sysctl_int(const char* name) {
+    long long value = 0;
+    size_t size = sizeof(value);
+    if (sysctlbyname(name, &value, &size, nullptr, 0) != 0) return 0;
+    /* hw.physicalcpu and friends are 32-bit: read the low part only. */
+    if (size == sizeof(int)) {
+        int v32 = 0;
+        memcpy(&v32, &value, sizeof(v32));
+        return v32;
+    }
+    return value;
+}
+#endif
+
 static cJSON* load_cache() {
     std::string content = read_file(cache_file());
     if (content.empty()) return cJSON_CreateObject();
@@ -95,6 +186,7 @@ const char* lembed_tune_cache_path(void) {
 }
 
 lembed_status_t lembed_cache_detect_hardware(lembed_cache_hardware_info_t* hw) {
+    using namespace lembed::detail;
     if (!hw) return LEMBED_ERROR_INVALID_ARGUMENT;
     memset(hw, 0, sizeof(*hw));
 #ifdef _WIN32
@@ -106,29 +198,117 @@ lembed_status_t lembed_cache_detect_hardware(lembed_cache_hardware_info_t* hw) {
     memcpy(brand + 16, cpuInfo, sizeof(cpuInfo));
     __cpuid(cpuInfo, 0x80000004);
     memcpy(brand + 32, cpuInfo, sizeof(cpuInfo));
-    strncpy(hw->cpu_name, brand, sizeof(hw->cpu_name) - 1);
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    hw->logical_cores = (int)si.dwNumberOfProcessors;
-    hw->physical_cores = hw->logical_cores > 1 ? hw->logical_cores / 2 : 1;
+    copy_field(hw->cpu_name, sizeof(hw->cpu_name), trim_copy(brand));
+    /* All processor groups (more than 64 logical CPUs), and physical cores
+     * counted rather than guessed: logical/2 was wrong without SMT and on
+     * hybrid CPUs, whose E-cores have no second thread. */
+    hw->logical_cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+    if (len > 0) {
+        std::vector<char> buf(len);
+        auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data());
+        if (GetLogicalProcessorInformationEx(RelationProcessorCore, info, &len)) {
+            int cores = 0;
+            for (DWORD off = 0; off < len;) {
+                auto* entry = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data() + off);
+                if (entry->Relationship == RelationProcessorCore) cores++;
+                off += entry->Size;
+            }
+            hw->physical_cores = cores;
+        }
+    }
     MEMORYSTATUSEX ms;
     ms.dwLength = sizeof(ms);
     if (GlobalMemoryStatusEx(&ms)) hw->ram_mb = (int)(ms.ullTotalPhys / (1024*1024));
     strncpy(hw->os_name, "Windows", sizeof(hw->os_name) - 1);
     /* Detect features */
+    std::string features;
     __cpuid(cpuInfo, 1);
-    if (cpuInfo[2] & (1 << 28)) strncpy(hw->features, "AVX", sizeof(hw->features) - 1);
+    if (cpuInfo[2] & (1 << 28)) append_feature(features, "AVX");
+    if (cpuInfo[2] & (1 << 12)) append_feature(features, "FMA");
     __cpuid(cpuInfo, 7);
-    if (cpuInfo[1] & (1 << 5)) {
-        if (hw->features[0]) strncat(hw->features, ",AVX2", sizeof(hw->features) - strlen(hw->features) - 1);
-        else strncpy(hw->features, "AVX2", sizeof(hw->features) - 1);
+    if (cpuInfo[1] & (1 << 5)) append_feature(features, "AVX2");
+    if (cpuInfo[1] & (1 << 16)) append_feature(features, "AVX512F");
+    copy_field(hw->features, sizeof(hw->features), features);
+#elif defined(__linux__)
+    /* x86 "model name"; ARM kernels give no name, Raspberry Pi OS adds "Model". */
+    std::string name = proc_cpuinfo_value({"model name", "Model", "Hardware", "Processor", "cpu model"});
+    std::string features;
+    const std::string flags = " " + proc_cpuinfo_value({"flags", "Features"}) + " ";
+    auto has = [&flags](const char* f) { return flags.find(std::string(" ") + f + " ") != std::string::npos; };
+    if (has("avx")) append_feature(features, "AVX");
+    if (has("fma")) append_feature(features, "FMA");
+    if (has("avx2")) append_feature(features, "AVX2");
+    if (has("avx512f")) append_feature(features, "AVX512F");
+    if (has("neon") || has("asimd")) append_feature(features, "NEON");
+    if (has("asimddp")) append_feature(features, "DOTPROD");
+    if (has("i8mm")) append_feature(features, "I8MM");
+    if (has("sve")) append_feature(features, "SVE");
+    copy_field(hw->features, sizeof(hw->features), features);
+
+    long online = sysconf(_SC_NPROCESSORS_ONLN);
+    hw->logical_cores = online > 0 ? (int)online : 1;
+    hw->physical_cores = linux_physical_cores(hw->logical_cores);
+    const long pages = sysconf(_SC_PHYS_PAGES);
+    const long page_size = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && page_size > 0) {
+        hw->ram_mb = (int)((unsigned long long)pages * (unsigned long long)page_size / (1024ULL * 1024ULL));
     }
+    struct utsname un;
+    const bool have_uname = uname(&un) == 0;
+    if (name.empty() && have_uname) name = un.machine;
+    copy_field(hw->cpu_name, sizeof(hw->cpu_name), name.empty() ? "unknown" : name);
+#if defined(__ANDROID__)
+    std::string os = "Android";
 #else
-    strncpy(hw->cpu_name, "unknown", sizeof(hw->cpu_name) - 1);
-    hw->physical_cores = 1;
-    hw->logical_cores = 1;
-    strncpy(hw->os_name, "unknown", sizeof(hw->os_name) - 1);
+    std::string os = "Linux";
 #endif
+    if (have_uname) os += std::string(" ") + un.release;
+    copy_field(hw->os_name, sizeof(hw->os_name), os);
+#elif defined(__APPLE__)
+    std::string name = sysctl_string("machdep.cpu.brand_string");  /* Intel and Apple Silicon */
+    if (name.empty()) name = sysctl_string("hw.machine");           /* iOS: e.g. "iPhone15,2" */
+    copy_field(hw->cpu_name, sizeof(hw->cpu_name), name.empty() ? "unknown" : name);
+    hw->logical_cores = (int)sysctl_int("hw.logicalcpu");
+    hw->physical_cores = (int)sysctl_int("hw.physicalcpu");
+    hw->ram_mb = (int)(sysctl_int("hw.memsize") / (1024LL * 1024LL));
+#if TARGET_OS_IPHONE
+    std::string os = "iOS";
+#else
+    std::string os = "macOS";
+#endif
+    const std::string release = sysctl_string("kern.osproductversion");
+    if (!release.empty()) os += " " + release;
+    copy_field(hw->os_name, sizeof(hw->os_name), os);
+    std::string features;
+#if defined(__aarch64__) || defined(__arm64__)
+    append_feature(features, "NEON");
+    if (sysctl_int("hw.optional.arm.FEAT_DotProd")) append_feature(features, "DOTPROD");
+    if (sysctl_int("hw.optional.arm.FEAT_I8MM")) append_feature(features, "I8MM");
+#else
+    if (sysctl_int("hw.optional.avx1_0")) append_feature(features, "AVX");
+    if (sysctl_int("hw.optional.fma")) append_feature(features, "FMA");
+    if (sysctl_int("hw.optional.avx2_0")) append_feature(features, "AVX2");
+    if (sysctl_int("hw.optional.avx512f")) append_feature(features, "AVX512F");
+#endif
+    copy_field(hw->features, sizeof(hw->features), features);
+#else
+    long online = sysconf(_SC_NPROCESSORS_ONLN);
+    hw->logical_cores = online > 0 ? (int)online : 1;
+    struct utsname un;
+    if (uname(&un) == 0) {
+        copy_field(hw->cpu_name, sizeof(hw->cpu_name), un.machine);
+        copy_field(hw->os_name, sizeof(hw->os_name), un.sysname);
+    } else {
+        copy_field(hw->cpu_name, sizeof(hw->cpu_name), "unknown");
+        copy_field(hw->os_name, sizeof(hw->os_name), "unknown");
+    }
+#endif
+    if (hw->logical_cores < 1) hw->logical_cores = 1;
+    if (hw->physical_cores < 1 || hw->physical_cores > hw->logical_cores) {
+        hw->physical_cores = hw->logical_cores;
+    }
     return LEMBED_OK;
 }
 
@@ -136,7 +316,12 @@ lembed_status_t lembed_cache_detect_software(lembed_cache_software_info_t* sw) {
     if (!sw) return LEMBED_ERROR_INVALID_ARGUMENT;
     memset(sw, 0, sizeof(*sw));
     strncpy(sw->libembedding, LIBEMBEDDING_VERSION_STRING, sizeof(sw->libembedding) - 1);
-    strncpy(sw->llama_cpp, "b5434", sizeof(sw->llama_cpp) - 1); /* TODO: get from llama.cpp */
+    /* The bundled snapshot is identified by its ggml version (llama.cpp
+     * v0.6.0 ships ggml 0.26.0): a bump changes the kernels, so it must
+     * invalidate tuning results. The previous constant ("b5434") never moved. */
+    const char* ggml = ggml_version();
+    lembed::detail::copy_field(sw->llama_cpp, sizeof(sw->llama_cpp),
+                               std::string("ggml ") + (ggml ? ggml : "unknown"));
     return LEMBED_OK;
 }
 
