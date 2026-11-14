@@ -20,6 +20,12 @@ Ce module gère la liste des modèles GGUF recommandés et leur configuration.
 | `lembed_list_gguf_models(out, count)` | `lembed_status_t` | Liste des modèles GGUF |
 | `lembed_find_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Chercher un modèle GGUF (NULL si inconnu) |
 | `lembed_default_gguf_model()` | `const lembed_gguf_model_info_t*` | Modèle GGUF recommandé par défaut |
+| `lembed_list_sparse_gguf_models(out, count)` | `lembed_status_t` | Liste des modèles sparse GGUF (runtime ggml de libembedding) ; `dim` = taille du vocabulaire |
+| `lembed_find_sparse_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Modèle sparse GGUF par nom exact, sans tenir compte de la casse (NULL si inconnu) |
+
+> Les modèles sparse GGUF (ex. `SPLADE-PP-En-v1-GGUF`) sont dans une liste à
+> part : une recherche dense ne renvoie jamais un modèle sparse. La correspondance
+> est exacte, pour ne pas capturer les noms du modèle ONNX de la même famille.
 
 > Les deux fonctions de recherche retournent un **pointeur vers les données
 > statiques** — ne pas libérer. Il n'existe pas de
