@@ -300,20 +300,26 @@ def cleanup_model_cache(
     """Clean up model cache, keeping only specified models.
 
     Args:
-        keep_models: List of model identifiers to keep (e.g., ["BAAI/bge-small-en-v1.5"]).
-            If None, all models are kept (no-op unless dry_run=True).
+        keep_models: Models to keep, by their usual name or by the repository
+            downloaded (e.g. ["BAAI/bge-small-en-v1.5"] keeps every copy the
+            registry downloads for it). None keeps everything and deletes
+            nothing; pass an empty list to delete every model.
         cache_dir: Custom cache directory (None = default).
         dry_run: If True, only report what would be deleted without actually deleting.
 
     Returns:
-        Dictionary with keys: "deleted_count", "freed_bytes", "details" (list of paths).
+        Dictionary with keys "deleted_count" and "freed_bytes" (bytes freed, or
+        that would be freed in a dry run). "details" is always an empty list,
+        kept for compatibility; LIBEMBEDDING_VERBOSE=1 prints the directories.
 
     Example:
         >>> result = cleanup_model_cache(keep_models=["BAAI/bge-small-en-v1.5"])
         >>> print(f"Deleted {result['deleted_count']} models, freed {result['freed_bytes']} bytes")
     """
     if keep_models is None:
-        keep_models = []
+        # Documented as "all models are kept": an empty list here would have
+        # told the C layer to delete every model in the cache.
+        return {"deleted_count": 0, "freed_bytes": 0, "details": []}
 
     c_keep = ffi.new("char*[]", len(keep_models) + 1)
     c_strs = []
@@ -351,12 +357,14 @@ def cleanup_model_cache_except(
     """Clean up model cache, keeping only the active model.
 
     Args:
-        active_model: Model identifier to keep (e.g., "BAAI/bge-small-en-v1.5").
+        active_model: Model to keep, by its usual name or by the repository
+            downloaded (e.g. "BAAI/bge-small-en-v1.5").
         cache_dir: Custom cache directory (None = default).
         dry_run: If True, only report what would be deleted without actually deleting.
 
     Returns:
-        Dictionary with keys: "deleted_count", "freed_bytes", "details" (list of paths).
+        Dictionary with keys "deleted_count" and "freed_bytes"; "details" is
+        always an empty list, kept for compatibility.
 
     Example:
         >>> result = cleanup_model_cache_except(active_model="BAAI/bge-small-en-v1.5")

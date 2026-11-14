@@ -17,8 +17,8 @@ Ce module gère le téléchargement et la résolution des modèles (ONNX et GGUF
 | `lembed_ensure_reranker_model(model_idx, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Idem pour un reranker |
 | `lembed_ensure_gguf_model(repo, filename, cache_dir, progress, offline, out_path)` | `lembed_status_t` | Idem pour un modèle GGUF |
 | `lembed_resolve_gguf_path(name_or_path, cache_dir, offline, model_path_out)` | `lembed_status_t` | Résoudre le chemin d'un `.gguf` (chemin, URL ou nom de registre) |
-| `lembed_cleanup_model_cache(cache_dir, keep_models, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purger le cache, en gardant une liste de modèles |
-| `lembed_cleanup_model_cache_except(cache_dir, active_model_dir, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purger le cache sauf le modèle actif |
+| `lembed_cleanup_model_cache(cache_dir, keep_models, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purger le cache, en gardant une liste de modèles (liste terminée par NULL ; vide = tout supprimer). Un modèle se désigne par son nom habituel (`BAAI/bge-small-en-v1.5`, toutes ses copies téléchargées sont gardées) ou par le dépôt téléchargé. Seuls les dossiers `models--*` sont touchés |
+| `lembed_cleanup_model_cache_except(cache_dir, active_model_dir, dry_run, deleted_count, freed_bytes)` | `lembed_status_t` | Purger le cache sauf le modèle actif (même règle de nommage) |
 | `lembed_free_string(s)` | `void` | Libérer une chaîne allouée par la bibliothèque |
 
 > Il n'existe **pas** de `lembed_download_model()` : le téléchargement passe
