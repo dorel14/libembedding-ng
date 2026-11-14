@@ -3,7 +3,7 @@
  * Batch iteration utility
  *
  * Auteur: David Orel
- * Version: 1.13.0
+ * Version: 1.14.0
  *
  * SPDX-License-Identifier: MIT
  */
