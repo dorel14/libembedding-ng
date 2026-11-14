@@ -383,6 +383,7 @@ if TextEmbedding.supports_llamacpp():
 | `LIBEMBEDDING_CACHE_DIR` | Override model cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: set to `1` by libembedding when unset (no data sent to Microsoft); `0` keeps ORT's telemetry |
 
 ## Building & Publishing
 

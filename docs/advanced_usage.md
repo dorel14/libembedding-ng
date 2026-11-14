@@ -147,6 +147,7 @@ model = TextEmbedding(
 | `LIBEMBEDDING_CACHE_DIR` | Redéfinit le répertoire de cache globalement |
 | `FASTEMBED_CACHE_DIR` | Répertoire de cache alternatif (compatibilité fastembed) |
 | `HF_ENDPOINT` | URL personnalisée pour le HuggingFace Hub (ex: miroir) |
+| `ORT_DISABLE_TELEMETRY` | Télémétrie d'ONNX Runtime : libembedding la met à `1` si elle est absente (aucune donnée envoyée à Microsoft) ; `0` conserve la télémétrie d'ORT |
 
 ```bash
 # Exemples d'utilisation

@@ -146,6 +146,7 @@ model = TextEmbedding(
 | `LIBEMBEDDING_CACHE_DIR` | Globally override the cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache directory (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL (e.g. mirror) |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: libembedding sets it to `1` when unset (nothing sent to Microsoft); `0` keeps ORT's telemetry |
 
 ```bash
 # Usage examples

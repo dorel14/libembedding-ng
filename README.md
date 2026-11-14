@@ -1114,7 +1114,15 @@ The library allocates output buffers internally. Always free them with the match
 | `LIBEMBEDDING_CACHE_DIR` | Override default model cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (compatibility with fastembed) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
+
+**No telemetry.** libembedding sends nothing anywhere. ONNX Runtime 1.31 does:
+its official Linux and macOS builds, bundled in the wheels, report a hashed
+device id, model file names and hashes and run durations to Microsoft by
+default. libembedding turns that off before its first ONNX Runtime call
+(`ORT_DISABLE_TELEMETRY=1`, plus `DisableTelemetryEvents()` for the Windows ETW
+provider), unless you set `ORT_DISABLE_TELEMETRY` yourself.
 
 ---
 
