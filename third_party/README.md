@@ -83,7 +83,18 @@ leur SHA-256 épinglé, puis les compile en bibliothèques statiques liées dans
   `scripts/build_android_libs.sh`) ;
 - par `scripts/build_ios.sh` (`ios.yml`) ;
 - en natif pour les wheels Linux (`build-wheel.yml`,
-  `scripts/build_wheel_manylinux.sh`).
+  `scripts/build_wheel_manylinux.sh`) ;
+- en cross-compilation armv7l (`scripts/build_wheel_armv7l.sh`, toolchain
+  `cmake/toolchains/armv7l-linux-gnueabihf.cmake`).
+
+## ONNX Runtime pour armv7l : compilé depuis les sources
+
+ONNX Runtime ne publie aucun build armv7l et ne prend en charge ARM 32 bits
+qu'en cross-compilation. `build-wheel-armv7l.yml` clone le tag de la version
+embarquée (1.31.0), le compile avec la toolchain ci-dessus et `--no_telemetry`
+(depuis 1.31, un build depuis les sources active la télémétrie 1DS par
+défaut), et met le résultat en cache par version et toolchain. Rien n'est
+versionné ici.
 
 Les deux textes de licence sont installés dans
 `curl-prefix/share/licenses/{curl,mbedtls}/`, d'où

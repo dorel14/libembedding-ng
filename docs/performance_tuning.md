@@ -37,7 +37,8 @@ plus : Raspberry Pi 3/4/5 sous Raspberry Pi OS 64 bits (bullseye, bookworm), Ubu
 suivants, AWS Graviton, Ampere. ggml fournit huit bibliothèques CPU ARM (`ggml-cpu-armv8.0_1` …
 `ggml-cpu-armv9.2_2`) et charge la meilleure à l'exécution. La CI la construit dans un conteneur
 `manylinux_2_28` et la teste sur les runners ARM de GitHub ; elle n'a pas encore été testée sur un
-Raspberry Pi physique. Raspberry Pi OS 32 bits (armv7l) n'est pas encore pris en charge. Sous Linux,
+Raspberry Pi physique. Sous Raspberry Pi OS 32 bits (armv7l, wheel `manylinux_2_35_armv7l`), ggml
+n'a qu'une bibliothèque CPU, compilée pour ARMv7-A avec NEON (pas de sélection à l'exécution). Sous Linux,
 les téléchargements HTTPS utilisent le bundle CA du système ; `SSL_CERT_FILE` ou `CURL_CA_BUNDLE`
 le remplacent.
 

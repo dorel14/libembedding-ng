@@ -18,7 +18,11 @@ directory (`<name>-<version>.dist-info/licenses/licenses/` once installed).
 
 The macOS wheel uses the system libcurl and bundles no download library.
 
-libgomp is grafted by auditwheel from the manylinux toolchain, unmodified. The
+ONNX Runtime publishes no armv7l build: the Linux armv7l wheel bundles ONNX
+Runtime compiled from the unmodified sources of the same release tag, with
+its telemetry disabled at build time (`--no_telemetry`).
+
+libgomp is grafted by auditwheel from the build toolchain, unmodified. The
 GCC Runtime Library Exception 3.1 allows it to be distributed with programs
 under any licence: <https://www.gnu.org/licenses/gcc-exception-3.1.html>.
 
