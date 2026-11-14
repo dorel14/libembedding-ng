@@ -64,6 +64,14 @@ Le répertoire de cache par défaut est `~/.cache/libembedding`, ou
 `$HOME/Library/Caches/libembedding` sur iOS ; `LIBEMBEDDING_CACHE_DIR` et
 `FASTEMBED_CACHE_DIR` priment.
 
+Chaque fichier est demandé au plus 3 fois. Une nouvelle tentative suit une
+erreur réseau (connexion impossible ou coupée, transfert incomplet), un code
+HTTP 429 ou 5xx, ou un transfert resté sans aucun octet reçu pendant
+`LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` secondes (30 par défaut). Une connexion
+lente mais active n'est jamais interrompue. Un 404, un 401 ou une erreur de
+certificat échouent tout de suite. Le message d'erreur précise le nombre de
+tentatives.
+
 ## Limite de taille sur mobile
 
 Sur Android et iOS, un modèle du registre de plus de
