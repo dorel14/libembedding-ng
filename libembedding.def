@@ -177,6 +177,8 @@ lembed_resolve_sparse_model
     lembed_list_gguf_models
     lembed_find_gguf_model
     lembed_default_gguf_model
+    lembed_list_sparse_gguf_models
+    lembed_find_sparse_gguf_model
 
     ; ---- GGUF inspection (capability convention, read-only) ----
     lembed_gguf_inspect

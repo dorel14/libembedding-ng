@@ -149,6 +149,7 @@ model = TextEmbedding(
 | `HF_ENDPOINT` | URL personnalisée pour le HuggingFace Hub (ex: miroir) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Secondes sans aucun octet reçu avant d'abandonner un téléchargement et de le relancer (30 par défaut ; 3 tentatives au plus) |
 | `ORT_DISABLE_TELEMETRY` | Télémétrie d'ONNX Runtime : libembedding la met à `1` si elle est absente (aucune donnée envoyée à Microsoft) ; `0` conserve la télémétrie d'ORT |
+| `LIBEMBEDDING_VERBOSE` | `1` affiche les diagnostics sur stderr (progression de l'autotune, sélection automatique du modèle, simulation du nettoyage du cache) ; silencieux par défaut |
 | `LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES` | `1` charge les modèles du registre dont la licence n'est pas compatible MIT (`jina-reranker-v2-base-multilingual`, CC-BY-NC-4.0 ; `embeddinggemma-300m`, Gemma), refusés par défaut |
 
 ```bash

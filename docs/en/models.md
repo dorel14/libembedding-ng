@@ -205,6 +205,23 @@ for (int i = 0; i < count; i++) {
 
 > **Note:** Sparse embeddings have no fixed dimension. The returned dimension equals the number of active tokens in the vocabulary.
 
+### Sparse GGUF models (1 model)
+
+Run by libembedding's own ggml runtime, not llama.cpp. Listed by
+`lembed_list_sparse_gguf_models()`; in Python, pass the registry name.
+
+| Registry name | File | Size | Licence | Validation |
+|---------------|------|------|---------|------------|
+| `SPLADE-PP-En-v1-GGUF` | `cstr/splade-pp-en-v1-GGUF`, `splade-pp-en-v1-q8_0.gguf` | ~112 MB | Apache-2.0 | cosine ≥ 0.995 against the ONNX `prithivida/Splade_PP_en_v1` (measured min 0.9998) |
+
+```python
+from libembedding import SparseTextEmbedding
+model = SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")   # downloads the Q8_0 file
+```
+
+The name is matched exactly (case-insensitive): `"Splade_PP_en_v1"` and the
+other names of the ONNX model keep loading the ONNX model.
+
 ---
 
 ## Reranker models (5 models)

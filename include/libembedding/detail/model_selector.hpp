@@ -14,6 +14,7 @@
 #include "libembedding/autotuner.h"
 #include "libembedding/model_registry.h"
 #include "libembedding/text_embedding.h"
+#include "log.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -106,7 +107,7 @@ static lembed_status_t auto_select_impl(
         return LEMBED_ERROR_INVALID_ARGUMENT;
     }
 
-    fprintf(stderr, "Auto model selection (use_case=%s)...\n", use_case);
+    lembed::detail::log_info("Auto model selection (use_case=%s)...\n", use_case);
 
     double best_score = -1e18;
     bool found = false;
@@ -114,13 +115,13 @@ static lembed_status_t auto_select_impl(
     for (int i = 0; i < g_n_models; i++) {
         const auto& cat = g_models[i];
 
-        fprintf(stderr, "  Testing %s...\n", cat.name);
+        lembed::detail::log_info("  Testing %s...\n", cat.name);
 
         /* Quick autotune for this model */
         lembed_tuning_result_t tune = {0};
         lembed_status_t s = lembed_autotune(cat.model_code, LEMBED_AUTOTUNE_QUICK, &tune);
         if (s != LEMBED_OK) {
-            fprintf(stderr, "    SKIP (autotune failed)\n");
+            lembed::detail::log_info("    SKIP (autotune failed)\n");
             continue;
         }
 
@@ -128,7 +129,7 @@ static lembed_status_t auto_select_impl(
         double score = score_model(tune.throughput_docs_sec, tune.latency_ms,
                                    memory_mb, cat.quality_score, use_case);
 
-        fprintf(stderr, "    -> %.0f docs/s, score=%.1f\n", tune.throughput_docs_sec, score);
+        lembed::detail::log_info("    -> %.0f docs/s, score=%.1f\n", tune.throughput_docs_sec, score);
 
         if (score > best_score) {
             best_score = score;
@@ -150,7 +151,7 @@ static lembed_status_t auto_select_impl(
         return LEMBED_ERROR_MODEL_NOT_FOUND;
     }
 
-    fprintf(stderr, "  Winner: %s (score=%.1f)\n", result.model_name, result.score);
+    lembed::detail::log_info("  Winner: %s (score=%.1f)\n", result.model_name, result.score);
     return LEMBED_OK;
 }
 

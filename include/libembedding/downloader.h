@@ -113,6 +113,7 @@ lembed_status_t lembed_cleanup_model_cache_except(
 #include <vector>
 #include "detail/downloader_impl.hpp"
 #include "detail/download_manager.hpp"
+#include "detail/log.hpp"
 #include "gguf_registry.h"
 #include "model_registry.h"
 
@@ -239,10 +240,13 @@ lembed_status_t lembed_ensure_gguf_model(
          * the ONNX models are in ensure_model_by_kind(). A repo/file outside
          * the registry has no known size and is not checked. */
         const int limit = lembed_mobile_model_limit_mb();
-        if (limit > 0) {
+        /* Both GGUF registries, dense then sparse; light models are proposed
+         * from the same registry as the refused one. */
+        for (int registry = 0; limit > 0 && registry < 2; registry++) {
             const lembed_gguf_model_info_t* models = nullptr;
             int count = 0;
-            lembed_list_gguf_models(&models, &count);
+            if (registry == 0) lembed_list_gguf_models(&models, &count);
+            else lembed_list_sparse_gguf_models(&models, &count);
             const std::string suffix = std::string(repo) + "/resolve/main/" + file;
             for (int i = 0; i < count; i++) {
                 const std::string url(models[i].gguf_url ? models[i].gguf_url : "");
@@ -457,12 +461,13 @@ lembed_status_t lembed_cleanup_model_cache(
         }
 
         if (dry_run) {
-            /* Report what would be deleted */
+            /* The counts are returned through deleted_count / freed_bytes;
+             * the per-directory list only with LIBEMBEDDING_VERBOSE. */
             for (const auto& path : to_delete) {
-                fprintf(stderr, "[cleanup] Would delete: %s\n", path.c_str());
+                lembed::detail::log_info("[cleanup] Would delete: %s\n", path.c_str());
             }
-            fprintf(stderr, "[cleanup] Total: %zu directories, %llu bytes\n",
-                    to_delete.size(), (unsigned long long)local_freed);
+            lembed::detail::log_info("[cleanup] Total: %zu directories, %llu bytes\n",
+                                     to_delete.size(), (unsigned long long)local_freed);
             if (deleted_count) *deleted_count = to_delete.size();
             if (freed_bytes) *freed_bytes = local_freed;
             return LEMBED_OK;

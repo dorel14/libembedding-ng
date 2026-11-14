@@ -63,6 +63,10 @@ def _model_cache():
 def _load_model(home, **extra_env):
     env = {k: v for k, v in os.environ.items() if k not in _CI_VARIABLES}
     env.update(HOME=str(home), XDG_CACHE_HOME=str(home / "cache"), **extra_env)
+    # A scratch HOME hides the user site-packages (pip install --user, as the
+    # release workflow does), where cffi and numpy may live: hand the child
+    # this interpreter's module path.
+    env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
     package_root = str(Path(libembedding.__file__).resolve().parent.parent)
     subprocess.run(
         [sys.executable, "-c", _CHILD, package_root, _model_cache()],

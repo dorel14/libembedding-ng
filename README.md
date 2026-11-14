@@ -942,6 +942,11 @@ Measured against the sparse ONNX model on the same texts, cosine similarity is
 implementation divergence. See `docs/gguf_sparse_runtime.md` and
 `docs/archive/LE-9.6-results.md`.
 
+This file is registered as `SPLADE-PP-En-v1-GGUF` (Apache-2.0, ~112 MB):
+`lembed_list_sparse_gguf_models()` / `lembed_find_sparse_gguf_model()` in C,
+and in Python `SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")` downloads and loads
+it. The name is matched exactly, so the ONNX model's names still load ONNX.
+
 ---
 
 ### Unified Auto-Tuner and Benchmark
@@ -1121,6 +1126,7 @@ The library allocates output buffers internally. Always free them with the match
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
 | `LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES` | `1` loads the registry models whose licence is not MIT-compatible (`jina-reranker-v2-base-multilingual`, CC-BY-NC-4.0; `embeddinggemma-300m`, Gemma), refused by default |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
 

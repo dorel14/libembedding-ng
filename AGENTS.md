@@ -258,9 +258,12 @@ Exemple d’en-tête standard :
 
 - **Package** : `libembedding-ng`
 - **Build** : setuptools avec `python/pyproject.toml`
-- **Wheels** : construites par GitHub Actions (`build-wheel.yml`) sur ubuntu-22.04, macos-14, macos-13, windows-2022.
+- **Wheels** : construites par GitHub Actions :
+  - `build-wheel.yml` : ubuntu-22.04 (x86_64), ubuntu-22.04-arm (aarch64, conteneur `manylinux_2_28`), macos-15 (arm64), windows-2022 ;
+  - `build-wheel-android.yml` : Android, cibuildwheel ;
+  - `build-wheel-armv7l.yml` : armv7l, cross-compilation puis tests sous QEMU.
 - **Audit** : `auditwheel` (Linux), `delocate` (macOS), vérification manuelle (Windows).
-- **Runtime** : les wheels embarquent ONNX Runtime et libcurl.
+- **Runtime** : les wheels embarquent ONNX Runtime (une seule copie, contrôlée en CI). Sous Linux, Android et armv7l, libcurl est lié statiquement sur mbedTLS ; sous Windows, il vient de vcpkg ; macOS utilise celui du système. Les textes de licence sont dans `.dist-info/licenses/`.
 
 ### 8.2 GitHub Actions
 

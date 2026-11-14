@@ -210,3 +210,20 @@ def test_gguf_batching_keeps_vectors(gguf_model):
     batched = gguf_model.embed(texts, batch_size=64)
     cosines = [_cosine(_as_dict(a), _as_dict(b)) for a, b in zip(singles, batched)]
     assert min(cosines) >= BATCHING_COSINE_MIN, f"min cosine {min(cosines):.6f}"
+
+
+def test_registry_name_loads_the_same_gguf(onnx_model):
+    """SparseTextEmbedding("SPLADE-PP-En-v1-GGUF") resolves to the Q8_0 file
+    validated above, through the sparse GGUF registry."""
+    from libembedding import SparseTextEmbedding
+
+    model = _load(lambda: SparseTextEmbedding(
+        "SPLADE-PP-En-v1-GGUF", offline=True, show_download_progress=False, threads=4,
+    ))
+    try:
+        ref = onnx_model.embed(TEXTS)
+        got = model.embed(TEXTS)
+        cosines = [_cosine(_as_dict(a), _as_dict(b)) for a, b in zip(ref, got)]
+        assert min(cosines) >= COSINE_MIN, f"min cosine {min(cosines):.5f}"
+    finally:
+        model.close()
