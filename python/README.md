@@ -25,7 +25,9 @@ pip install libembedding-ng
 and macOS arm64 (Apple Silicon, macOS 14 or later). The x86-64 wheels run on any x86-64 CPU,
 no AVX/AVX2 required: GGUF models load the ggml CPU library matching the machine at run time
 (`libembedding.ggml_cpu_features()` names it), and the aarch64 wheel does the same across
-eight ARM levels (armv8.0 to armv9.2). 32-bit ARM (armv7l) is not supported yet. On Linux,
+eight ARM levels (armv8.0 to armv9.2). A Linux armv7l wheel (`manylinux_2_35_armv7l`) covers
+32-bit Raspberry Pi OS 12 (bookworm); numpy and cffi come from piwheels.org there, and piwheels'
+numpy needs `sudo apt install libopenblas0`. On Linux,
 downloads go through a libcurl linked statically over mbedTLS, and HTTPS uses the system CA bundle
 (`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
 (ONNX Runtime, llama.cpp/ggml, built without Metal) under `libembedding/.dylibs/` and uses the system libcurl.

@@ -214,8 +214,13 @@ glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
 bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
 libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
 run time. CI builds it in a `manylinux_2_28` container and tests it on GitHub's
-ARM runners; it has not been tested on a physical Raspberry Pi yet. 32-bit
-Raspberry Pi OS (armv7l) is not supported yet. The Linux wheels download through
+ARM runners; it has not been tested on a physical Raspberry Pi yet. The Linux
+armv7l wheel (`manylinux_2_35_armv7l`) targets 32-bit Raspberry Pi OS 12
+(bookworm) and Debian 12 armhf on ARMv7 boards: ONNX Runtime is built from
+source for it (without telemetry), ggml as a single ARMv7 NEON library, and CI
+tests it under QEMU. numpy and cffi come from piwheels.org there (Raspberry Pi
+OS's default index; piwheels' numpy needs `sudo apt install libopenblas0`); see
+[Platforms](docs/en/platforms.md). The Linux wheels download through
 a libcurl linked statically over mbedTLS (HTTP only), so they bundle no system
 libcurl or TLS library; HTTPS uses the system CA bundle, and `SSL_CERT_FILE` or
 `CURL_CA_BUNDLE` override it.

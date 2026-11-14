@@ -17,6 +17,7 @@ workflows; anything not executed on real devices is stated as such.
 | Windows x64 | PyPI wheel | yes (`windows-2022`) | n/a |
 | Linux x86_64 | PyPI wheel | yes (`ubuntu-22.04`) | n/a |
 | Linux aarch64 | PyPI wheel `manylinux_2_31_aarch64` | yes (ARM runner `ubuntu-22.04-arm`) | yes (Raspberry Pi) |
+| Linux armv7l (32-bit) | PyPI wheel `manylinux_2_35_armv7l` | yes (Debian 12 armhf container under QEMU) | yes (Raspberry Pi) |
 | macOS arm64 (Apple Silicon, macOS 14+) | PyPI wheel | yes (`macos-15`) | n/a |
 | Android arm64-v8a | wheel `android_24_arm64_v8a` (CPython 3.13) | built; native tests on an x86_64 emulator only | yes (arm64 device) |
 | Android x86_64 | wheel `android_24_x86_64` (CPython 3.13) | yes (emulator) | n/a |
@@ -42,7 +43,7 @@ floor").
 - ggml ships eight ARM CPU libraries (`ggml-cpu-armv8.0_1` …
   `ggml-cpu-armv9.2_2`) and loads the best one at run time;
   `libembedding.ggml_cpu_features()` names it.
-- **32-bit Raspberry Pi OS (armv7l) is not supported.**
+- **32-bit Raspberry Pi OS**: see the armv7l section below.
 - CI builds the wheel in a `manylinux_2_28` container and tests it on GitHub's
   ARM runners. It has **not** been tested on a physical Raspberry Pi.
 - The Linux wheels (x86_64 and aarch64) download through a libcurl linked
@@ -54,6 +55,35 @@ floor").
   `/etc/ssl/cert.pem`, first one found). `SSL_CERT_FILE` or `CURL_CA_BUNDLE`
   override it (`include/libembedding/detail/downloader_impl.hpp`,
   `find_ca_source()`).
+
+## Linux armv7l (32-bit Raspberry Pi OS)
+
+The `manylinux_2_35_armv7l` wheel installs on **32-bit** ARM Linux with glibc
+2.35 and GCC 12's libstdc++ or later: **32-bit Raspberry Pi OS 12
+(bookworm)**, Debian 12 armhf, on any ARMv7 Raspberry Pi (Pi 2 v1.2 and
+later). Raspberry Pi OS 11 (bullseye) is not supported: its libstdc++
+(GCC 10) is too old for ONNX Runtime.
+
+```bash
+sudo apt install libopenblas0   # needed by piwheels' numpy
+pip install libembedding-ng
+```
+
+- numpy and cffi publish no armv7l wheels on PyPI. Raspberry Pi OS takes them
+  from piwheels.org (set up by default in `/etc/pip.conf`); elsewhere, add
+  `--extra-index-url https://www.piwheels.org/simple`. piwheels' numpy needs
+  `libopenblas0`.
+- ONNX Runtime publishes no armv7l build: CI compiles it from source (1.31.0,
+  cross-compiled for `arm-linux-gnueabihf`, ARMv7-A, NEON VFPv4, hard float),
+  **without telemetry** (`--no_telemetry`).
+- ggml has no CPU variants for 32-bit ARM: a single `ggml-cpu` library is
+  built for ARMv7-A with NEON.
+- Files above 2 GB (GGUF of 7B and more) are supported (`_FILE_OFFSET_BITS=64`).
+- CI (`armv7l.yml` → `build-wheel-armv7l.yml`) cross-compiles the wheel on an
+  x86_64 runner, then repairs it (auditwheel) and tests it in an
+  `arm32v7/debian:bookworm` container under QEMU: offline suite and parity
+  against the x86_64 reference. It has **not** been tested on a physical
+  Raspberry Pi.
 
 ## Android
 
@@ -250,8 +280,9 @@ Two tests read that file:
   the iOS simulator (`ios.yml`);
 - `python/tests/test_parity.py` (pytest, markers `network` and
   `download_smoke`); run in the wheel test job on Linux x64, Linux aarch64,
-  macOS and Windows (`ci.yml` → `build-wheel.yml`), and on the Android
-  emulator through `download_smoke`.
+  macOS and Windows (`ci.yml` → `build-wheel.yml`), under QEMU for Linux
+  armv7l (`build-wheel-armv7l.yml`), and on the Android emulator through
+  `download_smoke`.
 
 ## Licences of the bundled components
 
