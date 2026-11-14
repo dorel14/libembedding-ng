@@ -141,7 +141,7 @@ lembed_status_t lembed_ensure_text_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -160,7 +160,7 @@ lembed_status_t lembed_ensure_sparse_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -180,7 +180,7 @@ lembed_status_t lembed_ensure_image_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -201,7 +201,7 @@ lembed_status_t lembed_ensure_reranker_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
