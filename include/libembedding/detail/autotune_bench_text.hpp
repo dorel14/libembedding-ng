@@ -33,6 +33,7 @@
 #include "autotune_corpus.hpp"
 #include "autotune_result.hpp"
 #include "autotune_search.hpp"
+#include "log.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -226,7 +227,7 @@ inline lembed_status_t text_autotune_run(lembed_text_model_t model,
 
     if (read_unified_cache(text_cache_subdir(), id, *result)) return LEMBED_OK;
 
-    std::fprintf(stderr, "autotune: cache miss for %s, running benchmark...\n", model_code);
+    lembed::detail::log_info("autotune: cache miss for %s, running benchmark...\n", model_code);
 
     autotune_search_options sopts;
     sopts.objective = objective;

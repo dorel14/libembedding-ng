@@ -25,6 +25,7 @@
 
 #include "autotune_measure.hpp"
 #include "autotune_objective.hpp"
+#include "log.hpp"
 
 #include <cstdio>
 #include <string>
@@ -49,7 +50,8 @@ struct autotune_search_result {
 };
 
 /* Search options. `label` prefixes every progress line ("reranker_autotune",
- * ...) so logs stay attributable; `verbose` = false silences them (tests).
+ * ...) so logs stay attributable. `verbose` defaults to LIBEMBEDDING_VERBOSE
+ * (detail/log.hpp): silent unless the user asks; tests force it to false.
  *
  * `relax_if_infeasible`: when configurations ran but none met the
  * constraints, choose among all of them as if unconstrained, and report it
@@ -64,7 +66,7 @@ struct autotune_search_options {
     double prune_factor = 2.5;           /* racing threshold, x best P50; 0 = off */
     double tie_tolerance = 0.05;         /* costs within 5% are a tie -> earliest point */
     const char* label = "autotune";
-    bool verbose = true;
+    bool verbose = verbose_enabled();
 };
 
 /* `bench(cfg, protocol)` measures one configuration with the given protocol.
