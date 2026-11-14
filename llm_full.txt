@@ -1132,6 +1132,7 @@ The library allocates output buffers internally. Always free them with the match
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
 
 **No telemetry.** libembedding sends nothing anywhere. ONNX Runtime 1.31 does:
@@ -3719,6 +3720,7 @@ model = TextEmbedding(
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL (e.g. mirror) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: libembedding sets it to `1` when unset (nothing sent to Microsoft); `0` keeps ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
 
 ```bash
 # Usage examples
@@ -7578,6 +7580,7 @@ model = TextEmbedding(
 | `HF_ENDPOINT` | URL personnalisée pour le HuggingFace Hub (ex: miroir) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Secondes sans aucun octet reçu avant d'abandonner un téléchargement et de le relancer (30 par défaut ; 3 tentatives au plus) |
 | `ORT_DISABLE_TELEMETRY` | Télémétrie d'ONNX Runtime : libembedding la met à `1` si elle est absente (aucune donnée envoyée à Microsoft) ; `0` conserve la télémétrie d'ORT |
+| `LIBEMBEDDING_VERBOSE` | `1` affiche les diagnostics sur stderr (progression de l'autotune, sélection automatique du modèle, simulation du nettoyage du cache) ; silencieux par défaut |
 
 ```bash
 # Exemples d'utilisation

@@ -148,6 +148,7 @@ model = TextEmbedding(
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL (e.g. mirror) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: libembedding sets it to `1` when unset (nothing sent to Microsoft); `0` keeps ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
 
 ```bash
 # Usage examples

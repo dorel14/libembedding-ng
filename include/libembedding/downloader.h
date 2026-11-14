@@ -113,6 +113,7 @@ lembed_status_t lembed_cleanup_model_cache_except(
 #include <vector>
 #include "detail/downloader_impl.hpp"
 #include "detail/download_manager.hpp"
+#include "detail/log.hpp"
 #include "gguf_registry.h"
 #include "model_registry.h"
 
@@ -457,12 +458,13 @@ lembed_status_t lembed_cleanup_model_cache(
         }
 
         if (dry_run) {
-            /* Report what would be deleted */
+            /* The counts are returned through deleted_count / freed_bytes;
+             * the per-directory list only with LIBEMBEDDING_VERBOSE. */
             for (const auto& path : to_delete) {
-                fprintf(stderr, "[cleanup] Would delete: %s\n", path.c_str());
+                lembed::detail::log_info("[cleanup] Would delete: %s\n", path.c_str());
             }
-            fprintf(stderr, "[cleanup] Total: %zu directories, %llu bytes\n",
-                    to_delete.size(), (unsigned long long)local_freed);
+            lembed::detail::log_info("[cleanup] Total: %zu directories, %llu bytes\n",
+                                     to_delete.size(), (unsigned long long)local_freed);
             if (deleted_count) *deleted_count = to_delete.size();
             if (freed_bytes) *freed_bytes = local_freed;
             return LEMBED_OK;
