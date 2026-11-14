@@ -90,10 +90,9 @@ bash scripts/collect_wheel_licenses.sh "$ONNXRUNTIME_VERSION" \
 echo "== package contents"
 pkg=python/src/libembedding
 cp "$lib" "$pkg/"
-# ORT is linked through its SONAME (libonnxruntime.so.1): auditwheel grafts
-# it from the build RUNPATH. The unversioned copy is the one the Python
-# loader looks for, as in the other Linux wheels.
-cp -L "$ort_lib" "$pkg/libonnxruntime.so"
+# ORT is not copied: libembedding.so needs it by SONAME (libonnxruntime.so.1),
+# and auditwheel grafts it from the build RUNPATH into libembedding_ng.libs/.
+# A copy here would be a second, never loaded 22 MB ONNX Runtime.
 ls -la "$pkg"
 
 echo "== symbol versions required per library"
