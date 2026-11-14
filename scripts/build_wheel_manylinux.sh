@@ -92,8 +92,11 @@ bash scripts/collect_wheel_licenses.sh "$ONNXRUNTIME_VERSION" \
 echo "== package contents"
 pkg=python/src/libembedding
 cp build/libembedding.so "$pkg/"
-cp "$ort_root/lib/libonnxruntime.so" "$pkg/"
-cp "$ort_root/lib/libonnxruntime_providers_shared.so" "$pkg/" 2>/dev/null || true
+# ONNX Runtime is not copied: libembedding.so needs it by SONAME
+# (libonnxruntime.so.1) and auditwheel grafts it into libembedding_ng.libs/
+# from the build RUNPATH. A copy here was a second, never loaded ONNX Runtime
+# (~25 MB). libonnxruntime_providers_shared.so only serves the CUDA/TensorRT
+# style execution providers, which the wheel does not ship.
 # ggml CPU variants are dlopen()ed, never linked: auditwheel cannot find them
 # through libembedding's dependencies, so they must already be in the package.
 shopt -s nullglob

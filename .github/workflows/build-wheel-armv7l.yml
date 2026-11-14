@@ -162,6 +162,9 @@ jobs:
               for name in names:
                   if any(f in name.rsplit("/", 1)[-1] for f in forbidden):
                       print(f"ERROR: {wheel} bundles {name}"); failed = True
+              ort = [n for n in names if n.rsplit("/", 1)[-1].startswith(("libonnxruntime.", "libonnxruntime-"))]
+              if len(ort) != 1:
+                  print(f"ERROR: {wheel} bundles {len(ort)} ONNX Runtime libraries: {ort}"); failed = True
               print(f"{wheel}: {sorted(n for n in names if n.endswith('.so') or '.so.' in n)}")
           sys.exit(failed)
           EOF
