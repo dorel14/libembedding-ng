@@ -36,7 +36,7 @@ TextEmbedding(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `"BAAI/bge-small-en-v1.5"` | HuggingFace model name, ONNX repo code, or local directory path containing `model.onnx` + `tokenizer.json` |
-| `provider` | `str` | `"cpu"` | Execution provider: `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`, `"llamacpp"` |
+| `provider` | `str` | `"cpu"` | Execution provider: `"cpu"`, `"coreml"` (Apple), `"llamacpp"`; `"cuda"`, `"directml"`, `"tensorrt"` are accepted but run on CPU (GPU planned after 1.x) |
 | `threads` | `int` | `0` | Number of threads (`0` = auto) |
 | `batch_size` | `int` | `256` | Internal batch size for inference |
 | `offline` | `bool` | `False` | `True` = use cache only, never download |
@@ -583,6 +583,7 @@ class ModelInfo:
     max_tokens:    int   # max token length
     pooling:       str   # "cls" or "mean"
     quantization:  str   # "none", "static", "dynamic"
+    download_size_mb: int = -1  # download size in MB, -1 if unknown
 ```
 
 ### ModelDesc
@@ -635,7 +636,7 @@ LembedError (Exception)
 ├── DownloadError          — download failure
 ├── IOError                — file I/O error
 ├── ModelNotFoundError     — unknown model
-├── UnsupportedError       — feature disabled at compile time
+├── UnsupportedError       — feature disabled at compile time, or registry model above the mobile limit (Android/iOS)
 ├── BatchSizeError         — incompatible batch size
 └── LlamaError             — llama.cpp/GGUF backend error
 ```
@@ -678,7 +679,15 @@ libembedding.list_text_models()      # list[ModelInfo]
 libembedding.list_sparse_models()    # list[ModelInfo]
 libembedding.list_image_models()     # list[ModelInfo]
 libembedding.list_reranker_models()  # list[ModelInfo]
+
+# Size limit for registry models (MB): 150 on Android and iOS, 0 (no limit)
+# elsewhere. On mobile, list_*_models() only returns models within the limit.
+# See Platforms.
+libembedding.mobile_model_limit_mb()  # int
 ```
+
+See [Platforms](platforms.html) for the mobile limit (`UnsupportedError`,
+`LIBEMBEDDING_ALLOW_LARGE_MODELS`, `LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT`).
 
 ### Auto-tuning workers (C API)
 

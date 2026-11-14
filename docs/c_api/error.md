@@ -19,7 +19,7 @@ Ce module définit les codes de statut et la gestion des erreurs thread-local.
 | `5` | `LEMBED_ERROR_DOWNLOAD` | Erreur de téléchargement |
 | `6` | `LEMBED_ERROR_IO` | Erreur d'entrée/sortie |
 | `7` | `LEMBED_ERROR_MODEL_NOT_FOUND` | Modèle non trouvé |
-| `8` | `LEMBED_ERROR_UNSUPPORTED` | Fonctionnalité non supportée |
+| `8` | `LEMBED_ERROR_UNSUPPORTED` | Fonctionnalité non supportée (aussi : modèle du registre au-dessus de la limite mobile de 150 Mo, voir [Plateformes](../platforms.html)) |
 | `9` | `LEMBED_ERROR_BATCH_SIZE` | Taille de batch invalide |
 | `10` | `LEMBED_ERROR_LLAMA` | Erreur llama.cpp |
 | `11` | `LEMBED_ERROR_CACHE_MISS` | Cache miss |

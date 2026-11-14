@@ -20,11 +20,21 @@
 # ggml CPU dispatch stays off (its default on Apple platforms) and Metal is
 # off (GPU is out of scope before 1.x).
 #
-# Downloading is disabled for now (LIBEMBEDDING_NO_DOWNLOAD): the iOS SDK has
-# no libcurl. Models are passed by path.
+# Downloading: the iOS SDK has no libcurl, so build_curl_mbedtls.sh builds a
+# static curl over mbedTLS, linked into the dylib. iOS exposes no certificate
+# file and SecTrust is not available with mbedTLS: Mozilla's CA bundle, pinned
+# by SHA-256 (the dated file of curl.se/ca), is compiled in
+# (LIBEMBEDDING_CA_BUNDLE_EMBED). SSL_CERT_FILE / CURL_CA_BUNDLE override it.
+# Models are cached in $HOME/Library/Caches/libembedding.
+#
+# Packaging: an iOS app embeds a dynamic library only inside a framework, so
+# the dylib is also wrapped as <work-dir>/framework-<sdk>/libembedding.framework
+# (headers, a C module map for Swift, Info.plist, licence texts, ad hoc
+# signature). .github/workflows/ios.yml joins both SDKs' frameworks into
+# libembedding.xcframework; examples/ios/ is a Swift package that uses it.
 #
 # Auteur: David Orel
-# Version: 1.12.2
+# Version: 1.13.0
 #
 # SPDX-License-Identifier: MIT
 
@@ -39,13 +49,15 @@ work="$2"
 tests="${3:-}"
 
 case "$sdk" in
-    iphoneos)        slice=ios-arm64 ;;
-    iphonesimulator) slice=ios-arm64_x86_64-simulator ;;
+    iphoneos)        slice=ios-arm64;                  platform=iPhoneOS ;;
+    iphonesimulator) slice=ios-arm64_x86_64-simulator; platform=iPhoneSimulator ;;
     *) echo "ERROR: unknown SDK '$sdk'" >&2; exit 2 ;;
 esac
 
 ORT_VERSION=1.30.0
 ORT_SHA256=e6f1670c14406fd9f082bb400ab197a9b0a9646058ca6366e440642e2b54a2ea
+CA_BUNDLE_DATE=2026-11-05   # Mozilla data as of 2026-11-05, published by curl.se
+CA_BUNDLE_SHA256=427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-15.1}"  # the ORT pod's minimum
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -65,33 +77,54 @@ if [ ! -f "$ort_lib" ]; then
     exit 1
 fi
 
+# ---- CA bundle and static libcurl over mbedTLS ----------------------------------
+ca="$work/cacert-$CA_BUNDLE_DATE.pem"
+if [ ! -f "$ca" ]; then
+    curl -fsSL --retry 3 -o "$ca.part" "https://curl.se/ca/cacert-$CA_BUNDLE_DATE.pem"
+    mv "$ca.part" "$ca"
+fi
+echo "$CA_BUNDLE_SHA256  $ca" | shasum -a 256 -c -
+
+ios_toolchain=(
+    -DCMAKE_SYSTEM_NAME=iOS
+    -DCMAKE_OSX_SYSROOT="$sdk"
+    -DCMAKE_OSX_ARCHITECTURES=arm64
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET"
+)
+curl_work="$work/curl-$sdk"
+bash "$root/scripts/build_curl_mbedtls.sh" "$curl_work" "${ios_toolchain[@]}"
+curl_prefix="$curl_work/curl-prefix"
+
 # ---- native build --------------------------------------------------------------
 build="$work/cmake-$sdk"
 targets=(embedding_shared)
 test_flag=OFF
 if [ "$tests" = tests ]; then
     test_flag=ON
+    # test_embedding_parity is an integration test: it downloads bge-small.
     targets+=(test_similarity test_pooling test_tokenizer test_model_registry
-              test_struct_sizes test_sparse_gguf)
+              test_struct_sizes test_sparse_gguf test_embedding_parity)
 fi
 
 # The static ORT library needs the frameworks its CoreML provider uses:
 # UIDevice (UIKit) and nw_path_* (Network) come from its prelinked objects.
+# curl uses CoreFoundation and SystemConfiguration on Apple platforms.
 apple_libs="-framework Foundation -framework CoreML -framework UIKit -framework Network"
+apple_libs+=" -framework CoreFoundation -framework SystemConfiguration"
 cmake -S "$root" -B "$build" \
-    -DCMAKE_SYSTEM_NAME=iOS \
-    -DCMAKE_OSX_SYSROOT="$sdk" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+    "${ios_toolchain[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_FIND_ROOT_PATH="$curl_prefix" \
+    -DCMAKE_PREFIX_PATH="$curl_prefix" \
+    -DLIBEMBEDDING_CA_BUNDLE_EMBED="$ca" \
     -DCMAKE_EXE_LINKER_FLAGS="$apple_libs" \
     -DCMAKE_SHARED_LINKER_FLAGS="$apple_libs" \
     -DBUILD_SHARED_LIBS=OFF \
     -DGGML_METAL=OFF \
     -DLIBEMBEDDING_CPU_DISPATCH=OFF \
-    -DLIBEMBEDDING_NO_DOWNLOAD=ON \
     -DLIBEMBEDDING_BUILD_SHARED=ON \
     -DLIBEMBEDDING_BUILD_TESTS="$test_flag" \
+    -DLIBEMBEDDING_INTEGRATION_TESTS="$test_flag" \
     -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
     -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
     -DONNXRuntime_INCLUDE_DIR="$ort/Headers" \
@@ -107,3 +140,57 @@ if otool -L "$dylib" | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/|@r
     echo "ERROR: libembedding.dylib depends on a non-system library" >&2
     exit 1
 fi
+
+# ---- libembedding.framework ------------------------------------------------------
+# iOS frameworks are flat: binary, Info.plist, Headers/ and Modules/ at the root.
+# The umbrella header is plain C (the C++ parts sit behind
+# LIBEMBEDDING_IMPLEMENTATION), so Swift imports it as a Clang module.
+version="$(sed -n 's/^#define LIBEMBEDDING_VERSION_STRING "\(.*\)"$/\1/p' "$root/include/libembedding/config.h")"
+fw="$work/framework-$sdk/libembedding.framework"
+rm -rf "$fw"
+mkdir -p "$fw/Headers" "$fw/Modules"
+cp "$dylib" "$fw/libembedding"
+install_name_tool -id @rpath/libembedding.framework/libembedding "$fw/libembedding"
+cp -R "$root/include/libembedding/." "$fw/Headers/"
+cat > "$fw/Modules/module.modulemap" <<'EOF'
+framework module libembedding {
+    umbrella header "libembedding.h"
+    export *
+}
+EOF
+cat > "$fw/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleExecutable</key><string>libembedding</string>
+    <key>CFBundleIdentifier</key><string>io.github.dorel14.libembedding</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>libembedding</string>
+    <key>CFBundlePackageType</key><string>FMWK</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleVersion</key><string>$version</string>
+    <key>CFBundleSupportedPlatforms</key><array><string>$platform</string></array>
+    <key>MinimumOSVersion</key><string>$IOS_DEPLOYMENT_TARGET</string>
+</dict>
+</plist>
+EOF
+plutil -lint "$fw/Info.plist"
+
+# Licence texts of everything linked into the binary.
+cp "$root/LICENSE" "$fw/LICENSE"
+cp "$ort/LICENSE" "$fw/LICENSE.onnxruntime"
+cp "$root/third_party/llama.cpp/LICENSE" "$fw/LICENSE.llama.cpp"
+cp "$curl_work"/curl-src/curl-*/COPYING "$fw/LICENSE.curl"
+cp "$curl_work"/curl-src/mbedtls-*/LICENSE "$fw/LICENSE.mbedtls"
+printf '%s\n' \
+    "The CA certificates compiled into libembedding are Mozilla's root store," \
+    "as published by curl.se/ca (cacert-$CA_BUNDLE_DATE.pem), under the Mozilla" \
+    "Public License 2.0: https://www.mozilla.org/MPL/2.0/" \
+    > "$fw/NOTICE.ca-certificates"
+
+# install_name_tool invalidated the linker's signature; Xcode re-signs the
+# framework with the app's identity when it embeds it.
+codesign --force --sign - "$fw"
+echo "== $fw"

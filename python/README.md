@@ -8,7 +8,7 @@
 
 Fast ONNX-based text, image, and sparse embeddings for Python. Dynamic INT8 ONNX models are ~4x smaller, ~2x lighter in memory and ~1.7-2.0x faster than FP32 on CPU (measured; see Benchmarks below).
 
-Built on a C/C++ backend using ONNX Runtime, exposed to Python via zero-overhead cffi bindings. The wheel bundles the **compiled shared library** (`libembedding.so` / `.dylib` / `.dll`) together with ONNX Runtime and libcurl, so no system ONNX Runtime install is required at runtime. Supports 44 text embedding models, 5 image models, 2 sparse models, and 4 rerankers with automatic model downloading from HuggingFace Hub.
+Built on a C/C++ backend using ONNX Runtime, exposed to Python via zero-overhead cffi bindings. The wheel bundles the **compiled shared library** (`libembedding.so` / `.dylib` / `.dll`) together with ONNX Runtime (and, except on macOS, libcurl), so no system ONNX Runtime install is required at runtime. The licence texts of the bundled native code are in the wheel's `.dist-info/licenses/`. Supports 44 text embedding models, 5 image models, 2 sparse models, and 4 rerankers with automatic model downloading from HuggingFace Hub.
 
 ## Installation
 
@@ -25,15 +25,26 @@ pip install libembedding-ng
 and macOS arm64 (Apple Silicon, macOS 14 or later). The x86-64 wheels run on any x86-64 CPU,
 no AVX/AVX2 required: GGUF models load the ggml CPU library matching the machine at run time
 (`libembedding.ggml_cpu_features()` names it), and the aarch64 wheel does the same across
-eight ARM levels (armv8.0 to armv9.2). 32-bit ARM (armv7l) is not supported yet. On Linux,
-HTTPS downloads use the system CA bundle (`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
-(ONNX Runtime, llama.cpp/ggml) under `libembedding/.dylibs/` and uses the system libcurl.
+eight ARM levels (armv8.0 to armv9.2). A Linux armv7l wheel (`manylinux_2_35_armv7l`) covers
+32-bit Raspberry Pi OS 12 (bookworm); numpy and cffi come from piwheels.org there, and piwheels'
+numpy needs `sudo apt install libopenblas0`. On Linux,
+downloads go through a libcurl linked statically over mbedTLS, and HTTPS uses the system CA bundle
+(`SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it). The macOS wheel bundles its dependencies
+(ONNX Runtime, llama.cpp/ggml, built without Metal) under `libembedding/.dylibs/` and uses the system libcurl.
 
 **Android:** wheels for CPython 3.13 on Android 7.0+ (`android_24_arm64_v8a`,
 `android_24_x86_64`, PEP 738: BeeWare, Chaquopy). cffi and numpy come from Chaquopy's index:
 `pip install --extra-index-url https://chaquo.com/pypi-13.1 libembedding-ng`. Models download
 normally (static libcurl over mbedTLS, system certificate store). The x86_64 wheel is tested
 on an emulator in CI; the arm64 wheel has not been run on a device yet.
+
+**Mobile model limit:** on Android and iOS, only light registry models load by name. A model
+above 150 MB raises `UnsupportedError` before any download, with the light alternatives in
+the message. `list_text_models()` and the other listing functions return only the light
+models, and `ModelInfo.download_size_mb` gives each model's size. No sparse model is light
+(SPLADE++ is 532 MB). `LIBEMBEDDING_ALLOW_LARGE_MODELS=1` lifts the limit, and a local model
+path is never checked. `mobile_model_limit_mb()` returns the active limit (0 = none), and
+`LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1` applies the limit on a desktop for testing.
 
 **Requirements:** ONNX Runtime must be installed on your system **only if** you build the package from source.
 
@@ -116,7 +127,7 @@ for m in libembedding.list_text_models():
 ```python
 TextEmbedding(
     model_name="BAAI/bge-small-en-v1.5",  # HuggingFace model name, repo code, or local dir path
-    provider="cpu",  # "cpu", "cuda", "coreml", "directml", "tensorrt", "llamacpp"
+    provider="cpu",  # "cpu", "coreml" (Apple), "llamacpp"; "cuda"/"directml"/"tensorrt" run on CPU (GPU planned after 1.x)
     device_id=0,
     cache_dir=None,  # None = ~/.cache/libembedding
     max_length=0,  # 0 = model default
@@ -242,7 +253,7 @@ with TextEmbedding("BAAI/bge-small-en-v1.5") as model:
 | `pooling` | `str` | "cls" or "mean" |
 | `num_threads` | `int` | Threads configured |
 | `batch_size` | `int` | Batch size configured |
-| `provider` | `str` | Execution provider ("cpu", "cuda", "directml", "coreml", "llamacpp") |
+| `provider` | `str` | Execution provider requested ("cpu", "coreml", "llamacpp"; "cuda", "directml", "tensorrt" are accepted but run on CPU) |
 | `device_id` | `int` | Device ID |
 
 **`Stats`** — runtime statistics (returned by `stats()`):
@@ -374,6 +385,8 @@ if TextEmbedding.supports_llamacpp():
 | `LIBEMBEDDING_CACHE_DIR` | Override model cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint |
+| `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: set to `1` by libembedding when unset (no data sent to Microsoft); `0` keeps ORT's telemetry |
 
 ## Building & Publishing
 

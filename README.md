@@ -108,8 +108,8 @@ gguf_model = TextEmbedding.from_gguf(                          # llama.cpp
 ```
 
 This matters because GGUF quantized models are smaller, faster on CPU, and avoid
-ONNX Runtime dependencies — while ONNX remains the best choice for GPU and
-maximum throughput.
+ONNX Runtime dependencies — while ONNX remains the best choice for maximum
+throughput.
 
 ### Native performance, two languages
 
@@ -167,7 +167,7 @@ with minimal overhead (~13%).
 - **Dual distribution**: header-only `INTERFACE` library on Linux/macOS (STB-style `#define LIBEMBEDDING_IMPLEMENTATION`), plus a **compiled shared library** for FFI/bindings and a native **Windows DLL** (built by CMake, exposed to Python through cffi)
 - CLS and Mean pooling with L2 normalization
 - Batch processing with configurable batch sizes
-- CPU, CUDA, CoreML, DirectML, TensorRT execution providers
+- CPU inference (plus CoreML on Apple platforms); GPU providers are planned after 1.x
 - Custom/user-defined model support (bring your own ONNX)
 - Local model loading from a directory (`model.onnx` + `tokenizer.json`, optional `config.json`)
 - Runtime introspection: `desc()`, `model_name()`, `max_length()`, `stats()` (texts, batches, latency)
@@ -186,7 +186,7 @@ with minimal overhead (~13%).
 |---|---|---|
 | **ONNX Runtime** >= 1.16 | Yes | Bundled in PyPI wheels and on Windows. On macOS/Linux, copied next to executables at build time. |
 | **llama.cpp** | Yes | Vendored in `third_party/llama.cpp` and built with `add_subdirectory` (no download). Always enabled — provides the GGUF backend. The snapshot is trimmed to what the `llama`/`ggml` targets need (`cmake/`, `ggml/`, `include/`, `src/`, `vendor/`, `LICENSE`); see `third_party/README.md`. |
-| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). |
+| **libcurl** >= 7.0 | Optional | For model downloading. Copied next to executables on all platforms. Disabled with `-DLIBEMBEDDING_NO_DOWNLOAD=ON`. On Windows the runtime DLL is **not** vendored: run `pwsh -File scripts/fetch_windows_libcurl.ps1` (see below). The Linux, Android and iOS packages link a static libcurl over mbedTLS instead (`scripts/build_curl_mbedtls.sh`). |
 | **cJSON** | Bundled | Included in `third_party/` |
 | **stb_image** | Bundled | Included in `third_party/`. Disable with `-DLIBEMBEDDING_NO_IMAGE=ON` |
 | **CMake** >= 3.18 | Build only | |
@@ -214,9 +214,21 @@ glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
 bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
 libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
 run time. CI builds it in a `manylinux_2_28` container and tests it on GitHub's
-ARM runners; it has not been tested on a physical Raspberry Pi yet. 32-bit
-Raspberry Pi OS (armv7l) is not supported yet. On Linux, HTTPS downloads use the
-system CA bundle; `SSL_CERT_FILE` or `CURL_CA_BUNDLE` override it.
+ARM runners; it has not been tested on a physical Raspberry Pi yet. The Linux
+armv7l wheel (`manylinux_2_35_armv7l`) targets 32-bit Raspberry Pi OS 12
+(bookworm) and Debian 12 armhf on ARMv7 boards: ONNX Runtime is built from
+source for it (without telemetry), ggml as a single ARMv7 NEON library, and CI
+tests it under QEMU. numpy and cffi come from piwheels.org there (Raspberry Pi
+OS's default index; piwheels' numpy needs `sudo apt install libopenblas0`); see
+[Platforms](docs/en/platforms.md). The Linux wheels download through
+a libcurl linked statically over mbedTLS (HTTP only), so they bundle no system
+libcurl or TLS library; HTTPS uses the system CA bundle, and `SSL_CERT_FILE` or
+`CURL_CA_BUNDLE` override it.
+
+Every wheel ships the licence texts of the native code it bundles (ONNX Runtime,
+llama.cpp/ggml, cJSON, stb, and curl, mbedTLS or zlib where linked) in its
+`.dist-info/licenses/` directory; `python/licenses/THIRD_PARTY_NOTICES.md` lists
+which wheel bundles what.
 
 The Android wheels (`android_24_arm64_v8a`, `android_24_x86_64`) target CPython
 3.13 on Android 7.0 (API 24) and later, the PEP 738 builds used by BeeWare and
@@ -226,6 +238,40 @@ Models download as on other platforms, through a libcurl linked statically over
 mbedTLS that reads the system certificate store. CI tests the x86_64 wheel on an
 emulator, including a model download; the arm64 wheel is built from the same
 sources but has not been run on a device yet.
+
+iOS (15.1 and later, arm64 device and simulator) is supported as a native
+library, not as a Python wheel. `scripts/build_ios.sh <iphoneos|iphonesimulator>
+<work-dir>` builds a self-contained `libembedding.dylib` that links ONNX Runtime
+1.30.0 (the newest onnxruntime-c pod), a static ggml/llama, and a static libcurl
+over mbedTLS (`scripts/build_curl_mbedtls.sh`), and wraps it as a dynamic
+`libembedding.framework` with a C module map, so Swift can `import libembedding`.
+The `iOS` workflow joins both SDKs' frameworks into `libembedding.xcframework`,
+with the licence texts of everything linked in, runs the Swift package in
+`examples/ios` against it with `xcodebuild test`, and uploads it as the
+`libembedding-ios-xcframework` artifact. Models download
+as on other platforms into `$HOME/Library/Caches/libembedding`. iOS exposes no
+certificate file, and curl offers SecTrust only with OpenSSL or GnuTLS, so
+Mozilla's CA bundle (curl.se/ca, pinned by SHA-256) is compiled into the dylib
+(`-DLIBEMBEDDING_CA_BUNDLE_EMBED=<pem>`); `SSL_CERT_FILE` or `CURL_CA_BUNDLE`
+override it. CI runs the unit tests on a simulator, including a model download
+checked against the x86_64 reference embeddings; nothing has run on a physical
+iPhone yet.
+
+On Android and iOS, only light registry models load by name: a model whose files
+exceed 150 MB (`LEMBED_MOBILE_MODEL_LIMIT_MB`) is refused before any download
+with `LEMBED_ERROR_UNSUPPORTED` (`UnsupportedError` in Python), and the error
+lists the light models of the same kind. The light text models include
+bge-small-en-v1.5, all-MiniLM-L6/L12-v2, snowflake-arctic-embed-xs/s and the
+quantized variants of several base models. No sparse model is light: SPLADE++
+is 532 MB. `list_*_models()` only returns the light ones there, and
+`ModelInfo.download_size_mb` gives every model's size.
+`LIBEMBEDDING_ALLOW_LARGE_MODELS=1` lifts the limit. A model passed by local path
+is never checked. `LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1` applies the limit on
+a desktop, to test an app's behaviour.
+
+The full platform matrix, the Android and iOS build details and the numerical
+parity check are in the documentation:
+[docs/en/platforms.md](docs/en/platforms.md) (French: [docs/platforms.md](docs/platforms.md)).
 
 The macOS wheel is arm64 (Apple Silicon, macOS 14 or later), built natively. For
 a local build that will never leave the machine,
@@ -724,7 +770,7 @@ typedef struct {
     int                         dim;            // default: 0 (for local models without config.json)
     /* llama.cpp backend options (only used when provider = LEMBED_PROVIDER_LLAMACPP) */
     int                         llama_n_ctx;    // context size (0 = model default)
-    int                         llama_n_gpu_layers; // GPU layers (-1 = all, 0 = CPU only)
+    int                         llama_n_gpu_layers; // GPU layers; ignored: ggml is built CPU-only
     int                         llama_verbose;  // 1 = enable llama.cpp logging
     int                         llama_n_batch;  // max tokens per llama_encode (0 = model default)
     int                         auto_workers;   // 1 = auto-detect optimal workers/sessions
@@ -743,13 +789,17 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | Enum | Backend |
 |---|---|
 | `LEMBED_PROVIDER_CPU` | CPU (default, always available) |
-| `LEMBED_PROVIDER_CUDA` | NVIDIA CUDA (requires `USE_CUDA` + ORT CUDA provider) |
-| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS) |
-| `LEMBED_PROVIDER_DIRECTML` | DirectML (Windows, requires `USE_DML` + ORT DML provider) |
-| `LEMBED_PROVIDER_TENSORRT` | NVIDIA TensorRT (requires `USE_TENSORRT`) |
-| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled) |
+| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), falls back to CPU if unavailable |
+| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU) |
+| `LEMBED_PROVIDER_CUDA` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_DIRECTML` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_TENSORRT` | Reserved: runs on CPU (GPU support is planned after 1.x) |
 
-Providers are configured via `configure_provider()` and gracefully fall back to CPU if the provider library is unavailable.
+GPU acceleration is out of scope before 1.x. The CUDA, DirectML and TensorRT
+values exist so the enum stays stable, but no build enables them
+(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`): a
+model created with one of them runs on the CPU. ggml is built without GPU
+backends, so `llama_n_gpu_layers` has no effect.
 
 ### Versioned options (v2)
 
@@ -774,6 +824,7 @@ Use `lembed_text_options_default_v2()` / `lembed_reranker_options_default_v2()` 
 | `LIBEMBEDDING_BUILD_EXAMPLES` | ON | Build examples |
 | `LIBEMBEDDING_BUILD_BENCHMARKS` | OFF | Build benchmarks |
 | `LIBEMBEDDING_BUILD_SHARED` | OFF | Build shared library for bindings (Windows: always SHARED) |
+| `LIBEMBEDDING_CA_BUNDLE_EMBED` | empty | PEM file compiled into the library and used when no system CA file or directory is found (iOS) |
 
 ---
 
@@ -1068,7 +1119,16 @@ The library allocates output buffers internally. Always free them with the match
 | `LIBEMBEDDING_CACHE_DIR` | Override default model cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (compatibility with fastembed) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
+| `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
+
+**No telemetry.** libembedding sends nothing anywhere. ONNX Runtime 1.31 does:
+its official Linux and macOS builds, bundled in the wheels, report a hashed
+device id, model file names and hashes and run durations to Microsoft by
+default. libembedding turns that off before its first ONNX Runtime call
+(`ORT_DISABLE_TELEMETRY=1`, plus `DisableTelemetryEvents()` for the Windows ETW
+provider), unless you set `ORT_DISABLE_TELEMETRY` yourself.
 
 ---
 

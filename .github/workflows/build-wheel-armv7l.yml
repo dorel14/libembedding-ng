@@ -1,0 +1,173 @@
+name: Build Wheel armv7l (reusable)
+
+# Roadmap T33d: Python wheel for 32-bit ARM Linux (Raspberry Pi OS 32-bit,
+# Debian armhf), tag manylinux_2_35_armv7l. Called by armv7l.yml on pull
+# requests and by release.yml, which publishes the artifact (wheel-linux-armv7l)
+# with the other platform wheels.
+#
+# ONNX Runtime publishes no armv7l build and supports ARM32 only by
+# cross-compiling, so the "ort" job cross-compiles it once per version and
+# toolchain and caches the result (25 min on 4 cores, measured 2026-11-13).
+# It is built with --no_telemetry: since 1.31 a source build enables ORT's
+# 1DS telemetry by default.
+#
+# The "wheel" job cross-compiles libembedding on the x86_64 runner
+# (scripts/build_wheel_armv7l.sh), then repairs and tests the wheel in an
+# arm32v7 Debian 12 container under QEMU (scripts/check_wheel_armv7l.sh):
+# GitHub's ARM runners cannot execute AArch32 code. Toolchain:
+# cmake/toolchains/armv7l-linux-gnueabihf.cmake (Ubuntu 22.04 cross GCC; its
+# libstdc++ needs GLIBCXX_3.4.30, hence manylinux_2_35, i.e. Raspberry Pi OS
+# 12 or later).
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: false
+        type: string
+        default: ""
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+  # protoc runs on the build machine; ORT 1.31.0 pins protobuf 33.6 (cmake/deps.txt).
+  PROTOC_VERSION: "33.6"
+
+jobs:
+  ort:
+    name: ONNX Runtime (armv7l)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Restore a cached build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ort-out
+          # Bump the trailing number when the build.py arguments change.
+          key: ort-armv7l-${{ env.ONNXRUNTIME_VERSION }}-${{ hashFiles('cmake/toolchains/armv7l-linux-gnueabihf.cmake') }}-ubuntu22.04-1
+
+      - name: Install the armhf cross toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-arm-linux-gnueabihf ninja-build
+
+      - name: Fetch ONNX Runtime sources and a host protoc
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "v$ONNXRUNTIME_VERSION" \
+            https://github.com/microsoft/onnxruntime.git "$RUNNER_TEMP/ort"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/protoc.zip" \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-linux-x86_64.zip"
+          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+
+      - name: Cross-compile ONNX Runtime
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python3 "$RUNNER_TEMP/ort/tools/ci_build/build.py" \
+            --build_dir "$RUNNER_TEMP/ort-build" --config Release \
+            --update --build --parallel --skip_tests \
+            --build_shared_lib --compile_no_warning_as_error \
+            --no_telemetry \
+            --cmake_generator Ninja \
+            --path_to_protoc_exe "$RUNNER_TEMP/protoc/bin/protoc" \
+            --cmake_extra_defines \
+              CMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/armv7l-linux-gnueabihf.cmake" \
+              onnxruntime_BUILD_UNIT_TESTS=OFF
+          mkdir -p ort-out/lib ort-out/include
+          cp -P "$RUNNER_TEMP"/ort-build/Release/libonnxruntime.so* ort-out/lib/
+          cp "$RUNNER_TEMP"/ort/include/onnxruntime/core/session/*.h ort-out/include/
+
+      - name: Check the library
+        run: |
+          lib="ort-out/lib/libonnxruntime.so.$ONNXRUNTIME_VERSION"
+          file "$lib"
+          if grep -q -a "events.data.microsoft.com" "$lib"; then
+            echo "::error::$lib contains ORT's telemetry collector URL"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-linux-armv7l
+          path: ort-out/
+          retention-days: 3
+
+  wheel:
+    name: Python wheel (linux-armv7l)
+    needs: ort
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: onnxruntime-linux-armv7l
+          path: ort-armv7l
+
+      - name: Install the armhf cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-arm-linux-gnueabihf ninja-build
+          python3 -m pip install --user build "setuptools>=77" wheel
+
+      - name: Cross-compile libembedding and build the raw wheel
+        run: bash scripts/build_wheel_armv7l.sh ort-armv7l
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Repair and test the wheel (arm32v7 Debian 12, QEMU)
+        run: |
+          docker run --rm --platform linux/arm/v7 \
+            -v "$PWD:$PWD" -w "$PWD" \
+            arm32v7/debian:bookworm \
+            bash scripts/check_wheel_armv7l.sh ort-armv7l
+          # The container ran as root.
+          sudo chown -R "$(id -u):$(id -g)" .
+
+      # cffi ABI mode is Python-version-independent, as for the other wheels.
+      - name: Normalize the wheel tag to py3-none
+        run: |
+          cd python/dist
+          for f in *.whl; do
+            newname=$(echo "$f" | sed 's/cp3[0-9]*-cp3[0-9]*/py3-none/')
+            if [ "$f" != "$newname" ]; then mv "$f" "$newname"; fi
+          done
+          ls -la
+
+      - name: Check licence texts and bundled libraries
+        run: |
+          python3 - python/dist/*.whl <<'EOF'
+          import sys, zipfile
+          required = ["LICENSE", "licenses/THIRD_PARTY_NOTICES.md", "licenses/onnxruntime.LICENSE",
+                      "licenses/onnxruntime.ThirdPartyNotices.txt", "licenses/llama.cpp.LICENSE",
+                      "licenses/cJSON.LICENSE", "licenses/stb.LICENSE",
+                      "licenses/curl.COPYING", "licenses/mbedtls.LICENSE"]
+          forbidden = ["libcurl", "libssl", "libcrypto", "libgnutls"]
+          failed = False
+          for wheel in sys.argv[1:]:
+              names = zipfile.ZipFile(wheel).namelist()
+              licences = {n.split(".dist-info/licenses/", 1)[1] for n in names if ".dist-info/licenses/" in n}
+              for item in required:
+                  if item not in licences:
+                      print(f"ERROR: {wheel} lacks the licence file {item}"); failed = True
+              for name in names:
+                  if any(f in name.rsplit("/", 1)[-1] for f in forbidden):
+                      print(f"ERROR: {wheel} bundles {name}"); failed = True
+              print(f"{wheel}: {sorted(n for n in names if n.endswith('.so') or '.so.' in n)}")
+          sys.exit(failed)
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-armv7l
+          path: python/dist/*.whl
+          if-no-files-found: error
