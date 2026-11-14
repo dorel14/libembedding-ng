@@ -290,13 +290,23 @@ jobs:
     with:
       ref: ${{ needs.version.outputs.tag }}
 
+  # Linux armv7l wheel (Raspberry Pi OS 32-bit), cross-compiled and tested
+  # under QEMU. Published with the others, for the same reason as Android.
+  build-armv7l:
+    name: Build wheel (linux-armv7l)
+    needs: [version]
+    if: needs.version.outputs.released == 'true'
+    uses: ./.github/workflows/build-wheel-armv7l.yml
+    with:
+      ref: ${{ needs.version.outputs.tag }}
+
   # -----------------------------------------------------------------------
   # 5) Collect every wheel and publish them to PyPI
   # -----------------------------------------------------------------------
   publish:
     name: Publish to PyPI
-    needs: [version, build, build-android]
-    if: always() && needs.build.result == 'success' && needs.build-android.result == 'success' && needs.version.outputs.released == 'true'
+    needs: [version, build, build-android, build-armv7l]
+    if: always() && needs.build.result == 'success' && needs.build-android.result == 'success' && needs.build-armv7l.result == 'success' && needs.version.outputs.released == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download wheel artifacts

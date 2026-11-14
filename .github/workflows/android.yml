@@ -70,16 +70,18 @@ jobs:
         run: |
           cmake --build build --parallel 4 --target embedding_shared \
             test_similarity test_pooling test_tokenizer test_model_registry \
-            test_struct_sizes test_sparse_gguf test_text_embedding
+            test_struct_sizes test_sparse_gguf test_text_embedding test_embedding_parity
 
       - name: Stage binaries
         run: |
           mkdir -p stage
-          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_text_embedding; do
+          for t in test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_text_embedding test_embedding_parity; do
             cp "build/tests/$t" stage/
           done
           find build -name '*.so' -exec cp {} stage/ \;
           cp ort/lib/libonnxruntime.so stage/
+          # x86_64 reference for test_embedding_parity (cosine >= 0.999).
+          cp python/tests/data/parity_bge_small_en_v15.json stage/
           ls -la stage
           # Every shipped object must target the requested ABI.
           file stage/libembedding.so stage/libggml-cpu-*.so | sed 's/,.*BuildID.*//'

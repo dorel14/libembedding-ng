@@ -24,7 +24,9 @@ stage="${1:?usage: android_run_tests.sh <staging-dir>}"
 dest=/data/local/tmp/libembedding
 # test_text_embedding downloads its model: it checks libcurl, mbedTLS and the
 # system certificate store (/system/etc/security/cacerts) on the device.
-tests=(test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_text_embedding)
+# test_embedding_parity compares with the x86_64 reference pushed alongside
+# (parity_bge_small_en_v15.json, cosine >= 0.999 per text).
+tests=(test_similarity test_pooling test_tokenizer test_model_registry test_struct_sizes test_sparse_gguf test_text_embedding test_embedding_parity)
 
 adb wait-for-device
 adb shell "getprop ro.product.cpu.abi; getprop ro.build.version.sdk"
@@ -33,7 +35,7 @@ adb push "$stage"/. "$dest/" > /dev/null
 
 failed=0
 for t in "${tests[@]}"; do
-    out=$(adb shell "cd $dest && chmod 755 ./$t && TMPDIR=$dest/tmp HOME=$dest/tmp LD_LIBRARY_PATH=$dest ./$t; echo EXIT=\$?" || true)
+    out=$(adb shell "cd $dest && chmod 755 ./$t && TMPDIR=$dest/tmp HOME=$dest/tmp LD_LIBRARY_PATH=$dest LEMBED_PARITY_REF=$dest/parity_bge_small_en_v15.json ./$t; echo EXIT=\$?" || true)
     rc=$(echo "$out" | grep -oE 'EXIT=[0-9]+' | tail -n 1 | cut -d= -f2 || true)
     summary=$(echo "$out" | grep -oE '[0-9]+ passed[^[:cntrl:]]*' | tail -n 1 || true)
     if [ "${rc:-1}" = 0 ]; then

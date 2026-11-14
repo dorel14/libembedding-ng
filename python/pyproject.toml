@@ -2,7 +2,7 @@
 # Forked from https://github.com/pacifio/libembedding (C/C++ ONNX embedding core).
 # Published on PyPI as `libembedding-ng`; imported as `libembedding`.
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]  # 77: PEP 639 license-files
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,6 +11,10 @@ version = "1.13.0"
 description = "Fast ONNX-based text, image, and sparse embeddings for Python. Dynamic INT8 ONNX models are ~4x smaller, ~2x lighter in memory and ~1.7-2.0x faster than FP32 on CPU."
 readme = "README.md"
 license = "MIT"
+# The project's licence and those of the bundled native code (PEP 639): the
+# stable texts are versioned in licenses/, the build-dependent ones (ONNX
+# Runtime, curl, mbedTLS, zlib) are added by scripts/collect_wheel_licenses.sh.
+license-files = ["LICENSE", "licenses/*"]
 requires-python = ">=3.9"
 authors = [
     { name = "David Orel" },

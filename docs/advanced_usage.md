@@ -48,17 +48,8 @@ from libembedding import TextEmbedding
 # CPU (défaut, toujours disponible)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# NVIDIA CUDA
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda", device_id=0)
-
-# Apple CoreML (macOS/iOS)
+# Apple CoreML (macOS/iOS), repli sur le CPU s'il est indisponible
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
-
-# DirectML (Windows)
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="directml")
-
-# NVIDIA TensorRT
-model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 ```
 
 **Providers supportés :**
@@ -66,11 +57,13 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="tensorrt")
 | Provider | Backend | Plateforme |
 |----------|---------|-----------|
 | `cpu` | CPU | Toutes |
-| `cuda` | CUDA | NVIDIA GPU |
 | `coreml` | CoreML | macOS, iOS |
-| `directml` | DirectML | Windows |
-| `tensorrt` | TensorRT | NVIDIA GPU |
-| `llamacpp` | llama.cpp | Toutes |
+| `llamacpp` | llama.cpp (CPU) | Toutes |
+| `cuda`, `directml`, `tensorrt` | réservés : exécution sur CPU | — |
+
+L'accélération GPU est hors périmètre avant la 1.x. Les valeurs `cuda`,
+`directml` et `tensorrt` sont acceptées pour garder l'API stable, mais aucune
+build ne les active : le modèle tourne alors sur le CPU.
 
 ### Modèles GGUF (llama.cpp)
 
@@ -154,6 +147,8 @@ model = TextEmbedding(
 | `LIBEMBEDDING_CACHE_DIR` | Redéfinit le répertoire de cache globalement |
 | `FASTEMBED_CACHE_DIR` | Répertoire de cache alternatif (compatibilité fastembed) |
 | `HF_ENDPOINT` | URL personnalisée pour le HuggingFace Hub (ex: miroir) |
+| `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Secondes sans aucun octet reçu avant d'abandonner un téléchargement et de le relancer (30 par défaut ; 3 tentatives au plus) |
+| `ORT_DISABLE_TELEMETRY` | Télémétrie d'ONNX Runtime : libembedding la met à `1` si elle est absente (aucune donnée envoyée à Microsoft) ; `0` conserve la télémétrie d'ORT |
 
 ```bash
 # Exemples d'utilisation
@@ -324,7 +319,7 @@ Pour des performances optimales :
 
 1. **Réutilisez le modèle** — créez-le une fois et embeds plusieurs batchs
 2. **Ajustez `batch_size`** — augmentez jusqu'à saturation mémoire
-3. **Utilisez un provider GPU** — `cuda`, `coreml`, ou `directml`
+3. **Essayez CoreML sur Apple** — `provider="coreml"` (mesurez : le gain dépend du modèle)
 4. **Activez la quantification** — choisissez les modèles `_Q` pour diviser la taille sur disque par 2 à 4 (l'effet sur le débit dépend du modèle : mesurez-le, voir [Performance](performance_tuning.html#quantification--fp32-vs-int8))
 5. **Désactivez la progression** — `show_download_progress=False` pour les scripts
 

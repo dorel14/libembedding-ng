@@ -10,6 +10,12 @@
 # glibc 2.35 itself refuses. manylinux_2_28's gcc-toolset-14 keeps every
 # GLIBCXX symbol within the glibc 2.28 baseline.
 #
+# Downloads go through a static libcurl over mbedTLS (build_curl_mbedtls.sh),
+# linked into libembedding.so: the system libcurl would make auditwheel graft
+# some thirty libraries (OpenSSL, krb5, LDAP, libssh, several under the LGPL)
+# that an HTTPS model download does not need. The licence texts are gathered by
+# collect_wheel_licenses.sh.
+#
 # Expected environment:
 #   ONNXRUNTIME_VERSION  ONNX Runtime release to bundle (e.g. 1.31.0)
 #   HOST_UID, HOST_GID   owner to give the produced files back to
@@ -17,7 +23,7 @@
 # Output: the repaired wheel in python/dist/, the build tree in build/.
 #
 # Auteur: David Orel
-# Version: 1.12.0
+# Version: 1.13.0
 #
 # SPDX-License-Identifier: MIT
 
@@ -47,15 +53,22 @@ cmake --version | sed -n 1p
 ldd --version | sed -n 1p
 
 echo "== system dependencies"
-dnf install -y libcurl-devel
+# bzip2 and xz unpack the curl and mbedTLS source archives.
+dnf install -y bzip2 xz
 
 echo "== ONNX Runtime ${ONNXRUNTIME_VERSION} (${ort_arch})"
 curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}.tgz" | tar xz
 ort_root="$PWD/onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}"
 
+echo "== static libcurl over mbedTLS"
+curl_work="$PWD/build/curl"
+bash scripts/build_curl_mbedtls.sh "$curl_work"
+curl_prefix="$curl_work/curl-prefix"
+
 echo "== shared library"
 cmake -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$curl_prefix" \
     -DLIBEMBEDDING_BUILD_SHARED=ON \
     -DLIBEMBEDDING_BUILD_TESTS=OFF \
     -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
@@ -65,6 +78,16 @@ cmake -S . -B build \
 jobs=$(nproc)
 if [ "$jobs" -gt 4 ]; then jobs=4; fi
 cmake --build build --parallel "$jobs" --target embedding_shared
+# libcurl must be linked in, not a dependency auditwheel would graft.
+if objdump -p build/libembedding.so | grep -E 'NEEDED.*(curl|ssl|crypto)'; then
+    echo "ERROR: libembedding.so links a system libcurl or TLS library" >&2
+    exit 1
+fi
+
+echo "== licence texts"
+bash scripts/collect_wheel_licenses.sh "$ONNXRUNTIME_VERSION" \
+    "$curl_prefix/share/licenses/curl/COPYING" curl.COPYING \
+    "$curl_prefix/share/licenses/mbedtls/LICENSE" mbedtls.LICENSE
 
 echo "== package contents"
 pkg=python/src/libembedding
@@ -103,8 +126,8 @@ show=$(auditwheel show "$raw_dir"/*.whl)
 echo "$show"
 # The image sets AUDITWHEEL_PLAT to its own policy (manylinux_2_28), which
 # `repair` uses by default, so pass the tag auditwheel itself computed. Our own
-# libraries stay within glibc 2.28; the system libraries grafted for libcurl
-# (OpenSSL, krb5, libssh...) are what raise it (2_31 measured on aarch64).
+# libraries stay within glibc 2.28; when the system libcurl was used, the
+# libraries grafted for it (OpenSSL, krb5, libssh...) raised it to 2_31.
 plat=$(echo "$show" | tr '\n' ' ' | grep -oE 'constrains the platform tag to "[^"]+"' \
        | grep -oE 'manylinux_[0-9]+_[0-9]+_[a-z0-9_]+' || true)
 plat="${plat:-$AUDITWHEEL_PLAT}"

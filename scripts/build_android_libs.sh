@@ -12,10 +12,11 @@
 # variable cibuildwheel derives the wheel tag from, so the libraries and the tag
 # cannot disagree. Android has no libcurl: build_android_curl.sh builds a static
 # one over mbedTLS, linked into libembedding.so, so models download as on any
-# other platform.
+# other platform. The licence texts of what the wheel bundles are gathered into
+# python/licenses/ by collect_wheel_licenses.sh.
 #
 # Auteur: David Orel
-# Version: 1.12.2
+# Version: 1.13.0
 #
 # SPDX-License-Identifier: MIT
 
@@ -99,3 +100,8 @@ if [ ${#libs[@]} -eq 0 ]; then
 fi
 cp "${libs[@]}" "$pkg/"
 ls -la "$pkg"/*.so
+
+# ---- licence texts (python/licenses/, PEP 639 license-files) -------------------
+bash "$root/scripts/collect_wheel_licenses.sh" "$ONNXRUNTIME_VERSION" \
+    "$curl_prefix/share/licenses/curl/COPYING" curl.COPYING \
+    "$curl_prefix/share/licenses/mbedtls/LICENSE" mbedtls.LICENSE

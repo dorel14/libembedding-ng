@@ -30,6 +30,7 @@
 #include <windows.h>
 #endif
 
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -56,9 +57,47 @@ namespace lembed { namespace detail {
 
 /* RAII helper to release ORT objects */
 
+/* ONNX Runtime telemetry is turned off unless the user asks for it.
+ *
+ * Since 1.31 the official Linux and macOS builds of ORT (the ones bundled in
+ * the wheels) report to Microsoft by default: a hashed device id, the model
+ * file name, graph and weight hashes and run durations, sent to
+ * mobile.events.data.microsoft.com, plus a device id stored under
+ * ~/.cache/Microsoft/DeveloperTools/.onnxruntime. A library embedded in other
+ * people's applications must not do that silently.
+ *
+ * On POSIX the only full opt-out is ORT_DISABLE_TELEMETRY, read once when
+ * ORT's default Env is built, i.e. on the first ORT call that needs it, which
+ * can be CreateSessionOptions as well as CreateEnv. So the variable is set
+ * from ort_api(), the entry point of every ORT call in this library, before
+ * anything else runs. DisableTelemetryEvents() after CreateEnv also covers
+ * Windows, where ORT's ETW provider ignores the variable.
+ *
+ * A user who sets ORT_DISABLE_TELEMETRY themselves keeps their choice: a falsy
+ * value (0, false, ...) leaves ORT's telemetry on. */
+inline bool ort_telemetry_disabled() {
+    static const bool disabled = []() {
+        const char* value = std::getenv("ORT_DISABLE_TELEMETRY");
+        if (!value) {
+#if !defined(_WIN32)
+            setenv("ORT_DISABLE_TELEMETRY", "1", 0);
+#endif
+            return true;
+        }
+        std::string v(value);
+        for (char& c : v) c = (char)std::tolower((unsigned char)c);
+        return v == "1" || v == "true" || v == "yes" || v == "on" || v == "y";
+    }();
+    return disabled;
+}
+
 /* Singleton ORT environment */
 inline const OrtApi* ort_api() {
-    return OrtGetApiBase()->GetApi(ORT_API_VERSION);
+    static const OrtApi* api = []() {
+        (void)ort_telemetry_disabled();
+        return OrtGetApiBase()->GetApi(ORT_API_VERSION);
+    }();
+    return api;
 }
 inline OrtEnv* ort_env() {
     static OrtEnv* env = nullptr;
@@ -71,6 +110,11 @@ inline OrtEnv* ort_env() {
             std::string err = std::string("Failed to create ORT env: ") + msg;
             api->ReleaseStatus(status);
             throw std::runtime_error(err);
+        }
+        if (ort_telemetry_disabled()) {
+            /* Best effort: a build without telemetry may refuse the call. */
+            OrtStatus* st = api->DisableTelemetryEvents(env);
+            if (st) api->ReleaseStatus(st);
         }
     });
     return env;

@@ -54,7 +54,21 @@ def _model_info_from_c(info) -> ModelInfo:
         max_tokens=info.max_tokens,
         pooling=_POOLING_NAMES.get(info.pooling, "unknown"),
         quantization=_QUANTIZATION_NAMES.get(info.quantization, "unknown"),
+        download_size_mb=lib.lembed_model_download_size_mb(
+            info.model_code, info.model_file
+        ),
     )
+
+
+def mobile_model_limit_mb() -> int:
+    """Largest registry model, in MB, loadable on this platform; 0 means no limit.
+
+    150 on Android and iOS, where a larger registry model is refused by name
+    (``UnsupportedError``) to protect the phone's memory. Setting
+    ``LIBEMBEDDING_ALLOW_LARGE_MODELS=1`` lifts it; a local model path is never
+    checked. ``LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1`` applies it on a desktop.
+    """
+    return lib.lembed_mobile_model_limit_mb()
 
 
 def _matches_model(model_name: str, name: str, code: str) -> bool:
@@ -138,10 +152,15 @@ def resolve_reranker_model(model_name: str) -> int:
 
 
 def _list_models(list_fn) -> list[ModelInfo]:
+    """Registry models of one kind; on mobile, only those within the limit."""
     models_ptr = ffi.new("lembed_model_info_t const **")
     count_ptr = ffi.new("int *")
     check_status(list_fn(models_ptr, count_ptr))
-    return [_model_info_from_c(models_ptr[0][i]) for i in range(count_ptr[0])]
+    models = [_model_info_from_c(models_ptr[0][i]) for i in range(count_ptr[0])]
+    limit = mobile_model_limit_mb()
+    if limit > 0:
+        models = [m for m in models if 0 <= m.download_size_mb <= limit]
+    return models
 
 
 def list_text_models() -> list[ModelInfo]:

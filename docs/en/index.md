@@ -24,6 +24,7 @@ libembedding is a C/C++ and Python library for generating dense, sparse, and ima
 ## Navigation
 
 - [Getting Started](getting_started.html) — Installation and first usage
+- [Platforms](platforms.html) — Windows, Linux, macOS, Android, iOS, Raspberry Pi
 - [Python API Reference](api_reference.html) — Complete Python API reference
 - [Available Models](models.html) — List of supported models
 - [Performance Tuning](performance_tuning.html) — Optimizations and configs

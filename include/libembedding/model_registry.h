@@ -78,6 +78,26 @@ int lembed_resolve_text_model(const char* model);
 int lembed_resolve_reranker_model(const char* model);
 int lembed_resolve_sparse_model(const char* model);
 
+/* Download size, in MB, of a registry model: model_file plus its external
+ * weights (".onnx_data"), as measured on HuggingFace. model_code and model_file
+ * are the fields of a lembed_model_info_t. Returns -1 for a pair that is not in
+ * the registry. */
+int lembed_model_download_size_mb(const char* model_code, const char* model_file);
+
+/* Largest registry model, in MB, that may be loaded on this platform; 0 means
+ * no limit.
+ *
+ * On Android and iOS a phone's memory is the constraint: a registry model above
+ * LEMBED_MOBILE_MODEL_LIMIT_MB is refused by name, before any download, with an
+ * error that lists the light models of the same kind. Setting the environment
+ * variable LIBEMBEDDING_ALLOW_LARGE_MODELS=1 lifts the limit (this returns 0).
+ * A model passed by local path is never checked. Elsewhere this returns 0;
+ * LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT=1 applies the mobile limit on any
+ * platform, to test an application's behaviour on a desktop. */
+int lembed_mobile_model_limit_mb(void);
+
+#define LEMBED_MOBILE_MODEL_LIMIT_MB 150
+
 #ifdef __cplusplus
 }
 #endif
@@ -88,7 +108,17 @@ int lembed_resolve_sparse_model(const char* model);
 #define LIBEMBEDDING_MODEL_REGISTRY_IMPL
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>  /* TARGET_OS_IPHONE, for the mobile model limit */
+#endif
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>             /* GetEnvironmentVariableA, see lembed__env_is_one */
+#endif
 
 /* Provides lembed::detail::set_error() used for registry diagnostics. */
 #include "error.h"
@@ -402,6 +432,89 @@ static const int lembed__additional_files_count =
     (int)(sizeof(lembed__additional_files) / sizeof(lembed__additional_files[0]));
 
 /* =========================================================================
+ * Download sizes (MB) for the mobile limit
+ *
+ * model_file plus its external weights, rounded, measured on HuggingFace
+ * (API tree/main, 2026-11-11). Keyed on (model_code, model_file) rather than
+ * on the enums, so the four registries share one table and lembed_model_info_t
+ * keeps its layout. test_model_registry fails for any registry entry missing
+ * here: a new model needs its size.
+ * ========================================================================= */
+
+typedef struct {
+    const char* model_code;
+    const char* model_file;
+    int         size_mb;
+} lembed__model_size_t;
+
+static const lembed__model_size_t lembed__model_sizes[] = {
+    /* text */
+    { "Qdrant/all-MiniLM-L6-v2-onnx", "model.onnx", 90 },
+    { "Xenova/all-MiniLM-L6-v2", "onnx/model_quantized.onnx", 23 },
+    { "Xenova/all-MiniLM-L12-v2", "onnx/model.onnx", 133 },
+    { "Xenova/all-MiniLM-L12-v2", "onnx/model_quantized.onnx", 34 },
+    { "Xenova/all-mpnet-base-v2", "onnx/model.onnx", 436 },
+    { "Xenova/bge-base-en-v1.5", "onnx/model.onnx", 436 },
+    { "Qdrant/bge-base-en-v1.5-onnx-Q", "model_optimized.onnx", 218 },
+    { "Xenova/bge-large-en-v1.5", "onnx/model.onnx", 1337 },
+    { "Qdrant/bge-large-en-v1.5-onnx-Q", "model_optimized.onnx", 668 },
+    { "Xenova/bge-small-en-v1.5", "onnx/model.onnx", 133 },
+    { "Qdrant/bge-small-en-v1.5-onnx-Q", "model_optimized.onnx", 66 },
+    { "nomic-ai/nomic-embed-text-v1", "onnx/model.onnx", 548 },
+    { "nomic-ai/nomic-embed-text-v1.5", "onnx/model.onnx", 547 },
+    { "nomic-ai/nomic-embed-text-v1.5", "onnx/model_quantized.onnx", 137 },
+    { "Xenova/paraphrase-multilingual-MiniLM-L12-v2", "onnx/model.onnx", 470 },
+    { "Qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q", "model_optimized.onnx", 235 },
+    { "Xenova/paraphrase-multilingual-mpnet-base-v2", "onnx/model.onnx", 1110 },
+    { "Xenova/bge-small-zh-v1.5", "onnx/model.onnx", 95 },
+    { "Xenova/bge-large-zh-v1.5", "onnx/model.onnx", 1298 },
+    { "BAAI/bge-m3", "onnx/model.onnx", 2268 },
+    { "lightonai/modernbert-embed-large", "onnx/model.onnx", 1580 },
+    { "intfloat/multilingual-e5-small", "onnx/model.onnx", 470 },
+    { "intfloat/multilingual-e5-base", "onnx/model.onnx", 1110 },
+    { "Qdrant/multilingual-e5-large-onnx", "model.onnx", 2236 },
+    { "mixedbread-ai/mxbai-embed-large-v1", "onnx/model.onnx", 1337 },
+    { "mixedbread-ai/mxbai-embed-large-v1", "onnx/model_quantized.onnx", 337 },
+    { "Alibaba-NLP/gte-base-en-v1.5", "onnx/model.onnx", 556 },
+    { "Alibaba-NLP/gte-base-en-v1.5", "onnx/model_quantized.onnx", 147 },
+    { "Alibaba-NLP/gte-large-en-v1.5", "onnx/model.onnx", 1746 },
+    { "Alibaba-NLP/gte-large-en-v1.5", "onnx/model_quantized.onnx", 446 },
+    { "Qdrant/clip-ViT-B-32-text", "model.onnx", 254 },
+    { "jinaai/jina-embeddings-v2-base-code", "onnx/model.onnx", 642 },
+    { "jinaai/jina-embeddings-v2-base-en", "model.onnx", 547 },
+    { "onnx-community/embeddinggemma-300m-ONNX", "onnx/model.onnx", 1235 },
+    { "snowflake/snowflake-arctic-embed-xs", "onnx/model.onnx", 90 },
+    { "snowflake/snowflake-arctic-embed-xs", "onnx/model_quantized.onnx", 23 },
+    { "snowflake/snowflake-arctic-embed-s", "onnx/model.onnx", 133 },
+    { "snowflake/snowflake-arctic-embed-s", "onnx/model_quantized.onnx", 34 },
+    { "Snowflake/snowflake-arctic-embed-m", "onnx/model.onnx", 436 },
+    { "Snowflake/snowflake-arctic-embed-m", "onnx/model_quantized.onnx", 110 },
+    { "snowflake/snowflake-arctic-embed-m-long", "onnx/model.onnx", 548 },
+    { "snowflake/snowflake-arctic-embed-m-long", "onnx/model_quantized.onnx", 138 },
+    { "snowflake/snowflake-arctic-embed-l", "onnx/model.onnx", 1337 },
+    { "snowflake/snowflake-arctic-embed-l", "onnx/model_quantized.onnx", 337 },
+    { "onnx-community/bge-small-en-v1.5-ONNX", "onnx/model_quantized.onnx", 34 },
+    /* sparse */
+    { "Qdrant/Splade_PP_en_v1", "model.onnx", 532 },
+    /* image */
+    { "Qdrant/clip-ViT-B-32-vision", "model.onnx", 352 },
+    { "Qdrant/resnet50-onnx", "model.onnx", 94 },
+    { "Qdrant/Unicom-ViT-B-16", "model.onnx", 808 },
+    { "Qdrant/Unicom-ViT-B-32", "model.onnx", 467 },
+    { "nomic-ai/nomic-embed-vision-v1.5", "onnx/model.onnx", 374 },
+    { "Xenova/clip-vit-base-patch32", "onnx/vision_model_int8.onnx", 89 },
+    /* reranker */
+    { "BAAI/bge-reranker-base", "onnx/model.onnx", 1112 },
+    { "rozgo/bge-reranker-v2-m3", "model.onnx", 2271 },
+    { "jinaai/jina-reranker-v1-turbo-en", "onnx/model.onnx", 151 },
+    { "jinaai/jina-reranker-v2-base-multilingual", "onnx/model.onnx", 1114 },
+    { "jinaai/jina-reranker-v1-turbo-en", "onnx/model_quantized.onnx", 38 },
+};
+
+static const int lembed__model_sizes_count =
+    (int)(sizeof(lembed__model_sizes) / sizeof(lembed__model_sizes[0]));
+
+/* =========================================================================
  * Query Functions
  * ========================================================================= */
 
@@ -587,6 +700,41 @@ int lembed_find_image_model_by_code(const char* model_code) {
         if (strcmp(lembed__image_models[i].model_code, model_code) == 0) return i;
     }
     return -1;
+}
+
+int lembed_model_download_size_mb(const char* model_code, const char* model_file) {
+    if (!model_code || !model_file) return -1;
+    for (int i = 0; i < lembed__model_sizes_count; i++) {
+        if (strcmp(lembed__model_sizes[i].model_code, model_code) == 0 &&
+            strcmp(lembed__model_sizes[i].model_file, model_file) == 0) {
+            return lembed__model_sizes[i].size_mb;
+        }
+    }
+    return -1;
+}
+
+static int lembed__env_is_one(const char* name) {
+#ifdef _WIN32
+    /* The process environment, not this module's CRT copy: libembedding.dll
+     * may use another CRT than its host (ucrtbased in Debug), and getenv()
+     * would then miss a variable the host set after loading the DLL. */
+    char v[4];
+    const unsigned long n = GetEnvironmentVariableA(name, v, (unsigned long)sizeof(v));
+    return n == 1 && v[0] == '1';
+#else
+    const char* v = getenv(name);
+    return v && strcmp(v, "1") == 0;
+#endif
+}
+
+int lembed_mobile_model_limit_mb(void) {
+    if (lembed__env_is_one("LIBEMBEDDING_ALLOW_LARGE_MODELS")) return 0;
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    return LEMBED_MOBILE_MODEL_LIMIT_MB;
+#else
+    return lembed__env_is_one("LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT")
+        ? LEMBED_MOBILE_MODEL_LIMIT_MB : 0;
+#endif
 }
 
 #ifdef __cplusplus

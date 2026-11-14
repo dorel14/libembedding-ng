@@ -3,6 +3,8 @@
   url: index.html
 - title: Démarrage
   url: getting_started.html
+- title: Plateformes
+  url: platforms.html
 - title: API Python
   url: api_reference.html
 - title: Similarité

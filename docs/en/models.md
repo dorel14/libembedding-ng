@@ -6,6 +6,10 @@ nav_exclude: true
 
 libembedding ships with a registry of pre-configured models. You can list them dynamically from Python:
 
+> **Android and iOS:** only light models (≤ 150 MB) load by name, and
+> `list_*_models()` returns only those. See
+> [Platforms — mobile model limit](platforms.html).
+
 ```python
 import libembedding
 

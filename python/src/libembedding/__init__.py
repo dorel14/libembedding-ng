@@ -47,6 +47,7 @@ from .models import (
     list_reranker_models,
     list_sparse_models,
     list_text_models,
+    mobile_model_limit_mb,
 )
 from .reranker import (
     Reranker,
@@ -202,6 +203,7 @@ __all__ = [
     "list_reranker_models",
     "list_sparse_models",
     "list_text_models",
+    "mobile_model_limit_mb",
     "reranker_auto_config",
     "reranker_auto_config_profile",
     "reranker_autotune",

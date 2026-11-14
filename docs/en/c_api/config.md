@@ -30,6 +30,7 @@ This module manages library version and configuration macros.
 | `LIBEMBEDDING_NO_IMAGE` | Disable images (stb_image) |
 | `LIBEMBEDDING_INTEGRATION_TESTS` | Enable integration tests |
 | `LIBEMBEDDING_BUILD_SHARED` | Build shared library for Python bindings (Windows: always SHARED) |
+| `LIBEMBEDDING_CA_BUNDLE_EMBED` | CMake option (path to a PEM bundle, empty by default): compiles the certificate bundle into the library, handed to libcurl through `CURLOPT_CAINFO_BLOB` (used for iOS; see [Platforms](../platforms.html)) |
 
 ## Version
 

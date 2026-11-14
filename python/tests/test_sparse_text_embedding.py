@@ -25,9 +25,12 @@ def sparse_model():
     return _factory
 
 
-def test_sparse_list_supported_models():
+def test_sparse_list_supported_models(monkeypatch):
     from libembedding import SparseTextEmbedding
 
+    # The registry content, not the mobile filter (no sparse model fits the
+    # 150 MB limit; test_mobile_limit.py covers the filter).
+    monkeypatch.setenv("LIBEMBEDDING_ALLOW_LARGE_MODELS", "1")
     models = SparseTextEmbedding.list_supported_models()
     assert len(models) > 0
     for m in models:
@@ -36,7 +39,7 @@ def test_sparse_list_supported_models():
         assert m.max_tokens > 0
 
 
-def test_sparse_defaults_match_registry_canonical_name():
+def test_sparse_defaults_match_registry_canonical_name(monkeypatch):
     """Every default model name must be a registry entry, spelled exactly.
 
     The defaults used to be "prithvida/SPLADE_PP_en_v1" -- a misspelt org and a
@@ -54,6 +57,8 @@ def test_sparse_defaults_match_registry_canonical_name():
     from libembedding import SparseTextEmbedding, sparse_best_config
     from libembedding.models import list_sparse_models, resolve_sparse_model
 
+    # The full registry: on mobile the listing hides every sparse model.
+    monkeypatch.setenv("LIBEMBEDDING_ALLOW_LARGE_MODELS", "1")
     registry = list_sparse_models()
     canonical = registry[0].model_name
 

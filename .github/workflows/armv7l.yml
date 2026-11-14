@@ -1,0 +1,13 @@
+name: Linux armv7l
+
+# Roadmap T33d (D10): Python wheel for 32-bit Raspberry Pi OS. The build and
+# the tests live in build-wheel-armv7l.yml, shared with release.yml.
+
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+jobs:
+  wheel:
+    uses: ./.github/workflows/build-wheel-armv7l.yml

@@ -1,0 +1,4 @@
+# Built by scripts/build_ios.sh + xcodebuild -create-xcframework, never versioned.
+libembedding.xcframework/
+.build/
+.swiftpm/

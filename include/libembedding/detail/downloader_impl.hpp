@@ -21,6 +21,17 @@
 #include <thread>
 #include <vector>
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>  /* TARGET_OS_IPHONE */
+#endif
+
+/* iOS (device and simulator), where the app sandbox and the certificate store
+ * differ from every other platform. */
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define LEMBED_DETAIL_IOS 1
+#else
+#define LEMBED_DETAIL_IOS 0
+#endif
 
 namespace lembed { namespace detail {
 
@@ -37,6 +48,12 @@ inline std::string get_cache_dir(const char* override_dir = nullptr) {
     /* Default: ~/.cache/libembedding */
     const char* home = std::getenv("HOME");
     if (!home || !home[0]) home = std::getenv("USERPROFILE");
+#if LEMBED_DETAIL_IOS
+    /* HOME is the app container, whose root an app may not write to; caches
+     * belong in Library/Caches, which the system may purge when space runs
+     * low (a purged model is downloaded again). */
+    if (home && home[0]) return std::string(home) + "/Library/Caches/libembedding";
+#endif
     if (home && home[0]) return std::string(home) + "/.cache/libembedding";
 
     /* No home directory. Android apps have none and no /tmp either, but the
@@ -92,6 +109,11 @@ inline std::string repo_to_dirname(const std::string& repo_code) {
 #ifndef LIBEMBEDDING_NO_DOWNLOAD
 
 #include <curl/curl.h>
+#ifdef LIBEMBEDDING_EMBEDDED_CA_BUNDLE
+/* Generated at configure time from LIBEMBEDDING_CA_BUNDLE_EMBED: defines
+ * lembed_embedded_ca_bundle[], the PEM bundle as bytes. */
+#include "lembed_embedded_ca_bundle.h"
+#endif
 
 /* Correction pour le support de S_ISREG sous Windows (MSVC) */
 #if defined(_WIN32) || defined(WIN32)
@@ -141,7 +163,12 @@ static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow
  * /etc/pki/tls/certs/ca-bundle.crt, which Debian and Ubuntu do not have, so
  * every HTTPS download failed there (measured on the aarch64 wheel). Instead,
  * honour SSL_CERT_FILE / CURL_CA_BUNDLE, then use the first bundle that exists
- * on this machine. Windows and macOS keep libcurl's own default. */
+ * on this machine. Windows and macOS keep libcurl's own default.
+ *
+ * iOS exposes no certificate file and its native verifier (SecTrust) is not
+ * available with mbedTLS, so the iOS build embeds Mozilla's CA bundle
+ * (LIBEMBEDDING_EMBEDDED_CA_BUNDLE, see CMakeLists.txt). SSL_CERT_FILE /
+ * CURL_CA_BUNDLE still take precedence there. */
 struct CaSource {
     std::string file;   /* for CURLOPT_CAINFO, empty if none */
     std::string dir;    /* for CURLOPT_CAPATH, empty if none */
@@ -149,7 +176,7 @@ struct CaSource {
 
 inline CaSource find_ca_source() {
     CaSource ca;
-#if defined(__linux__) || defined(__ANDROID__)
+#if defined(__linux__) || defined(__ANDROID__) || LEMBED_DETAIL_IOS
     for (const char* var : {"SSL_CERT_FILE", "CURL_CA_BUNDLE"}) {
         const char* v = std::getenv(var);
         if (v && v[0] && file_exists(v)) {
@@ -157,6 +184,8 @@ inline CaSource find_ca_source() {
             return ca;
         }
     }
+#endif
+#if defined(__linux__) || defined(__ANDROID__)
     static const char* const kBundles[] = {
         "/etc/ssl/certs/ca-certificates.crt",                 /* Debian, Ubuntu, Alpine */
         "/etc/pki/tls/certs/ca-bundle.crt",                   /* RHEL, Fedora, AlmaLinux */
@@ -185,7 +214,122 @@ inline const CaSource& ca_source() {
     return ca;
 }
 
-/* Download a single file from HuggingFace.
+/* Number of tries for one file: the first request plus two retries. */
+constexpr int kDownloadAttempts = 3;
+
+/* Seconds without a single byte received after which a transfer is aborted
+ * (and retried). Without it a connection that stops sending, while staying
+ * open, blocks the download forever: seen on the Windows CI runners, stuck at
+ * 0 % until the test timeout. LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT overrides
+ * the 30 s default; slow links are not affected, only silent ones. */
+inline long download_stall_seconds() {
+    const char* env = std::getenv("LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT");
+    if (env && env[0]) {
+        char* end = nullptr;
+        const long value = std::strtol(env, &end, 10);
+        if (end && *end == '\0' && value > 0) return value;
+    }
+    return 30;
+}
+
+/* Failures worth another request: the network or the server side, not the
+ * request itself (404, 401, a bad certificate). */
+inline bool is_transient_download_error(CURLcode res, long http_code) {
+    switch (res) {
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_OPERATION_TIMEDOUT:
+    case CURLE_SEND_ERROR:
+    case CURLE_RECV_ERROR:
+    case CURLE_PARTIAL_FILE:
+    case CURLE_GOT_NOTHING:
+    case CURLE_HTTP2:
+    case CURLE_HTTP2_STREAM:
+        return true;
+    case CURLE_HTTP_RETURNED_ERROR:
+        return http_code == 429 || http_code >= 500;
+    default:
+        return false;
+    }
+}
+
+/* One request for url into tmp_path (truncated first). On failure, reason
+ * receives libcurl's message and retry whether another request may succeed. */
+inline bool download_attempt(const std::string& url, const std::string& tmp_path,
+                             long stall_seconds,
+                             download_progress_fn progress_fn, void* progress_userdata,
+                             std::string* reason, bool* retry) {
+    if (retry) *retry = false;
+    FILE* fp = fopen(tmp_path.c_str(), "wb");
+    if (!fp) {
+        if (reason) *reason = "cannot create " + tmp_path;
+        return false;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        fclose(fp);
+        if (reason) *reason = "curl_easy_init failed";
+        return false;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "libembedding/" LIBEMBEDDING_VERSION_STRING);
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+    /* Below 1 byte/s for stall_seconds: the connection is dead, not slow. */
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, stall_seconds);
+
+    const CaSource& ca = ca_source();
+    if (!ca.file.empty()) curl_easy_setopt(curl, CURLOPT_CAINFO, ca.file.c_str());
+    if (!ca.dir.empty()) curl_easy_setopt(curl, CURLOPT_CAPATH, ca.dir.c_str());
+#ifdef LIBEMBEDDING_EMBEDDED_CA_BUNDLE
+    if (ca.file.empty() && ca.dir.empty()) {
+        struct curl_blob blob;
+        blob.data = (void*)lembed_embedded_ca_bundle;
+        blob.len = sizeof(lembed_embedded_ca_bundle);
+        blob.flags = CURL_BLOB_NOCOPY;  /* static storage, outlives the transfer */
+        curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
+    }
+#endif
+
+    char errbuf[CURL_ERROR_SIZE];
+    errbuf[0] = '\0';
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+
+    ProgressData pd = { progress_fn, progress_userdata };
+    if (progress_fn) {
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &pd);
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    }
+
+    const CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_cleanup(curl);
+    const bool closed = fclose(fp) == 0;
+
+    if (res != CURLE_OK) {
+        if (reason) {
+            *reason = curl_easy_strerror(res);
+            if (errbuf[0]) *reason += std::string(": ") + errbuf;
+        }
+        if (retry) *retry = is_transient_download_error(res, http_code);
+        return false;
+    }
+    if (!closed) {
+        if (reason) *reason = "cannot write the downloaded file: " + tmp_path;
+        return false;
+    }
+    return true;
+}
+
+/* Download a single file from HuggingFace, retrying transient failures.
  * error_out, when not null, receives libcurl's reason for a failure. */
 inline bool download_hf_file(const std::string& repo, const std::string& filename,
                               const std::string& dest_path,
@@ -206,53 +350,31 @@ inline bool download_hf_file(const std::string& repo, const std::string& filenam
         if (!mkdirs(parent)) return false;
     }
 
-    /* Open temp file */
     std::string tmp_path = dest_path + ".tmp-" + std::to_string(tick) + "-" +
                            std::to_string(thread_id) + "-" +
                            std::to_string(sequence);
-    FILE* fp = fopen(tmp_path.c_str(), "wb");
-    if (!fp) return false;
 
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        fclose(fp);
-        remove(tmp_path.c_str());
-        return false;
-    }
-
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "libembedding/" LIBEMBEDDING_VERSION_STRING);
-    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-
-    const CaSource& ca = ca_source();
-    if (!ca.file.empty()) curl_easy_setopt(curl, CURLOPT_CAINFO, ca.file.c_str());
-    if (!ca.dir.empty()) curl_easy_setopt(curl, CURLOPT_CAPATH, ca.dir.c_str());
-
-    char errbuf[CURL_ERROR_SIZE];
-    errbuf[0] = '\0';
-    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
-
-    ProgressData pd = { progress_fn, progress_userdata };
-    if (progress_fn) {
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &pd);
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    }
-
-    CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-    fclose(fp);
-
-    if (res != CURLE_OK) {
-        if (error_out) {
-            *error_out = curl_easy_strerror(res);
-            if (errbuf[0]) *error_out += std::string(": ") + errbuf;
+    const long stall = download_stall_seconds();
+    std::string reason;
+    for (int attempt = 1;; attempt++) {
+        bool retry = false;
+        if (download_attempt(url, tmp_path, stall, progress_fn, progress_userdata,
+                             &reason, &retry)) {
+            break;
         }
         remove(tmp_path.c_str());
-        return false;
+        if (!retry || attempt >= kDownloadAttempts) {
+            if (error_out) {
+                *error_out = reason;
+                if (attempt > 1) {
+                    *error_out += " (after " + std::to_string(attempt) + " attempts)";
+                }
+            }
+            return false;
+        }
+        /* A short pause: a stalled or reset connection is often a CDN node
+         * going away, and the next request lands on another one. */
+        std::this_thread::sleep_for(std::chrono::seconds(attempt));
     }
 
     /* Publish atomically; another downloader may have completed this file. */

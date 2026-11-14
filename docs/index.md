@@ -25,6 +25,7 @@ libembedding est une bibliothèque C/C++ et Python pour générer des embeddings
 ## Navigation
 
 - [Démarrage](getting_started.html) — Installation et premier usage
+- [Plateformes](platforms.html) — Windows, Linux, macOS, Android, iOS, Raspberry Pi
 - [API Python](api_reference.html) — Référence API Python complète
 - [Modèles](models.html) — Liste des modèles supportés
 - [Performance](performance_tuning.html) — Optimisations et configurations

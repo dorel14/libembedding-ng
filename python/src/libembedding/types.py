@@ -37,6 +37,8 @@ class ModelInfo:
     max_tokens: int
     pooling: str  # "cls" or "mean"
     quantization: str  # "none", "static", "dynamic"
+    # Download size in MB (model file plus external weights), -1 if unknown.
+    download_size_mb: int = -1
 
 
 @dataclass(frozen=True)

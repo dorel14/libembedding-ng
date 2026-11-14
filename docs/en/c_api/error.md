@@ -18,7 +18,7 @@ This module defines status codes and thread-local error handling.
 | `5` | `LEMBED_ERROR_DOWNLOAD` | Download error |
 | `6` | `LEMBED_ERROR_IO` | I/O error |
 | `7` | `LEMBED_ERROR_MODEL_NOT_FOUND` | Model not found |
-| `8` | `LEMBED_ERROR_UNSUPPORTED` | Unsupported feature |
+| `8` | `LEMBED_ERROR_UNSUPPORTED` | Unsupported feature (also: registry model above the 150 MB mobile limit, see [Platforms](../platforms.html)) |
 | `9` | `LEMBED_ERROR_BATCH_SIZE` | Invalid batch size |
 | `10` | `LEMBED_ERROR_LLAMA` | llama.cpp error |
 | `11` | `LEMBED_ERROR_CACHE_MISS` | Cache miss |

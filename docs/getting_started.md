@@ -13,6 +13,8 @@ pip install libembedding-ng
 
 > Le paquet PyPI est **`libembedding-ng`** (importé en Python sous le nom `libembedding`).
 
+Des wheels existent pour Windows x64, Linux x86_64, Linux aarch64 (Raspberry Pi 64 bits compris), Linux armv7l (Raspberry Pi OS 12 32 bits), macOS arm64 et Android (CPython 3.13, via l'index Chaquopy) ; iOS est livré comme bibliothèque native (xcframework). Voir [Plateformes](platforms.html) pour la matrice complète, l'installation sur Android, le build iOS et la limite de taille des modèles sur mobile.
+
 ## Prérequis
 
 ### Python (pip)

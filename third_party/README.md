@@ -70,21 +70,53 @@ backend optionnel.
 5. Documenter le bump : `README.md` (table des dépendances), `AGENTS.md`
    (§3.3) et régénérer `llm.txt` / `llm_full.txt`.
 
-## Android : libcurl et mbedTLS compilés depuis les sources
+## Android, iOS et wheels Linux : libcurl et mbedTLS compilés depuis les sources
 
-Android ne fournit ni libcurl ni OpenSSL au code NDK. Rien n'est vendorisé ici :
-`scripts/build_android_curl.sh` télécharge les sources officielles, vérifie
+Ni Android (code NDK) ni le SDK iOS ne fournissent libcurl. Sous Linux, le
+libcurl du système ferait greffer par auditwheel une trentaine de bibliothèques
+(OpenSSL, krb5, LDAP, libssh, plusieurs sous LGPL). Rien n'est vendorisé ici :
+`scripts/build_curl_mbedtls.sh` télécharge les sources officielles, vérifie
 leur SHA-256 épinglé, puis les compile en bibliothèques statiques liées dans
-`libembedding.so`. Il est utilisé par `.github/workflows/android.yml` et par
-`scripts/build_android_libs.sh`.
+`libembedding.so` / `libembedding.dylib`. Il est appelé :
+
+- par `scripts/build_android_curl.sh` (Android : `android.yml`,
+  `scripts/build_android_libs.sh`) ;
+- par `scripts/build_ios.sh` (`ios.yml`) ;
+- en natif pour les wheels Linux (`build-wheel.yml`,
+  `scripts/build_wheel_manylinux.sh`) ;
+- en cross-compilation armv7l (`scripts/build_wheel_armv7l.sh`, toolchain
+  `cmake/toolchains/armv7l-linux-gnueabihf.cmake`).
+
+## ONNX Runtime pour armv7l : compilé depuis les sources
+
+ONNX Runtime ne publie aucun build armv7l et ne prend en charge ARM 32 bits
+qu'en cross-compilation. `build-wheel-armv7l.yml` clone le tag de la version
+embarquée (1.31.0), le compile avec la toolchain ci-dessus et `--no_telemetry`
+(depuis 1.31, un build depuis les sources active la télémétrie 1DS par
+défaut), et met le résultat en cache par version et toolchain. Rien n'est
+versionné ici.
+
+Les deux textes de licence sont installés dans
+`curl-prefix/share/licenses/{curl,mbedtls}/`, d'où
+`scripts/collect_wheel_licenses.sh` les copie dans les wheels.
 
 | Composant | Version | Source | Licence |
 |---|---|---|---|
 | curl (HTTP/HTTPS seulement) | 8.21.0, celle des en-têtes de `curl/` | `curl.se/download`, archive signée par Daniel Stenberg | curl (type MIT) |
 | mbedTLS (branche LTS) | 3.6.7 | releases GitHub `Mbed-TLS/mbedtls`, somme SHA-256 publiée | Apache-2.0 (double licence avec GPL-2.0-or-later, utilisé sous Apache-2.0) |
 
-Les certificats viennent du magasin système `/system/etc/security/cacerts`,
-via `CURLOPT_CAPATH` (voir `detail/downloader_impl.hpp`).
+Certificats :
+
+- **Android** : magasin système `/system/etc/security/cacerts`, via
+  `CURLOPT_CAPATH` (voir `detail/downloader_impl.hpp`).
+- **iOS** : aucun fichier de certificats n'est exposé, et curl ne sait utiliser
+  SecTrust qu'avec OpenSSL ou GnuTLS. Le bundle CA de Mozilla publié par
+  `curl.se/ca` (fichier daté, SHA-256 épinglé dans `build_ios.sh`, licence
+  MPL-2.0) est donc compilé dans la bibliothèque : l'option CMake
+  `LIBEMBEDDING_CA_BUNDLE_EMBED=<pem>` génère `lembed_embedded_ca_bundle.h`,
+  passé à curl via `CURLOPT_CAINFO_BLOB`. Pour le mettre à jour, changer
+  `CA_BUNDLE_DATE` et `CA_BUNDLE_SHA256` dans `build_ios.sh` (la date est
+  aussi reprise dans `NOTICE.ca-certificates`, écrit par le même script).
 
 ## Attribution
 

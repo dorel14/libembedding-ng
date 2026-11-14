@@ -48,14 +48,18 @@ jobs:
       # ggml's armv9.2 variants need GCC 14, and a GCC 14 on this runner would
       # link a libstdc++ that pushes the wheel to manylinux_2_39, which the
       # runner itself cannot install.
+      # Downloads go through a static libcurl over mbedTLS linked into
+      # libembedding.so: the system libcurl would make auditwheel graft some
+      # thirty libraries (OpenSSL, krb5, LDAP, libssh, several under the LGPL).
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libcurl4-openssl-dev
+          sudo apt-get install -y cmake build-essential
           curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
           echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
-          echo "CURL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
+          bash scripts/build_curl_mbedtls.sh "$RUNNER_TEMP/curl"
+          echo "CURL_PREFIX=$RUNNER_TEMP/curl/curl-prefix" >> "$GITHUB_ENV"
 
       - name: Build and repair wheel in manylinux_2_28 (Linux aarch64)
         if: runner.os == 'Linux' && runner.arch == 'ARM64'
@@ -141,11 +145,17 @@ jobs:
           if [ -n "$CURL_LIBRARY" ]; then
             cmake_args+=("-DCURL_LIBRARY=$CURL_LIBRARY")
           fi
+          if [ -n "$CURL_PREFIX" ]; then
+            cmake_args+=("-DCMAKE_PREFIX_PATH=$CURL_PREFIX")
+          fi
           if [ "$(uname)" = "Darwin" ]; then
             # Without a target, binaries require the runner's macOS version.
+            # Metal is off: GPU is out of scope before 1.x (ggml enables it by
+            # default on Apple platforms).
             cmake_args+=(
               "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_MIN_VERSION"
               "-DCMAKE_OSX_ARCHITECTURES=$(uname -m)"
+              "-DGGML_METAL=OFF"
             )
           fi
           cmake .. "${cmake_args[@]}"
@@ -163,27 +173,24 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             ext=".so"
-            ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
-            curl_lib_dir="$CURL_LIB_DIR"
           else
             ext=".dylib"
-            ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
-            if [ "$(uname -m)" = "arm64" ]; then
-              curl_lib_dir="/opt/homebrew/lib"
-            else
-              curl_lib_dir="/usr/local/lib"
-            fi
           fi
+          ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
 
           cp "build/libembedding${ext}" python/src/libembedding/
 
           # On macOS, delocate vendors ONNX Runtime and the ggml/llama dylibs
           # under .dylibs/ from libembedding's own references; a copy here
           # would be a second, unused ONNX Runtime. libcurl is the system one.
+          # On Linux, libcurl is linked in statically (no copy, nothing to graft).
           if [ "${{ runner.os }}" = "Linux" ]; then
+            if objdump -p build/libembedding.so | grep -E 'NEEDED.*(curl|ssl|crypto)'; then
+              echo "ERROR: libembedding.so links a system libcurl or TLS library"
+              exit 1
+            fi
             cp "${ort_lib_dir}/libonnxruntime${ext}" python/src/libembedding/ || true
             cp "${ort_lib_dir}/libonnxruntime_providers_shared${ext}" python/src/libembedding/ || true
-            cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
           fi
 
           # ggml CPU variants (CPU dispatch, default ON on Linux). They are
@@ -285,6 +292,24 @@ jobs:
 
           Get-ChildItem python/src/libembedding/
 
+      # ── Licence texts (PEP 639 license-files, see python/licenses/) ──
+      # Linux aarch64 collects them inside its container script.
+      - name: Collect third-party licence texts
+        if: runner.os != 'Linux' || runner.arch == 'X64'
+        shell: bash
+        run: |
+          extra=()
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            extra+=("$CURL_PREFIX/share/licenses/curl/COPYING" curl.COPYING
+                    "$CURL_PREFIX/share/licenses/mbedtls/LICENSE" mbedtls.LICENSE)
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            # vcpkg's curl port links libcurl.dll and z.dll (zlib), both vendored above.
+            share="/c/vcpkg/installed/x64-windows/share"
+            extra+=("$share/curl/copyright" curl.COPYING
+                    "$share/zlib/copyright" zlib.LICENSE)
+          fi
+          bash scripts/collect_wheel_licenses.sh "${{ env.ONNXRUNTIME_VERSION }}" ${extra[@]+"${extra[@]}"}
+
       # ── Build the Python wheel ───────────────────────────────────
       - name: Build wheel
         if: runner.os != 'Linux' || runner.arch == 'X64'
@@ -362,6 +387,35 @@ jobs:
             echo "=== $f ==="
             python -m zipfile -l "$f"
           done
+
+      # Every wheel carries the licence texts of what it bundles; a Linux wheel
+      # grafts no libcurl (it is linked in statically) and macOS no Metal.
+      - name: Check licence texts and bundled libraries
+        shell: bash
+        run: |
+          python - "${{ runner.os }}" python/dist/*.whl <<'EOF'
+          import sys, zipfile
+          system, wheels = sys.argv[1], sys.argv[2:]
+          required = ["LICENSE", "licenses/THIRD_PARTY_NOTICES.md", "licenses/onnxruntime.LICENSE",
+                      "licenses/onnxruntime.ThirdPartyNotices.txt", "licenses/llama.cpp.LICENSE",
+                      "licenses/cJSON.LICENSE", "licenses/stb.LICENSE"]
+          required += {"Linux": ["licenses/curl.COPYING", "licenses/mbedtls.LICENSE"],
+                       "Windows": ["licenses/curl.COPYING", "licenses/zlib.LICENSE"]}.get(system, [])
+          forbidden = {"Linux": ["libcurl", "libssl", "libcrypto", "libgnutls"],
+                       "macOS": ["libggml-metal"]}.get(system, [])
+          failed = False
+          for wheel in wheels:
+              names = zipfile.ZipFile(wheel).namelist()
+              licences = {n.split(".dist-info/licenses/", 1)[1] for n in names if ".dist-info/licenses/" in n}
+              for item in required:
+                  if item not in licences:
+                      print(f"ERROR: {wheel} lacks the licence file {item}"); failed = True
+              for name in names:
+                  if any(f in name.rsplit("/", 1)[-1] for f in forbidden):
+                      print(f"ERROR: {wheel} bundles {name}"); failed = True
+              print(f"{wheel}: licences {sorted(licences)}")
+          sys.exit(failed)
+          EOF
 
       # ── Install wheel and run tests ──────────────────────────────
       - name: Install wheel and run tests

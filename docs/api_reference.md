@@ -37,7 +37,7 @@ TextEmbedding(
 | Paramètre | Type | Défaut | Description |
 |-----------|------|---------|-------------|
 | `model_name` | `str` | `"BAAI/bge-small-en-v1.5"` | Nom HuggingFace, code de repo, ou chemin local vers un répertoire contenant `model.onnx` + `tokenizer.json` |
-| `provider` | `str` | `"cpu"` | Provider d'exécution : `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`, `"llamacpp"` |
+| `provider` | `str` | `"cpu"` | Provider d'exécution : `"cpu"`, `"coreml"` (Apple), `"llamacpp"` ; `"cuda"`, `"directml"`, `"tensorrt"` sont acceptés mais tournent sur CPU (GPU prévu après la 1.x) |
 | `threads` | `int` | `0` | Nombre de threads (`0` = auto) |
 | `batch_size` | `int` | `256` | Taille de batch interne pour l'inférence |
 | `offline` | `bool` | `False` | `True` = utilise uniquement le cache, pas de téléchargement |
@@ -511,6 +511,7 @@ class ModelInfo:
     max_tokens:    int   # longueur max en tokens
     pooling:       str   # "cls" ou "mean"
     quantization:  str   # "none", "static", "dynamic"
+    download_size_mb: int = -1  # taille du téléchargement en Mo, -1 si inconnue
 ```
 
 ### ModelDesc
@@ -659,7 +660,7 @@ LembedError (Exception)
 ├── DownloadError          — échec de téléchargement
 ├── IOError                — erreur fichier
 ├── ModelNotFoundError     — modèle inconnu
-├── UnsupportedError       — fonctionnalité désactivée à la compilation
+├── UnsupportedError       — fonctionnalité désactivée à la compilation, ou modèle du registre au-dessus de la limite mobile (Android/iOS)
 ├── BatchSizeError         — taille de batch incompatible
 └── LlamaError             — erreur du backend llama.cpp/GGUF
 ```
@@ -697,7 +698,15 @@ libembedding.list_text_models()      # list[ModelInfo]
 libembedding.list_sparse_models()    # list[ModelInfo]
 libembedding.list_image_models()     # list[ModelInfo]
 libembedding.list_reranker_models()  # list[ModelInfo]
+
+# Limite de taille des modèles du registre (Mo) : 150 sur Android et iOS,
+# 0 (aucune limite) ailleurs. Sur mobile, list_*_models() ne renvoie que les
+# modèles dans la limite. Voir Plateformes.
+libembedding.mobile_model_limit_mb()  # int
 ```
+
+Voir [Plateformes](platforms.html) pour la limite mobile (`UnsupportedError`,
+`LIBEMBEDDING_ALLOW_LARGE_MODELS`, `LIBEMBEDDING_FORCE_MOBILE_MODEL_LIMIT`).
 
 ### Auto-tuning workers (C API)
 

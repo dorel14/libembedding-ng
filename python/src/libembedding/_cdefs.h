@@ -415,6 +415,11 @@ int lembed_resolve_text_model(const char* model);
 int lembed_resolve_reranker_model(const char* model);
 int lembed_resolve_sparse_model(const char* model);
 
+/* Download size (MB) of a registry (model_code, model_file) pair, -1 if unknown. */
+int lembed_model_download_size_mb(const char* model_code, const char* model_file);
+/* Largest registry model (MB) loadable here; 0 = no limit (150 on Android/iOS). */
+int lembed_mobile_model_limit_mb(void);
+
 /* ═══ Functions: Downloader ════════════════════════════════════════ */
 
 lembed_status_t lembed_ensure_text_model(lembed_text_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);

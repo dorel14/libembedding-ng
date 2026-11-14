@@ -141,6 +141,9 @@ lembed_status_t lembed_ensure_text_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
+    } catch (const lembed::detail::model_too_large_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_DOWNLOAD;
@@ -157,6 +160,9 @@ lembed_status_t lembed_ensure_sparse_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
+    } catch (const lembed::detail::model_too_large_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_DOWNLOAD;
@@ -174,6 +180,9 @@ lembed_status_t lembed_ensure_image_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
+    } catch (const lembed::detail::model_too_large_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_DOWNLOAD;
@@ -192,6 +201,9 @@ lembed_status_t lembed_ensure_reranker_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
+    } catch (const lembed::detail::model_too_large_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_DOWNLOAD;
@@ -220,6 +232,38 @@ lembed_status_t lembed_ensure_gguf_model(
             if (component == "..") {
                 lembed::detail::set_error("GGUF filename must not traverse parent directories");
                 return LEMBED_ERROR_INVALID_ARGUMENT;
+            }
+        }
+
+        /* Mobile model limit: a GGUF of the registry above it is refused, as
+         * the ONNX models are in ensure_model_by_kind(). A repo/file outside
+         * the registry has no known size and is not checked. */
+        const int limit = lembed_mobile_model_limit_mb();
+        if (limit > 0) {
+            const lembed_gguf_model_info_t* models = nullptr;
+            int count = 0;
+            lembed_list_gguf_models(&models, &count);
+            const std::string suffix = std::string(repo) + "/resolve/main/" + file;
+            for (int i = 0; i < count; i++) {
+                const std::string url(models[i].gguf_url ? models[i].gguf_url : "");
+                if (url.size() < suffix.size() ||
+                    url.compare(url.size() - suffix.size(), suffix.size(), suffix) != 0 ||
+                    models[i].file_size_mb <= limit) {
+                    continue;
+                }
+                std::string light;
+                for (int j = 0; j < count; j++) {
+                    if (models[j].file_size_mb > limit) continue;
+                    if (!light.empty()) light += ", ";
+                    light += std::string(models[j].name) + " (" +
+                             std::to_string(models[j].file_size_mb) + " MB)";
+                }
+                lembed::detail::set_error(
+                    std::string(models[i].name) + " (" + std::to_string(models[i].file_size_mb) +
+                    " MB) exceeds the " + std::to_string(limit) +
+                    " MB limit for models on mobile devices. Set LIBEMBEDDING_ALLOW_LARGE_MODELS=1"
+                    " to load it anyway, or pass a local model path. Light GGUF models: " + light + ".");
+                return LEMBED_ERROR_UNSUPPORTED;
             }
         }
 

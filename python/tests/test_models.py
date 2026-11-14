@@ -40,9 +40,12 @@ def test_qsuffix_registry_entries_are_fp16():
         )
 
 
-def test_list_sparse_models():
+def test_list_sparse_models(monkeypatch):
     from libembedding.models import list_sparse_models
 
+    # The registry content, not the mobile filter (no sparse model fits the
+    # 150 MB limit; test_mobile_limit.py covers the filter).
+    monkeypatch.setenv("LIBEMBEDDING_ALLOW_LARGE_MODELS", "1")
     models = list_sparse_models()
     assert len(models) > 0
     for m in models:

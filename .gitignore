@@ -72,6 +72,11 @@ python/*.egg-info/
 python/src/*.egg-info/
 python/dist/
 python/build/
+# Licence texts added at wheel build time by scripts/collect_wheel_licenses.sh
+python/licenses/onnxruntime.*
+python/licenses/curl.*
+python/licenses/mbedtls.*
+python/licenses/zlib.*
 
 # libcurl runtime installed by scripts/fetch_windows_libcurl.ps1
 # (libcurl-x64.dll and the .libcurl-source.txt provenance record)

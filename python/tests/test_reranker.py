@@ -5,9 +5,11 @@ import pytest
 from libembedding.exceptions import LembedError
 
 
-def test_reranker_list_supported_models():
+def test_reranker_list_supported_models(monkeypatch):
     from libembedding import Reranker
 
+    # The registry content, not the mobile filter (test_mobile_limit.py).
+    monkeypatch.setenv("LIBEMBEDDING_ALLOW_LARGE_MODELS", "1")
     models = Reranker.list_supported_models()
     assert len(models) > 0
     assert any("bge-reranker" in m.model_name for m in models)
