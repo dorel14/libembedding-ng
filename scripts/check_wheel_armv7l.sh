@@ -34,14 +34,16 @@ ldd --version | sed -n 1p
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-    python3 python3-venv ca-certificates patchelf libgomp1 >/dev/null
+    python3 python3-venv ca-certificates libgomp1 >/dev/null
 python3 --version
 
 python3 -m venv /tmp/venv
 # shellcheck disable=SC1091
 . /tmp/venv/bin/activate
 pip install -q --upgrade pip
-pip install -q auditwheel
+# auditwheel repair needs patchelf >= 0.14.5; Debian 12 ships 0.14.3. The
+# PyPI package has an armv7l wheel.
+pip install -q auditwheel patchelf
 
 echo "== repair"
 raw=$(ls python/dist/*.whl)
