@@ -176,21 +176,20 @@ jobs:
           else
             ext=".dylib"
           fi
-          ort_lib_dir="$ONNXRUNTIME_ROOT/lib"
-
           cp "build/libembedding${ext}" python/src/libembedding/
 
           # On macOS, delocate vendors ONNX Runtime and the ggml/llama dylibs
           # under .dylibs/ from libembedding's own references; a copy here
           # would be a second, unused ONNX Runtime. libcurl is the system one.
-          # On Linux, libcurl is linked in statically (no copy, nothing to graft).
+          # On Linux, libcurl is linked in statically (no copy, nothing to graft),
+          # and ONNX Runtime is not copied either: auditwheel grafts it into
+          # libembedding_ng.libs/ from libembedding.so's SONAME dependency
+          # (libonnxruntime.so.1); a copy here was a second, unused ONNX Runtime.
           if [ "${{ runner.os }}" = "Linux" ]; then
             if objdump -p build/libembedding.so | grep -E 'NEEDED.*(curl|ssl|crypto)'; then
               echo "ERROR: libembedding.so links a system libcurl or TLS library"
               exit 1
             fi
-            cp "${ort_lib_dir}/libonnxruntime${ext}" python/src/libembedding/ || true
-            cp "${ort_lib_dir}/libonnxruntime_providers_shared${ext}" python/src/libembedding/ || true
           fi
 
           # ggml CPU variants (CPU dispatch, default ON on Linux). They are
@@ -413,6 +412,10 @@ jobs:
               for name in names:
                   if any(f in name.rsplit("/", 1)[-1] for f in forbidden):
                       print(f"ERROR: {wheel} bundles {name}"); failed = True
+              # One ONNX Runtime per wheel: a second copy is ~25 MB never loaded.
+              ort = [n for n in names if n.rsplit("/", 1)[-1].startswith(("libonnxruntime.", "libonnxruntime-", "onnxruntime.dll"))]
+              if len(ort) != 1:
+                  print(f"ERROR: {wheel} bundles {len(ort)} ONNX Runtime libraries: {ort}"); failed = True
               print(f"{wheel}: licences {sorted(licences)}")
           sys.exit(failed)
           EOF
