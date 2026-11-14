@@ -105,6 +105,7 @@ lembed_status_t lembed_cleanup_model_cache_except(
 /* ---- Implementation ---- */
 #ifdef LIBEMBEDDING_IMPLEMENTATION
 
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -432,11 +433,59 @@ lembed_status_t lembed_cleanup_model_cache(
             return LEMBED_OK;
         }
 
-        /* Build set of model directories to keep */
+        /* Build set of model directories to keep. A model is cached under the
+         * repository actually downloaded (registry model_code, e.g.
+         * Qdrant/bge-small-en-v1.5-onnx-Q), while callers name it by its usual
+         * name (model_name, e.g. BAAI/bge-small-en-v1.5): keeping only the
+         * literal name deleted the very model the caller meant to keep. Every
+         * registry entry matching a kept name, by either field and ignoring
+         * case, keeps its download directory too; GGUF entries likewise. */
+        auto same = [](const char* a, const char* b) {
+            if (!a || !b) return false;
+            for (; *a && *b; ++a, ++b) {
+                if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b)) return false;
+            }
+            return *a == *b;
+        };
         std::unordered_set<std::string> keep_dirs;
+        auto keep_repo = [&keep_dirs](const std::string& repo) {
+            keep_dirs.insert("models--" + lembed::detail::repo_to_dirname(repo));
+        };
+        using list_fn = lembed_status_t (*)(const lembed_model_info_t**, int*);
+        const list_fn registries[] = {
+            lembed_list_text_models, lembed_list_sparse_models,
+#ifndef LIBEMBEDDING_NO_IMAGE
+            lembed_list_image_models,
+#endif
+            lembed_list_reranker_models,
+        };
+        const lembed_gguf_model_info_t* gguf = nullptr;
+        int gguf_count = 0;
+        lembed_list_gguf_models(&gguf, &gguf_count);
         for (int i = 0; keep_models[i]; i++) {
-            std::string repo_dir = lembed::detail::repo_to_dirname(keep_models[i]);
-            keep_dirs.insert("models--" + repo_dir);
+            const char* wanted = keep_models[i];
+            keep_repo(wanted);
+            for (list_fn list : registries) {
+                const lembed_model_info_t* models = nullptr;
+                int count = 0;
+                if (list(&models, &count) != LEMBED_OK) continue;
+                for (int m = 0; m < count; m++) {
+                    if (same(wanted, models[m].model_name) || same(wanted, models[m].model_code)) {
+                        keep_repo(models[m].model_code);
+                    }
+                }
+            }
+            for (int g = 0; g < gguf_count; g++) {
+                if (!same(wanted, gguf[g].name) && !same(wanted, gguf[g].model_code)) continue;
+                /* https://huggingface.co/<repo>/resolve/main/<file> */
+                const std::string url(gguf[g].gguf_url ? gguf[g].gguf_url : "");
+                const std::string host = "huggingface.co/";
+                const size_t start = url.find(host);
+                const size_t end = url.find("/resolve/");
+                if (start != std::string::npos && end != std::string::npos && end > start) {
+                    keep_repo(url.substr(start + host.size(), end - start - host.size()));
+                }
+            }
         }
 
         /* Also always keep tune_cache.json and any non-model directories */
