@@ -1114,6 +1114,7 @@ The library allocates output buffers internally. Always free them with the match
 | `LIBEMBEDDING_CACHE_DIR` | Override default model cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (compatibility with fastembed) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
+| `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
 
