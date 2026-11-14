@@ -3,8 +3,8 @@
  *
  * The fidelity criterion. Both models derive from the same HuggingFace export,
  * prithivida/Splade_PP_en_v1, so on the same text they must produce nearly the
- * same sparse vector. Cosine >= 0.90 is the bar; the measured value is printed so
- * a regression shows up as a drift, not just a failure.
+ * same sparse vector. Cosine >= kMinCosine (0.995) is the bar; the measured value
+ * is printed so a regression shows up as a drift, not just a failure.
  *
  * Requires network: two separate downloads. Guarded by
  * LIBEMBEDDING_INTEGRATION_TESTS in tests/CMakeLists.txt, so a run without that
@@ -13,10 +13,11 @@
  * Two deliberate choices:
  *
  *   - The texts are plain ASCII English. The tokeniser is shared between the two
- *     backends, so on any text they agree -- but both are approximations of
- *     HuggingFace's BertNormalizer (ASCII-only lowercasing, no accent
- *     stripping). Feeding accented text here would measure the approximation
- *     instead of the runtime, which is not what this test is for.
+ *     backends, so on any text they agree -- but it only approximates
+ *     HuggingFace's BertNormalizer (lowercasing and accent stripping cover ASCII
+ *     and the Latin ranges, see detail/tokenizer_impl.hpp). Feeding other
+ *     scripts here would measure the approximation instead of the runtime,
+ *     which is not what this test is for.
  *
  *   - top_k is 0, meaning no truncation. A cosine between two truncated vectors
  *     is dominated by which terms each side happened to keep, and would measure
