@@ -40,7 +40,13 @@
 #endif
 #ifdef __APPLE__
 #include <TargetConditionals.h>  /* TARGET_OS_IPHONE */
-#include <sys/sysctl.h>
+/* Declared here rather than through <sys/sysctl.h>: that header pulls in
+ * <sys/proc.h>, which failed to compile in the macOS and iOS builds of
+ * libembedding_shlib.cpp ("field has incomplete type 'struct itimerval'"),
+ * this header being included after others that change the feature macros.
+ * Signature from sysctlbyname(3), stable since Mac OS X 10.0. */
+extern "C" int sysctlbyname(const char* name, void* oldp, size_t* oldlenp,
+                            void* newp, size_t newlen);
 #endif
 
 namespace lembed {
