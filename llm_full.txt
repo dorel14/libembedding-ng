@@ -953,6 +953,11 @@ Measured against the sparse ONNX model on the same texts, cosine similarity is
 implementation divergence. See `docs/gguf_sparse_runtime.md` and
 `docs/archive/LE-9.6-results.md`.
 
+This file is registered as `SPLADE-PP-En-v1-GGUF` (Apache-2.0, ~112 MB):
+`lembed_list_sparse_gguf_models()` / `lembed_find_sparse_gguf_model()` in C,
+and in Python `SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")` downloads and loads
+it. The name is matched exactly, so the ONNX model's names still load ONNX.
+
 ---
 
 ### Unified Auto-Tuner and Benchmark
@@ -2748,6 +2753,23 @@ for (int i = 0; i < count; i++) {
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ languages |
 
 > **Note:** Sparse embeddings have no fixed dimension. The returned dimension equals the number of active tokens in the vocabulary.
+
+### Sparse GGUF models (1 model)
+
+Run by libembedding's own ggml runtime, not llama.cpp. Listed by
+`lembed_list_sparse_gguf_models()`; in Python, pass the registry name.
+
+| Registry name | File | Size | Licence | Validation |
+|---------------|------|------|---------|------------|
+| `SPLADE-PP-En-v1-GGUF` | `cstr/splade-pp-en-v1-GGUF`, `splade-pp-en-v1-q8_0.gguf` | ~112 MB | Apache-2.0 | cosine ≥ 0.995 against the ONNX `prithivida/Splade_PP_en_v1` (measured min 0.9998) |
+
+```python
+from libembedding import SparseTextEmbedding
+model = SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")   # downloads the Q8_0 file
+```
+
+The name is matched exactly (case-insensitive): `"Splade_PP_en_v1"` and the
+other names of the ONNX model keep loading the ONNX model.
 
 ---
 
@@ -5439,6 +5461,12 @@ This module manages the list of recommended GGUF models and their configuration.
 | `lembed_list_gguf_models(out, count)` | `lembed_status_t` | List GGUF models |
 | `lembed_find_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Look up a GGUF model (NULL if unknown) |
 | `lembed_default_gguf_model()` | `const lembed_gguf_model_info_t*` | Recommended default GGUF model |
+| `lembed_list_sparse_gguf_models(out, count)` | `lembed_status_t` | Sparse GGUF models (libembedding's ggml runtime); `dim` is the vocabulary size |
+| `lembed_find_sparse_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Sparse GGUF model by exact name, ignoring case (NULL if unknown) |
+
+> Sparse GGUF models (e.g. `SPLADE-PP-En-v1-GGUF`) are a separate list: a dense
+> lookup never returns a sparse model. The match is exact so that it does not
+> capture the names of the ONNX model of the same family.
 
 > Both lookup functions return a **pointer into static data** — do not free it.
 > There is no `lembed_get_gguf_model_info()`: iterate directly over the array
@@ -6594,6 +6622,23 @@ Les modèles GGUF sont chargés par chemin de fichier (pas par enum). Ils utilis
 | `BAAI/bge-m3` | variable | 8192 | BGE-M3, 100+ langues |
 
 > **Note :** Les embeddings sparse n'ont pas de dimension fixe. La dimension retournée correspond au nombre de tokens actifs dans le vocabulaire.
+
+### Modèles sparse GGUF (1 modèle)
+
+Exécutés par le runtime ggml de libembedding, pas par llama.cpp. Listés par
+`lembed_list_sparse_gguf_models()` ; en Python, passer le nom du registre.
+
+| Nom du registre | Fichier | Taille | Licence | Validation |
+|-----------------|---------|--------|---------|------------|
+| `SPLADE-PP-En-v1-GGUF` | `cstr/splade-pp-en-v1-GGUF`, `splade-pp-en-v1-q8_0.gguf` | ~112 Mo | Apache-2.0 | cosinus ≥ 0.995 contre l'ONNX `prithivida/Splade_PP_en_v1` (minimum mesuré 0.9998) |
+
+```python
+from libembedding import SparseTextEmbedding
+model = SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")   # télécharge le fichier Q8_0
+```
+
+Le nom est comparé exactement (sans tenir compte de la casse) : `"Splade_PP_en_v1"`
+et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
 
 ---
 
@@ -9324,6 +9369,12 @@ Ce module gère la liste des modèles GGUF recommandés et leur configuration.
 | `lembed_list_gguf_models(out, count)` | `lembed_status_t` | Liste des modèles GGUF |
 | `lembed_find_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Chercher un modèle GGUF (NULL si inconnu) |
 | `lembed_default_gguf_model()` | `const lembed_gguf_model_info_t*` | Modèle GGUF recommandé par défaut |
+| `lembed_list_sparse_gguf_models(out, count)` | `lembed_status_t` | Liste des modèles sparse GGUF (runtime ggml de libembedding) ; `dim` = taille du vocabulaire |
+| `lembed_find_sparse_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Modèle sparse GGUF par nom exact, sans tenir compte de la casse (NULL si inconnu) |
+
+> Les modèles sparse GGUF (ex. `SPLADE-PP-En-v1-GGUF`) sont dans une liste à
+> part : une recherche dense ne renvoie jamais un modèle sparse. La correspondance
+> est exacte, pour ne pas capturer les noms du modèle ONNX de la même famille.
 
 > Les deux fonctions de recherche retournent un **pointeur vers les données
 > statiques** — ne pas libérer. Il n'existe pas de

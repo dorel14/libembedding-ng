@@ -165,6 +165,23 @@ Les modèles GGUF sont chargés par chemin de fichier (pas par enum). Ils utilis
 
 > **Note :** Les embeddings sparse n'ont pas de dimension fixe. La dimension retournée correspond au nombre de tokens actifs dans le vocabulaire.
 
+### Modèles sparse GGUF (1 modèle)
+
+Exécutés par le runtime ggml de libembedding, pas par llama.cpp. Listés par
+`lembed_list_sparse_gguf_models()` ; en Python, passer le nom du registre.
+
+| Nom du registre | Fichier | Taille | Licence | Validation |
+|-----------------|---------|--------|---------|------------|
+| `SPLADE-PP-En-v1-GGUF` | `cstr/splade-pp-en-v1-GGUF`, `splade-pp-en-v1-q8_0.gguf` | ~112 Mo | Apache-2.0 | cosinus ≥ 0.995 contre l'ONNX `prithivida/Splade_PP_en_v1` (minimum mesuré 0.9998) |
+
+```python
+from libembedding import SparseTextEmbedding
+model = SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")   # télécharge le fichier Q8_0
+```
+
+Le nom est comparé exactement (sans tenir compte de la casse) : `"Splade_PP_en_v1"`
+et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
+
 ---
 
 ## Modèles de reranking (5 modèles)

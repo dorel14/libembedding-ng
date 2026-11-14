@@ -76,15 +76,28 @@ def _build_options(
     return opts, cache_buf
 
 
+def _split_hf_resolve_url(url: str) -> tuple[str, str]:
+    """``https://huggingface.co/<repo>/resolve/main/<file>`` -> (repo, file)."""
+    marker = "/resolve/main/"
+    head, sep, filename = url.partition(marker)
+    prefix = "https://huggingface.co/"
+    if not sep or not head.startswith(prefix) or not filename:
+        raise ValueError(f"Not a HuggingFace resolve URL: {url}")
+    return head[len(prefix):], filename
+
+
 class SparseTextEmbedding:
     """Generate sparse vector embeddings (term weights) from text.
 
     Two backends behind one API: ONNX Runtime from the model registry, and this
     library's own ggml runtime from a GGUF file. See :meth:`from_gguf` for the
-    latter -- a local path ending in ``.gguf`` is routed to it automatically.
+    latter -- a local path ending in ``.gguf`` is routed to it automatically,
+    and so is a sparse GGUF registry name such as ``"SPLADE-PP-En-v1-GGUF"``
+    (downloaded from HuggingFace, Q8_0).
 
     Args:
-        model_name: HuggingFace model name or local directory path.
+        model_name: HuggingFace model name, sparse GGUF registry name
+            (``"SPLADE-PP-En-v1-GGUF"``) or local directory / ``.gguf`` path.
         provider: Execution provider.
         cache_dir: Model cache directory.
         max_length: Max token length (0 = model default).
@@ -144,6 +157,23 @@ class SparseTextEmbedding:
         )
 
         ctx_ptr = ffi.new("lembed_sparse_embedding_ctx_t **")
+
+        # A sparse GGUF registry name ("SPLADE-PP-En-v1-GGUF") is matched
+        # exactly, before the ONNX registry, whose partial matching would
+        # otherwise take it for the ONNX model of the same family.
+        gguf = lib.lembed_find_sparse_gguf_model(model_name.encode("utf-8"))
+        if gguf != ffi.NULL:
+            repo, filename = _split_hf_resolve_url(ffi.string(gguf.gguf_url).decode("utf-8"))
+            check_status(
+                lib.lembed_sparse_text_embedding_create_from_gguf_model(
+                    repo.encode("utf-8"),
+                    filename.encode("utf-8"),
+                    ffi.addressof(opts),
+                    ctx_ptr,
+                )
+            )
+            self._finish(ctx_ptr, opts)
+            return
 
         try:
             model_idx = resolve_sparse_model(model_name)

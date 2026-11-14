@@ -942,6 +942,11 @@ Measured against the sparse ONNX model on the same texts, cosine similarity is
 implementation divergence. See `docs/gguf_sparse_runtime.md` and
 `docs/archive/LE-9.6-results.md`.
 
+This file is registered as `SPLADE-PP-En-v1-GGUF` (Apache-2.0, ~112 MB):
+`lembed_list_sparse_gguf_models()` / `lembed_find_sparse_gguf_model()` in C,
+and in Python `SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")` downloads and loads
+it. The name is matched exactly, so the ONNX model's names still load ONNX.
+
 ---
 
 ### Unified Auto-Tuner and Benchmark

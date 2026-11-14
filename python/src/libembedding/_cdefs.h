@@ -733,6 +733,8 @@ typedef struct {
 lembed_status_t lembed_list_gguf_models(const lembed_gguf_model_info_t** out, int* count);
 const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name);
 const lembed_gguf_model_info_t* lembed_default_gguf_model(void);
+lembed_status_t lembed_list_sparse_gguf_models(const lembed_gguf_model_info_t** out, int* count);
+const lembed_gguf_model_info_t* lembed_find_sparse_gguf_model(const char* name);
 
 /* ═══ GGUF capability inspection (read-only) ═══════════════════════════ */
 
