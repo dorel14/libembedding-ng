@@ -80,5 +80,5 @@ export LIBEMBEDDING_TEST_INSTALLED=1
 cd python
 # Offline suite, then the parity check against the x86_64 reference
 # (downloads bge-small): a wrong ARM32 kernel shows up there.
-python -m pytest tests -q -m "not network" -p no:cacheprovider
+python -m pytest tests -q -rs -m "not network" -p no:cacheprovider
 python -m pytest tests/test_parity.py -v -p no:cacheprovider
