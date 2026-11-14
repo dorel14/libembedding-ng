@@ -155,16 +155,25 @@ for m in libembedding.list_text_models():
 
 ## GGUF models (llama.cpp backend)
 
-GGUF models are loaded by file path (not by enum). They use the llama.cpp backend.
+GGUF models are loaded by file path or HuggingFace repo + file (not by enum). They use
+the llama.cpp backend. The registry below (`lembed_list_gguf_models()`, source:
+`include/libembedding/detail/gguf_registry_impl.hpp`) lists the files that were checked.
 
-| Model name | Dim | Quantization | Description | Licence |
-|---|---|---|---|---|
-| `all-MiniLM-L6-v2` | 384 | Q4_K_M | MiniLM L6, ~4-bit | Apache-2.0 |
-| `all-MiniLM-L12-v2` | 384 | Q4_K_M | MiniLM L12, ~4-bit | not verified (GGUF repository not identified) |
-| `bge-small-en-v1.5` | 384 | Q4_K_M | BGE small, ~4-bit | not verified (GGUF repository not identified) |
-| `bge-base-en-v1.5` | 768 | Q4_K_M | BGE base, ~4-bit | not verified (GGUF repository not identified) |
-| `bge-large-en-v1.5` | 1024 | Q4_K_M | BGE large, ~4-bit | not verified (GGUF repository not identified) |
-| `snowflake-arctic-embed-xs` | 384 | Q4_K_M | Snowflake XS, ~4-bit | Apache-2.0 |
+| Registry name | Original model | GGUF repository | Quant. | Dim | Size | Licence |
+|---|---|---|---|---|---|---|
+| `Snowflake-XS-Q4` (default) | `snowflake/snowflake-arctic-embed-xs` | `ChristianAzinn/snowflake-arctic-embed-xs-gguf` | Q4_K_M | 384 | ~20 MB | Apache-2.0 |
+| `MiniLM-L6-Q4` | `sentence-transformers/all-MiniLM-L6-v2` | `second-state/All-MiniLM-L6-v2-Embedding-GGUF` | Q4_K_M | 384 | ~20 MB | Apache-2.0 |
+| `MiniLM-L6-Q8` | `sentence-transformers/all-MiniLM-L6-v2` | `second-state/All-MiniLM-L6-v2-Embedding-GGUF` | Q8_0 | 384 | ~24 MB | Apache-2.0 |
+| `Snowflake-S-Q4` | `snowflake/snowflake-arctic-embed-s` | `ChristianAzinn/snowflake-arctic-embed-s-gguf` | Q4_K_M | 384 | ~28 MB | Apache-2.0 |
+| `E5-small-Q4` | `intfloat/e5-small-v2` | `ChristianAzinn/e5-small-v2-gguf` | Q4_K_M | 384 | ~28 MB | MIT |
+| `GIST-small-Q4` | `avsolatorio/GIST-small-Embedding-v0` | `ChristianAzinn/gist-small-embedding-v0-gguf` | Q4_K_M | 384 | ~28 MB | MIT |
+| `BGE-Reranker-v2-M3` (reranker, default) | `BAAI/bge-reranker-v2-m3` | `smarttasks/bge-reranker-v2-m3-GGUF` | Q4_K_M | — | ~438 MB | Apache-2.0 |
+| `BGE-Reranker-Base` (reranker) | `BAAI/bge-reranker-base` | `sinjab/bge-reranker-base-Q4_K_M-GGUF` | Q4_K_M | — | ~219 MB | MIT (conversion tagged Apache-2.0) |
+| `BGE-Reranker-Large` (reranker) | `BAAI/bge-reranker-large` | `sinjab/bge-reranker-large-Q4_K_M-GGUF` | Q4_K_M | — | ~407 MB | MIT (conversion tagged Apache-2.0) |
+| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 MB | Apache-2.0 |
+| `Jina-Reranker-v1-Turbo-En` (reranker) | `jinaai/jina-reranker-v1-turbo-en` | `sinjab/jina-reranker-v1-turbo-en-Q8_0-GGUF` | Q8_0 | — | ~36 MB | Apache-2.0 |
+
+Any other GGUF file can still be loaded by path; the registry only records files that were checked.
 
 Browse the full registry at runtime:
 
