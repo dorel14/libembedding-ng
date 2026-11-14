@@ -1131,7 +1131,15 @@ The library allocates output buffers internally. Always free them with the match
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (compatibility with fastembed) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
+
+**No telemetry.** libembedding sends nothing anywhere. ONNX Runtime 1.31 does:
+its official Linux and macOS builds, bundled in the wheels, report a hashed
+device id, model file names and hashes and run durations to Microsoft by
+default. libembedding turns that off before its first ONNX Runtime call
+(`ORT_DISABLE_TELEMETRY=1`, plus `DisableTelemetryEvents()` for the Windows ETW
+provider), unless you set `ORT_DISABLE_TELEMETRY` yourself.
 
 ---
 
@@ -3710,6 +3718,7 @@ model = TextEmbedding(
 | `FASTEMBED_CACHE_DIR` | Alternative cache directory (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL (e.g. mirror) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: libembedding sets it to `1` when unset (nothing sent to Microsoft); `0` keeps ORT's telemetry |
 
 ```bash
 # Usage examples
@@ -7568,6 +7577,7 @@ model = TextEmbedding(
 | `FASTEMBED_CACHE_DIR` | Répertoire de cache alternatif (compatibilité fastembed) |
 | `HF_ENDPOINT` | URL personnalisée pour le HuggingFace Hub (ex: miroir) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Secondes sans aucun octet reçu avant d'abandonner un téléchargement et de le relancer (30 par défaut ; 3 tentatives au plus) |
+| `ORT_DISABLE_TELEMETRY` | Télémétrie d'ONNX Runtime : libembedding la met à `1` si elle est absente (aucune donnée envoyée à Microsoft) ; `0` conserve la télémétrie d'ORT |
 
 ```bash
 # Exemples d'utilisation

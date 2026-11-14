@@ -386,6 +386,7 @@ if TextEmbedding.supports_llamacpp():
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
+| `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: set to `1` by libembedding when unset (no data sent to Microsoft); `0` keeps ORT's telemetry |
 
 ## Building & Publishing
 

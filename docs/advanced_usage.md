@@ -148,6 +148,7 @@ model = TextEmbedding(
 | `FASTEMBED_CACHE_DIR` | Répertoire de cache alternatif (compatibilité fastembed) |
 | `HF_ENDPOINT` | URL personnalisée pour le HuggingFace Hub (ex: miroir) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Secondes sans aucun octet reçu avant d'abandonner un téléchargement et de le relancer (30 par défaut ; 3 tentatives au plus) |
+| `ORT_DISABLE_TELEMETRY` | Télémétrie d'ONNX Runtime : libembedding la met à `1` si elle est absente (aucune donnée envoyée à Microsoft) ; `0` conserve la télémétrie d'ORT |
 
 ```bash
 # Exemples d'utilisation
