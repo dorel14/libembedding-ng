@@ -13,7 +13,8 @@
 # libgomp), then install the repaired wheel in a fresh venv and run the Python
 # tests without the build tree or the ORT directory, as a user gets it. numpy
 # and cffi publish no armv7l wheels on PyPI; Raspberry Pi OS takes them from
-# piwheels.org, and so does this test.
+# piwheels.org, and so does this test. piwheels' numpy links the system
+# OpenBLAS (libopenblas0), as its install notes say.
 #
 # Output: the repaired wheel in python/dist/ (the raw one is removed).
 #
@@ -34,7 +35,7 @@ ldd --version | sed -n 1p
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-    python3 python3-venv ca-certificates libgomp1 >/dev/null
+    python3 python3-venv ca-certificates libgomp1 libopenblas0 >/dev/null
 python3 --version
 
 python3 -m venv /tmp/venv
