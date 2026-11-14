@@ -51,7 +51,11 @@ auditwheel show "$raw"
 mkdir -p /tmp/repaired
 auditwheel repair -w /tmp/repaired "$raw"
 rm -f "$raw"
-cp /tmp/repaired/*.whl python/dist/
+# cffi ABI mode is Python-version-independent: py3-none, as for the other
+# wheels (the build host's Python 3.10 is not Debian 12's 3.11).
+for f in /tmp/repaired/*.whl; do
+    cp "$f" "python/dist/$(basename "$f" | sed 's/cp3[0-9]*-cp3[0-9]*/py3-none/')"
+done
 auditwheel show python/dist/*.whl
 wheel=$(ls python/dist/*.whl)
 case "$wheel" in
