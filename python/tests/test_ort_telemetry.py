@@ -13,7 +13,8 @@ once per process. ORT also mutes its telemetry on CI machines, which would make
 the check pass vacuously, so the CI variables are removed from the child's
 environment. The control case sets ORT_DISABLE_TELEMETRY=0, the documented way
 to keep ORT's telemetry, and expects the directory: it proves the check sees
-telemetry when there is some. Its uploads go to a closed local proxy port.
+telemetry when there is some. Its uploads go to a closed local proxy port;
+only Hugging Face bypasses it.
 """
 
 import os
@@ -77,14 +78,18 @@ def test_telemetry_is_off_by_default(tmp_path):
 
 
 def test_user_can_keep_ort_telemetry(tmp_path):
+    # Every HTTPS request goes to a closed port except Hugging Face's, which
+    # libembedding needs if the model is not cached yet (downloads redirect to
+    # *.hf.co): ORT's uploads, to *.microsoft.com, cannot leave the machine.
     closed = "http://127.0.0.1:9"
+    hub = "huggingface.co,.huggingface.co,hf.co,.hf.co"
     found = _load_model(
         tmp_path,
         ORT_DISABLE_TELEMETRY="0",
         https_proxy=closed,
         HTTPS_PROXY=closed,
-        no_proxy="",
-        NO_PROXY="",
+        no_proxy=hub,
+        NO_PROXY=hub,
     )
     if not found:
         pytest.skip("this ONNX Runtime build has no telemetry")
