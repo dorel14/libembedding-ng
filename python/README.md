@@ -383,6 +383,7 @@ if TextEmbedding.supports_llamacpp():
 | `LIBEMBEDDING_CACHE_DIR` | Override model cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache dir (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint |
+| `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 
 ## Building & Publishing
 

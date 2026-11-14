@@ -146,6 +146,7 @@ model = TextEmbedding(
 | `LIBEMBEDDING_CACHE_DIR` | Globally override the cache directory |
 | `FASTEMBED_CACHE_DIR` | Alternative cache directory (fastembed compatibility) |
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL (e.g. mirror) |
+| `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 
 ```bash
 # Usage examples
