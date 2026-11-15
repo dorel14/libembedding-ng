@@ -14,6 +14,7 @@
 #include <libembedding/libembedding.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 
 #define ASSERT(cond, msg) do { \
@@ -63,7 +64,59 @@ int main(void) {
     ASSERT_SIZE(lembed_quantization_measurement_t, 32);
     ASSERT_SIZE(lembed_quantization_choice_t, 336);
 #else
-    printf("32-bit ABI: sizes not frozen, printing only\n");
+    /* 32-bit ABI, only where double and 64-bit integers are 8-byte aligned in
+     * structs: ARM EABI (armv7l, hard-float), MSVC x86. 4-byte pointers and
+     * size_t. i386 System V aligns them to 4, so its structs differ
+     * (e.g. lembed_stats_t is 20 there): that target is skipped explicitly.
+     * Only the structs holding a pointer or size_t differ from the 64-bit
+     * table; the others are identical because they hold no pointer and their
+     * doubles/uint64_t already sit on 8-byte boundaries.
+     * python/tests/test_cdefs.py asserts the same numbers. */
+    if (sizeof(void*) == 4 && alignof(double) == 8 && alignof(uint64_t) == 8) {
+        /* 3x 8-byte fields */
+        ASSERT_SIZE(lembed_stats_t, 24);
+        /* 24 + 2x uint64 (16) + int (4) = 44, padded to 8 */
+        ASSERT_SIZE(lembed_stats_v2_t, 48);
+        /* const char* (4) + 7 ints/enums (28) */
+        ASSERT_SIZE(lembed_model_desc_t, 32);
+        /* 32 + 2 ints */
+        ASSERT_SIZE(lembed_model_desc_v2_t, 40);
+        /* ptr + 2 ints */
+        ASSERT_SIZE(lembed_embeddings_t, 12);
+        /* 2 ptrs + int */
+        ASSERT_SIZE(lembed_sparse_embedding_t, 12);
+        ASSERT_SIZE(lembed_rerank_result_t, 8);
+        /* size_t, size_t, int */
+        ASSERT_SIZE(lembed_cache_config_t, 12);
+        /* model, provider, device_id (12) + cache_dir ptr (16) + 15 ints/enums
+         * (60) = 76; no padding, max alignment is 4 */
+        ASSERT_SIZE(lembed_text_options_t, 76);
+        ASSERT_SIZE(lembed_text_options_v2_t, 80);
+        /* 3 ints (12) padded to 16, + 3 doubles */
+        ASSERT_SIZE(lembed_tuning_result_t, 40);
+        /* int, float, 3 ints (20) padded to 24, + 3 doubles */
+        ASSERT_SIZE(lembed_sparse_tuning_result_t, 48);
+        /* 3 ints padded to 16, + 4 doubles */
+        ASSERT_SIZE(lembed_reranker_tuning_result_t, 48);
+        /* 8 ints/floats (32) + 4 doubles */
+        ASSERT_SIZE(lembed_unified_tuning_result_t, 64);
+        /* 3 enums (12), texts ptr @12, n_texts @16, padded to 24, double @24,
+         * min_tokens @32, padded to 40 */
+        ASSERT_SIZE(lembed_autotune_options_t, 40);
+        ASSERT(offsetof(lembed_autotune_options_t, texts) == 12, "texts offset");
+        ASSERT(offsetof(lembed_autotune_options_t, max_latency_ms) == 24,
+               "max_latency_ms offset");
+        /* Only char arrays and 4-byte scalars below: same as 64-bit */
+        ASSERT_SIZE(lembed_cache_hardware_info_t, 460);
+        ASSERT_SIZE(lembed_tune_config_result_t, 24);
+        ASSERT_SIZE(lembed_tune_cache_entry_t, 1104);
+        /* int @0, 3 doubles @8/16/24 */
+        ASSERT_SIZE(lembed_quantization_measurement_t, 32);
+        /* 4 ints + reason[192] = 208, + 4 x 32 */
+        ASSERT_SIZE(lembed_quantization_choice_t, 336);
+    } else {
+        printf("32-bit ABI with 4-byte double alignment (i386): sizes not frozen\n");
+    }
 #endif
 
     /* Invariants that must hold on every ABI, including 32-bit */
