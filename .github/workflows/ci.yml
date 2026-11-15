@@ -41,3 +41,8 @@ jobs:
             name: macos-arm64
           - os: windows-2022
             name: windows-x86_64
+
+  wheel-checks:
+    name: Wheel checks
+    needs: [python-tests]
+    uses: ./.github/workflows/wheel-checks.yml

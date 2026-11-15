@@ -1,0 +1,55 @@
+name: CodeQL
+
+# Static analysis. Non-blocking at first: results land in the Security tab
+# (code scanning) and no branch protection requires this check. Make it
+# required once the baseline of alerts has been triaged.
+#
+# - python: python/src (cffi bindings).
+# - c-cpp: `build-mode: none`, i.e. no compilation (the real build pulls ONNX
+#   Runtime, curl and llama.cpp and takes far too long for a scan). The
+#   extractor reads the sources and guesses include paths, so results are
+#   slightly less precise than with a traced build. third_party/ is excluded
+#   by .github/codeql/codeql-config.yml.
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, c-cpp]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
