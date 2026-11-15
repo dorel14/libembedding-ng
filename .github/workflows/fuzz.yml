@@ -21,7 +21,8 @@ on:
       - "include/libembedding/gguf_inspect.h"
       - "tests/fuzz/**"
       - "tests/test_sparse_gguf.cpp"
-      - "third_party/llama.cpp/ggml/src/gguf.cpp"
+      - "third_party/llama.cpp/ggml/**"
+      - "tests/CMakeLists.txt"
       - "CMakeLists.txt"
       - ".github/workflows/fuzz.yml"
   workflow_dispatch:
@@ -78,6 +79,7 @@ jobs:
 
       - name: Sparse GGUF unit tests under ASan + UBSan
         env:
+          ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: build-fuzz/tests/test_sparse_gguf
 
