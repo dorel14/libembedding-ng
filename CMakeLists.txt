@@ -67,13 +67,14 @@ if(LIBEMBEDDING_BUILD_FUZZERS)
     endif()
     # fuzzer-no-link: coverage counters everywhere, libFuzzer's main() only in
     # the harness (tests/fuzz/CMakeLists.txt).
-    # -fno-sanitize=function: ggml-cpu calls its vec_dot kernels through one
-    # generic pointer type (ggml-cpu.c, ggml_compute_forward_mul_mat_one_chunk),
-    # which UBSan's "function" check flags on the first matmul of any valid
-    # model. That is ggml's idiom, not ours, and third_party/ is not patched;
-    # every other UBSan check stays on.
+    # UBSan skips third_party/ through an ignorelist instead of switching checks
+    # off globally: ggml reads an enum straight from an untrusted byte (gguf.cpp,
+    # gguf_type) and calls its vec_dot kernels through one generic pointer type
+    # (ggml-cpu.c), both flagged by UBSan and neither ours to patch. Every check
+    # stays on for libembedding's own code, and ASan still covers ggml.
     add_compile_options(-fsanitize=address,undefined -fsanitize=fuzzer-no-link
-                        -fno-sanitize=function -fno-omit-frame-pointer -g)
+                        "-fsanitize-ignorelist=${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/ubsan_ignorelist.txt"
+                        -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
