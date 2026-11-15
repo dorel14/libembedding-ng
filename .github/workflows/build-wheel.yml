@@ -44,30 +44,26 @@ jobs:
           pyright python/src
 
       # ── Platform-specific system dependencies ────────────────────
-      # Linux aarch64 builds in a manylinux_2_28 container instead (below):
-      # ggml's armv9.2 variants need GCC 14, and a GCC 14 on this runner would
-      # link a libstdc++ that pushes the wheel to manylinux_2_39, which the
-      # runner itself cannot install.
+      # Linux (x86_64 and aarch64) builds in a manylinux_2_28 container: the
+      # wheel's glibc/libstdc++ floor is then the container's, not the
+      # runner's (ubuntu-22.04 gave manylinux_2_34), and aarch64's armv9.2
+      # ggml variants get the GCC 14 they need (gcc-toolset-14).
       # Downloads go through a static libcurl over mbedTLS linked into
       # libembedding.so: the system libcurl would make auditwheel graft some
       # thirty libraries (OpenSSL, krb5, LDAP, libssh, several under the LGPL).
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux' && runner.arch == 'X64'
+      # The script handles all of it: ONNX Runtime, curl, build, licences, repair.
+      - name: Build and repair wheel in manylinux_2_28 (Linux)
+        if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential
-          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
-          bash scripts/build_curl_mbedtls.sh "$RUNNER_TEMP/curl"
-          echo "CURL_PREFIX=$RUNNER_TEMP/curl/curl-prefix" >> "$GITHUB_ENV"
-
-      - name: Build and repair wheel in manylinux_2_28 (Linux aarch64)
-        if: runner.os == 'Linux' && runner.arch == 'ARM64'
-        run: |
+          case "$(uname -m)" in
+            x86_64)  image=quay.io/pypa/manylinux_2_28_x86_64 ;;
+            aarch64) image=quay.io/pypa/manylinux_2_28_aarch64 ;;
+            *) echo "unsupported architecture $(uname -m)"; exit 1 ;;
+          esac
           docker run --rm -v "$PWD:/io" \
             -e ONNXRUNTIME_VERSION="${{ env.ONNXRUNTIME_VERSION }}" \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-            quay.io/pypa/manylinux_2_28_aarch64 \
+            "$image" \
             bash /io/scripts/build_wheel_manylinux.sh
 
       - name: Install system dependencies (macOS)
@@ -122,7 +118,7 @@ jobs:
 
       # ── Build the C++ shared library ─────────────────────────────
       - name: Build shared library
-        if: runner.os != 'Linux' || runner.arch == 'X64'
+        if: runner.os != 'Linux'
         shell: bash
         env:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
@@ -168,41 +164,22 @@ jobs:
           fi
 
       # ── Copy shared library into the Python package ──────────────
-      - name: Copy shared libraries (Linux/macOS)
-        if: runner.os == 'macOS' || (runner.os == 'Linux' && runner.arch == 'X64')
+      - name: Copy shared libraries (macOS)
+        if: runner.os == 'macOS'
         run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            ext=".so"
-          else
-            ext=".dylib"
-          fi
+          ext=".dylib"
           cp "build/libembedding${ext}" python/src/libembedding/
 
-          # On macOS, delocate vendors ONNX Runtime and the ggml/llama dylibs
+          # delocate vendors ONNX Runtime and the ggml/llama dylibs
           # under .dylibs/ from libembedding's own references; a copy here
           # would be a second, unused ONNX Runtime. libcurl is the system one.
-          # On Linux, libcurl is linked in statically (no copy, nothing to graft),
-          # and ONNX Runtime is not copied either: auditwheel grafts it into
-          # libembedding_ng.libs/ from libembedding.so's SONAME dependency
-          # (libonnxruntime.so.1); a copy here was a second, unused ONNX Runtime.
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            if objdump -p build/libembedding.so | grep -E 'NEEDED.*(curl|ssl|crypto)'; then
-              echo "ERROR: libembedding.so links a system libcurl or TLS library"
-              exit 1
-            fi
-          fi
+          # Linux does all of this inside its container script.
 
-          # ggml CPU variants (CPU dispatch, default ON on Linux). They are
-          # dlopen()ed, never linked, so auditwheel/delocate cannot find them
-          # by following libembedding's dependencies: they must be in the
-          # package already, where auditwheel then repairs them like any other
-          # shared object. macOS builds natively (dispatch OFF) and has none.
+          # ggml CPU variants: dlopen()ed, never linked, so delocate cannot
+          # find them by following libembedding's dependencies. macOS builds
+          # natively (dispatch OFF) and has none.
           shopt -s nullglob
           cpu_variants=(build/bin/libggml-cpu-*${ext})
-          if [ "${{ runner.os }}" = "Linux" ] && [ ${#cpu_variants[@]} -eq 0 ]; then
-            echo "ERROR: no libggml-cpu-*${ext} under build/bin"
-            exit 1
-          fi
           for lib in "${cpu_variants[@]}"; do
             cp "$lib" python/src/libembedding/
             echo "Vendored ggml CPU variant: $(basename "$lib")"
@@ -292,16 +269,13 @@ jobs:
           Get-ChildItem python/src/libembedding/
 
       # ── Licence texts (PEP 639 license-files, see python/licenses/) ──
-      # Linux aarch64 collects them inside its container script.
+      # Linux collects them inside its container script.
       - name: Collect third-party licence texts
-        if: runner.os != 'Linux' || runner.arch == 'X64'
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           extra=()
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            extra+=("$CURL_PREFIX/share/licenses/curl/COPYING" curl.COPYING
-                    "$CURL_PREFIX/share/licenses/mbedtls/LICENSE" mbedtls.LICENSE)
-          elif [ "${{ runner.os }}" = "Windows" ]; then
+          if [ "${{ runner.os }}" = "Windows" ]; then
             # vcpkg's curl port links libcurl.dll and z.dll (zlib), both vendored above.
             share="/c/vcpkg/installed/x64-windows/share"
             extra+=("$share/curl/copyright" curl.COPYING
@@ -311,7 +285,7 @@ jobs:
 
       # ── Build the Python wheel ───────────────────────────────────
       - name: Build wheel
-        if: runner.os != 'Linux' || runner.arch == 'X64'
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           cd python
@@ -326,21 +300,7 @@ jobs:
           python -m build --wheel --outdir dist/
 
       # ── Repair wheel: vendor onnxruntime into the wheel ──────────
-      - name: Repair wheel with auditwheel (Linux)
-        if: runner.os == 'Linux' && runner.arch == 'X64'
-        run: |
-          # Install newer patchelf (>=0.14.5) for auditwheel 6.8+
-          wget -q https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0.tar.gz
-          tar xzf patchelf-0.18.0.tar.gz
-          cd patchelf-0.18.0
-          ./configure --prefix=/usr/local
-          make -j$(nproc)
-          sudo make install
-          cd ..
-          pip install auditwheel
-          cd python/dist
-          auditwheel repair *.whl -w .
-
+      # Linux repairs inside its container script (auditwheel).
       - name: Repair wheel with delocate (macOS)
         if: runner.os == 'macOS'
         run: |

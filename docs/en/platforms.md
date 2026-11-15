@@ -15,7 +15,7 @@ workflows; anything not executed on real devices is stated as such.
 | Platform | Deliverable | Tested in CI | Never run on physical hardware? |
 |---|---|---|---|
 | Windows x64 | PyPI wheel | yes (`windows-2022`) | n/a |
-| Linux x86_64 | PyPI wheel | yes (`ubuntu-22.04`) | n/a |
+| Linux x86_64 | PyPI wheel `manylinux_2_31_x86_64` | yes (`ubuntu-22.04`) | n/a |
 | Linux aarch64 | PyPI wheel `manylinux_2_31_aarch64` | yes (ARM runner `ubuntu-22.04-arm`) | yes (Raspberry Pi) |
 | Linux armv7l (32-bit) | PyPI wheel `manylinux_2_35_armv7l` | yes (Debian 12 armhf container under QEMU) | yes (Raspberry Pi) |
 | macOS arm64 (Apple Silicon, macOS 14+) | PyPI wheel | yes (`macos-15`) | n/a |
@@ -31,6 +31,18 @@ Sources: `.github/workflows/ci.yml` (`python-tests` matrix),
 On macOS and iOS, ggml is built without Metal (`-DGGML_METAL=OFF` in
 `.github/workflows/build-wheel.yml` and `scripts/build_ios.sh`): GPU is out of
 scope before 1.x.
+
+## Linux x86_64: glibc floor
+
+The `manylinux_2_31_x86_64` wheel installs on any x86_64 Linux with glibc 2.31
+or later (Debian 11+, Ubuntu 20.04+, RHEL/Rocky/Alma 9+). It is built in the
+`quay.io/pypa/manylinux_2_28_x86_64` container by
+`scripts/build_wheel_manylinux.sh`, the same script as the aarch64 wheel;
+previously it was built directly on the `ubuntu-22.04` runner and was tagged
+`manylinux_2_34`, which excluded Debian 11 and Ubuntu 20.04. The
+`manylinux_2_28` tag is not reached: `libllama` (llama.cpp) references
+`GLIBCXX_3.4.25`, which auditwheel's `manylinux_2_28` policy does not allow.
+CI tests the installed wheel on the `ubuntu-22.04` runner (glibc 2.35).
 
 ## Linux aarch64 and Raspberry Pi
 
