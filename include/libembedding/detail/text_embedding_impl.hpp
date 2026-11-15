@@ -42,6 +42,7 @@ extern "C++" {
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #ifdef __cplusplus
 }
@@ -406,6 +407,61 @@ lembed_worker_config_t lembed_detect_optimal_workers(void) {
 
 int lembed_recommended_workers_for_model(const char* model_path) {
     return lembed::detail::recommended_workers_for_model(model_path);
+}
+
+/* =========================================================================
+ * Matryoshka truncation
+ * ========================================================================= */
+lembed_status_t lembed_embeddings_truncate(
+        lembed_embeddings_t* emb,
+        int new_dim,
+        int renormalize) {
+    if (!emb) {
+        lembed::detail::set_error("lembed_embeddings_truncate: emb is NULL");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+    const int dim = emb->dim;
+    const int n = emb->num_embeddings;
+    if (dim <= 0 || n < 0) {
+        lembed::detail::set_error("lembed_embeddings_truncate: invalid result shape (dim "
+                                  + std::to_string(dim) + ", num_embeddings "
+                                  + std::to_string(n) + ")");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+    if (new_dim <= 0 || new_dim > dim) {
+        lembed::detail::set_error("lembed_embeddings_truncate: new_dim "
+                                  + std::to_string(new_dim) + " is outside [1, "
+                                  + std::to_string(dim) + "]");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+    if (n > 0 && !emb->data) {
+        lembed::detail::set_error("lembed_embeddings_truncate: data is NULL");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+
+    float* data = emb->data;
+    for (int i = 0; i < n; i++) {
+        float* dst = data + (size_t)i * (size_t)new_dim;
+        /* Row i moves from offset i*dim down to i*new_dim. Since new_dim <= dim
+         * the destination never overtakes an unread source row, so a forward
+         * pass is safe; the two ranges of one row can overlap, hence memmove. */
+        if (new_dim != dim && i > 0) {
+            std::memmove(dst, data + (size_t)i * (size_t)dim,
+                         (size_t)new_dim * sizeof(float));
+        }
+        if (renormalize) {
+            /* Accumulate in double: a 1024-term float sum drifts by ~1e-7
+             * relative, enough to miss a numpy reference at 1e-6. */
+            double ss = 0.0;
+            for (int j = 0; j < new_dim; j++) ss += (double)dst[j] * (double)dst[j];
+            if (ss > 0.0) {
+                const double inv = 1.0 / std::sqrt(ss);
+                for (int j = 0; j < new_dim; j++) dst[j] = (float)((double)dst[j] * inv);
+            }
+        }
+    }
+    emb->dim = new_dim;
+    return LEMBED_OK;
 }
 
 #ifdef __cplusplus

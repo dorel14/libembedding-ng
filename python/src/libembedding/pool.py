@@ -28,6 +28,7 @@ class TextEmbeddingPool:
         autotune_texts: Optional list of texts for autotune benchmark.
         cache_size: Size of LRU embedding cache per worker (0 = disabled).
         quantization: Override quantization mode ("none", "static", "dynamic").
+        truncate_dim: Matryoshka truncation, same as TextEmbedding.
     """
 
     def __init__(
@@ -49,6 +50,7 @@ class TextEmbeddingPool:
         autotune_max_samples: int = 100,
         cache_size: int = 0,
         quantization: str | None = None,
+        truncate_dim: int | None = None,
     ):
         if autotune:
             tuned = _do_autotune(
@@ -86,6 +88,7 @@ class TextEmbeddingPool:
                 pooling=pooling,
                 cache_size=cache_size,
                 quantization=quantization,
+                truncate_dim=truncate_dim,
             )
             self._workers.append(worker)
 
