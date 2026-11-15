@@ -209,7 +209,8 @@ assumed:
   names the one it picked; record it with any GGUF benchmark.
 - ONNX models run on ONNX Runtime, which selects its own kernels at run time.
 
-The Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
+The Linux x86_64 wheel (`manylinux_2_28_x86_64`) needs glibc 2.28 or later. The
+Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
 glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
 bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
 libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at

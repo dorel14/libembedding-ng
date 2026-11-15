@@ -4,11 +4,13 @@
 # Build the shared library and the Python wheel inside a manylinux container,
 # then repair the wheel with auditwheel. Called by .github/workflows/build-wheel.yml.
 #
-# Why a container: ggml's armv9.2 CPU variants need -march=armv9.2-a+sme, which
-# only GCC 14 accepts. A GCC 14 installed on the Ubuntu runner links against its
-# own libstdc++ and drags the wheel up to manylinux_2_39, which the runner's
-# glibc 2.35 itself refuses. manylinux_2_28's gcc-toolset-14 keeps every
-# GLIBCXX symbol within the glibc 2.28 baseline.
+# Why a container: the wheel's manylinux tag follows the toolchain it was built
+# with. On the Ubuntu 22.04 runner x86_64 came out as manylinux_2_34. For
+# aarch64, ggml's armv9.2 CPU variants need -march=armv9.2-a+sme, which only
+# GCC 14 accepts; a GCC 14 installed on the Ubuntu runner links against its own
+# libstdc++ and drags the wheel up to manylinux_2_39, which the runner's glibc
+# 2.35 itself refuses. manylinux_2_28's gcc-toolset-14 keeps every GLIBCXX
+# symbol within the glibc 2.28 baseline. Used for x86_64 and aarch64.
 #
 # Downloads go through a static libcurl over mbedTLS (build_curl_mbedtls.sh),
 # linked into libembedding.so: the system libcurl would make auditwheel graft
