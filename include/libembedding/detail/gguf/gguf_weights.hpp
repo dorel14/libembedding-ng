@@ -41,7 +41,9 @@
 #include <ggml-backend.h>
 #include <gguf.h>
 
+#include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -168,6 +170,18 @@ public:
             return false;
         }
 
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if (!in) {
+            err = std::string("cannot read GGUF file '") + path + "'";
+            return false;
+        }
+        const std::streamoff file_size = (std::streamoff)in.tellg();
+        in.close();
+        if (file_size < 0 || !payload_fits_in(path, nullptr, 0, (uint64_t)file_size, err)) {
+            if (err.empty()) err = std::string("cannot read GGUF file '") + path + "'";
+            return false;
+        }
+
         ggml_context* blob_ctx = nullptr;
         gguf_context* raw = gguf_init_from_file(path, blob_params(&blob_ctx));
         if (!raw) {
@@ -187,6 +201,11 @@ public:
     bool open_buffer(const void* data, size_t size, std::string& err) {
         if (!data || size == 0) {
             err = "empty GGUF buffer";
+            return false;
+        }
+
+        if (!payload_fits_in(nullptr, data, size, (uint64_t)size, err)) {
+            if (err.empty()) err = "cannot read GGUF buffer";
             return false;
         }
 
@@ -316,6 +335,42 @@ private:
         params.no_alloc = false;
         params.ctx = blob_ctx;
         return params;
+    }
+
+    /* Refuses a file whose tensor table declares more data than the file holds,
+     * before anything is allocated.
+     *
+     * With no_alloc = false, gguf_init allocates the whole declared payload
+     * (ggml_init of header + sum of tensor sizes, gguf.cpp:864) and only then
+     * tries to read it, so a header of a few hundred bytes can ask for
+     * hundreds of gigabytes. A metadata-only pass (no_alloc = true, no ggml
+     * context) gives the declared sizes for the price of the header; the real
+     * read happens only if they fit in the `available` bytes. Exactly one of
+     * `path` or `data` is the source. */
+    static bool payload_fits_in(const char* path, const void* data, size_t size,
+                               uint64_t available, std::string& err) {
+        gguf_init_params meta{};
+        meta.no_alloc = true;
+        meta.ctx = nullptr;
+        gguf_context* g = path ? gguf_init_from_file(path, meta)
+                               : gguf_init_from_buffer(data, size, meta);
+        if (!g) return false; /* the caller names the failure */
+
+        const uint64_t base = (uint64_t)gguf_get_data_offset(g);
+        uint64_t declared = 0;
+        const int64_t n = gguf_get_n_tensors(g);
+        for (int64_t i = 0; i < n; i++) {
+            const uint64_t end = (uint64_t)gguf_get_tensor_offset(g, i) +
+                                 (uint64_t)gguf_get_tensor_size(g, i);
+            if (end > declared) declared = end;
+        }
+        gguf_free(g);
+
+        if (base > available || declared > available - base) {
+            err = "cannot read GGUF: the tensor table declares more data than the file holds";
+            return false;
+        }
+        return true;
     }
 
     /* Takes ownership of a freshly parsed context, whatever it was read from,
