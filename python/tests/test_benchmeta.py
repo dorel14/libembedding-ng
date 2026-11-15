@@ -11,10 +11,13 @@ from pathlib import Path
 import pytest
 
 _BENCH = Path(__file__).resolve().parents[2] / "benchmarks"
-if str(_BENCH) not in sys.path:
+if _BENCH.is_dir() and str(_BENCH) not in sys.path:
     sys.path.insert(0, str(_BENCH))
 
-import _benchmeta as bm
+# Some CI jobs (Android wheel) ship only python/tests, without benchmarks/.
+bm = pytest.importorskip(
+    "_benchmeta", reason="benchmarks/ not shipped with the test sources"
+)
 
 
 def _run(**over):
