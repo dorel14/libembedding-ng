@@ -187,7 +187,9 @@ def test_text_embedding_from_mode():
 @pytest.mark.network
 def test_text_embedding_from_mode_fast():
     model = TextEmbedding.from_mode("fast")
-    assert model.dim > 0
+    assert model.dim == 384
+    result = model.embed(["Hello world"])
+    assert result.shape == (1, 384)
     model.close()
 
 
