@@ -53,20 +53,22 @@ import argparse
 import contextlib
 import json
 import os
-import platform
 import socket
 import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "python" / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import _benchmeta as bm  # needs the sys.path entry above
 
 _RESULT_PREFIX = "__RESULT__ "
 _REPORT_PATH = Path(__file__).resolve().parent / "LE-9.6-results.md"
+_JSON_PATH = Path(__file__).resolve().parent / "LE-9.6-results.json"
 
 # SPLADE++ and OpenSearch neural sparse both project onto the 30522-token BERT
 # vocabulary. Dense vectors are fully populated, hence 100% by convention.
@@ -140,61 +142,17 @@ def process_peak_mb() -> float:
     high-water mark can only rise, so a process that already ran a previous
     backend can never report a lower peak for the next one.
     """
-    if os.name == "nt":
-        with contextlib.suppress(Exception):
-            import ctypes
-
-            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-                _fields_ = [
-                    ("cb", ctypes.c_ulong),
-                    ("PageFaultCount", ctypes.c_ulong),
-                    ("PeakWorkingSetSize", ctypes.c_size_t),
-                    ("WorkingSetSize", ctypes.c_size_t),
-                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                    ("PagefileUsage", ctypes.c_size_t),
-                    ("PeakPagefileUsage", ctypes.c_size_t),
-                ]
-
-            # GetProcessMemoryInfo lives in psapi.dll; kernel32 only forwards it.
-            psapi = ctypes.windll.psapi
-            kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(0x0400 | 0x0010, False, os.getpid())
-            if handle:
-                try:
-                    counters = PROCESS_MEMORY_COUNTERS()
-                    counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-                    if psapi.GetProcessMemoryInfo(
-                        handle, ctypes.byref(counters), counters.cb
-                    ):
-                        return counters.PeakWorkingSetSize / (1024 * 1024)
-                finally:
-                    kernel32.CloseHandle(handle)
-
-    # ru_maxrss is a high-water mark on Linux (KiB) and on macOS (bytes).
-    with contextlib.suppress(Exception):
-        import resource
-
-        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
-
-    return 0.0
+    return bm.peak_rss_mb()
 
 
 def median(values: list[float]) -> float:
-    s = sorted(values)
-    n = len(s)
-    if n % 2 == 0:
-        return (s[n // 2 - 1] + s[n // 2]) / 2.0
-    return s[n // 2]
+    """Median; kept as a name other benchmarks import, delegates to _benchmeta."""
+    return bm.p50(values)
 
 
 def p95(values: list[float]) -> float:
-    s = sorted(values)
-    idx = int(0.95 * len(s)) - 1
-    return s[max(0, min(idx, len(s) - 1))]
+    """95th percentile (linear interpolation, see _benchmeta.percentile)."""
+    return bm.p95(values)
 
 
 def generate_corpus(n: int, seed: int = 42) -> list[str]:
@@ -578,16 +536,11 @@ def git_revision() -> str:
 
 def collect_environment() -> dict[str, object]:
     """Record the hardware and runtime identity alongside the numbers."""
-    env: dict[str, object] = {
-        "platform": platform.platform(),
-        "machine": platform.machine(),
-        "cpu_count": os.cpu_count(),
-        "hostname": socket.gethostname(),
-        "python": platform.python_version(),
-        "libembedding": source_version(),
-        "git": git_revision(),
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+    env: dict[str, object] = dict(bm.collect_machine_metadata(_REPO_ROOT))
+    # The source tree can differ from the installed distribution: this script
+    # puts python/src first, so the version in config.h is what actually runs.
+    env["libembedding_source"] = source_version()
+    env["hostname"] = socket.gethostname()
     return env
 
 
@@ -600,6 +553,7 @@ def write_report(
     batch_size: int,
     iterations: int,
     recall_k: list[int],
+    run_params: dict[str, object] | None = None,
 ) -> None:
     """Produce LE-9.6-results.md in the same format as LE-8.10-results.md."""
     ok = [r for r in results if r.status == "ok"]
@@ -648,17 +602,26 @@ def write_report(
     lines.append(f"| timed iterations | {iterations} (median reported) |")
     lines.append(f"| top_k | {top_k if top_k else 'untruncated'} |")
     lines.append("")
+    if run_params is not None:
+        # Mandatory per-run fields (threads, batch, warmup, iterations, format,
+        # quantization, dataset); format and quantization vary per backend and
+        # are in the results table.
+        lines.append("Run parameters: " + ", ".join(
+            f"{k}={v}" for k, v in run_params.items()
+        ) + ".")
+        lines.append("")
 
     lines.append("## 3. Results")
     lines.append("")
     header = (
         "| Backend | Model | Quant. | Top-K | Load (ms) | docs/s | ms/doc | "
+        "p50 pass (ms) | p95 pass (ms) | "
         "Peak RAM (MB) | nnz | vocab | Sparsity (%) |"
     )
     if recall_k:
         header += " " + " | ".join(f"R@{k}" for k in recall_k) + " |"
     lines.append(header)
-    lines.append("|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" * len(recall_k)))
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" * len(recall_k)))
     for r in results:
         if r.status == "ok":
             top_k_cell = str(r.top_k) if r.kind == "sparse" else "—"
@@ -671,6 +634,8 @@ def write_report(
                 f"{r.load_ms:.0f}",
                 f"{r.docs_per_sec:.1f}",
                 f"{r.ms_per_doc:.2f}",
+                f"{r.median_ms:.1f}",
+                f"{r.p95_ms:.1f}",
                 f"{r.peak_memory_mb:.0f}",
                 f"{r.avg_nnz:.0f}",
                 vocab_cell,
@@ -687,7 +652,7 @@ def write_report(
                 r.quantization,
                 "—",
                 "n/a" if r.status == "unavailable" else "ERROR",
-            ] + ["n/a"] * (6 + len(recall_k))
+            ] + ["n/a"] * (8 + len(recall_k))
             lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
 
@@ -813,6 +778,11 @@ def main() -> int:
         "--offline", action="store_true", help="Use cached models only, never download"
     )
     parser.add_argument(
+        "--output-json",
+        default=str(_JSON_PATH),
+        help="Machine-readable report (run metadata + per-backend results).",
+    )
+    parser.add_argument(
         "--worker", action="store_true", help=argparse.SUPPRESS
     )  # internal: one backend per subprocess
 
@@ -877,6 +847,16 @@ def main() -> int:
         else:
             print(f"    -> {result.status}: {result.reason}")
 
+    run = bm.RunParams(
+        threads=0,  # library default (auto); this script has no thread knob
+        batch=args.batch_size,
+        warmup=warmup_docs,
+        iterations=args.iterations,
+        format="onnx+gguf",  # per backend in the results rows
+        quantization="per backend (see results)",
+        dataset=f"synthetic-{args.num_texts}"
+        + (f"+recall:{Path(args.recall_corpus).name}" if args.recall_corpus else ""),
+    )
     write_report(
         results,
         env,
@@ -886,7 +866,19 @@ def main() -> int:
         args.batch_size,
         args.iterations,
         recall_k,
+        run_params=run.as_dict(),
     )
+    report = bm.build_report(
+        dict(env),
+        run,
+        results={r.key: asdict(r) for r in results},
+        title="LE-9.6 four-backend comparison",
+    )
+    bm.write_json(report, Path(args.output_json))
+    print(f"JSON written: {args.output_json}")
+    absent = bm.missing_fields(report)
+    if absent:
+        print(f"WARNING: missing metadata fields: {', '.join(absent)}")
     return 0
 
 
