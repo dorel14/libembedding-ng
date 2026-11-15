@@ -145,6 +145,7 @@ public:
     Weights() = default;
 
     ~Weights() {
+        free_blob_ctx();
         if (ctx_) ggml_free(ctx_);
         /* ctx_ is freed before buf_ on purpose: the tensors point into buf_. */
         if (buf_) ggml_backend_buffer_free(buf_);
@@ -288,7 +289,10 @@ public:
     /* Drops the parsed header and with it the whole GGUF blob, which
      * gguf_free() owns. Called once the vocabulary has been read out of it: the
      * steady-state footprint then is the backend buffer alone. */
-    void release_header() { probe_.close(); }
+    void release_header() {
+        probe_.close();
+        free_blob_ctx();
+    }
 
     const Probe& probe() const { return probe_; }
     const SpladeHparams& hparams() const { return hp_; }
@@ -318,7 +322,9 @@ private:
      * and resolves the hyper-parameters. */
     bool adopt_blob(gguf_context* raw, ggml_context* blob_ctx, std::string& err) {
         /* raw is non-null, so adopt() cannot fail; asking it would only produce
-         * a branch that has already lost the pointer. */
+         * a branch that has already lost the pointer. Both are owned from this
+         * line on, so every refusal below releases them through ~Weights(). */
+        free_blob_ctx();
         probe_.adopt(raw);
         blob_ctx_ = blob_ctx;
 
@@ -620,8 +626,17 @@ private:
 
     ggml_backend_buffer_t buf_ = nullptr;
     ggml_context* ctx_ = nullptr;
-    /* The gguf_context owns this: gguf_free() frees it. Never free it here. */
+    /* The tensor data context gguf_init wrote through params.ctx. gguf_free()
+     * does NOT free it (it only deletes the gguf_context), so Weights owns it
+     * and releases it in free_blob_ctx(). */
     ggml_context* blob_ctx_ = nullptr;
+
+    void free_blob_ctx() {
+        if (blob_ctx_) {
+            ggml_free(blob_ctx_);
+            blob_ctx_ = nullptr;
+        }
+    }
 };
 
 } /* namespace gguf */
