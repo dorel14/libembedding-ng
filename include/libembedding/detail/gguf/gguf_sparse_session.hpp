@@ -188,7 +188,27 @@ public:
                         int max_length, std::string& err) {
         std::unique_ptr<Weights> weights(new Weights());
         if (!weights->open(path, err)) return false;
+        return finish_load(std::move(weights), path ? path : "", n_threads, workers,
+                           max_length, err);
+    }
 
+    /* Same as load_from_file(), from a GGUF image in memory. Every check after
+     * the parse is shared with the file path, so the fuzzer that drives this
+     * entry point covers the loader the public API uses. `data` can be released
+     * once this returns. */
+    bool load_from_buffer(const void* data, size_t size, int n_threads, int workers,
+                          int max_length, std::string& err) {
+        std::unique_ptr<Weights> weights(new Weights());
+        if (!weights->open_buffer(data, size, err)) return false;
+        return finish_load(std::move(weights), std::string(), n_threads, workers,
+                           max_length, err);
+    }
+
+private:
+    /* Everything after the header parse: capability check, tensors, vocabulary,
+     * tokenizer, workers. `source` is the file path, empty for a buffer. */
+    bool finish_load(std::unique_ptr<Weights> weights, const std::string& source,
+                     int n_threads, int workers, int max_length, std::string& err) {
         /* Before anything is allocated: telling somebody their dense file has no
          * sparse head is cheap, and doing it after a hundred megabytes of weights
          * have been copied is not. */
@@ -252,7 +272,7 @@ public:
 
         vocab_size_ = hp.n_vocab;
         special_ids_ = weights->special_ids();
-        path_ = path ? path : "";
+        path_ = source;
 
         /* The vocabulary is the last thing read out of the header, so the file's
          * blob -- as large as the file itself -- can go now. What stays is the
@@ -277,6 +297,8 @@ public:
         workers_ = std::move(pool);
         return true;
     }
+
+public:
 
     /* The thread budget and how it is split.
      *

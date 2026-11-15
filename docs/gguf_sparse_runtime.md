@@ -265,6 +265,41 @@ copie. `LEMBED_ERROR_GGUF` est un code *ajouté en fin* d'énumération, et non
 demande est **plafonnée** à la longueur de contexte du modèle, pas refusée : une
 séquence plus longue indexerait hors de la table.
 
+### 4.1 Fuzzing du chargeur
+
+Un GGUF est une entrée non fiable. Les bornes et contrôles de forme ci-dessus
+(`detail/gguf/gguf_weights.hpp`, `read_hparams()` et `validate_tensors()`) sont
+mis à l'épreuve par un harnais libFuzzer, `tests/fuzz/fuzz_gguf_loader.cpp`.
+
+- **Cible** : `SparseSession::load_from_buffer()`, qui fait les mêmes contrôles
+  que le chargement par chemin (le lecteur gguf est commun à
+  `gguf_init_from_buffer` et `gguf_init_from_file`). Une entrée = une image GGUF
+  en mémoire, aucun fichier temporaire. Un fichier accepté embarque ensuite un
+  texte court : un fichier accepté ne doit jamais atteindre un `GGML_ASSERT`.
+- **Graines** : `test_sparse_gguf --write-fuzz-seeds <dossier>` écrit les
+  fixtures des tests unitaires (F32, F16, Q8_0, sans tête, sans `vocab_size`…).
+  Elles sont générées, pas versionnées.
+- **Build** : clang uniquement, dans un dossier dédié. L'option instrumente tout
+  le build (ggml compris) avec ASan, UBSan et la couverture libFuzzer.
+
+```bash
+cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DLIBEMBEDDING_BUILD_FUZZERS=ON -DLIBEMBEDDING_CPU_DISPATCH=OFF -DGGML_OPENMP=OFF \
+  -DLIBEMBEDDING_BUILD_EXAMPLES=OFF
+cmake --build build-fuzz --parallel 4 --target fuzz_gguf_loader test_sparse_gguf
+mkdir -p corpus && build-fuzz/tests/test_sparse_gguf --write-fuzz-seeds corpus
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  build-fuzz/tests/fuzz/fuzz_gguf_loader corpus -max_total_time=60
+```
+
+La CI (`.github/workflows/fuzz.yml`, Linux clang) le lance 60 s sur chaque PR
+qui touche le chargeur ou le harnais, échoue sur tout crash ou rapport
+ASan/UBSan, et publie les entrées fautives en artefact. Une entrée fautive se
+rejoue avec `fuzz_gguf_loader <fichier>` ; corrigée dans notre code, elle devient
+un test de régression dans `test_sparse_gguf`. Un défaut dans ggml est signalé,
+pas corrigé dans `third_party/`.
+
 ---
 
 ## 5. Mesures

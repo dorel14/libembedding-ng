@@ -553,6 +553,35 @@ std::string garbage_fixture() {
     return path;
 }
 
+/* Seed corpus for tests/fuzz/fuzz_gguf_loader.cpp: every model variant above,
+ * written by the same writer, so the fuzzer starts from files the loader
+ * accepts and from the refusals the unit tests check. Generated rather than
+ * committed: a fixture weighs tens of kilobytes. Returns the files written. */
+int write_fuzz_seeds(const std::string& dir) {
+    struct Seed { const char* name; ModelVariant variant; };
+    const Seed seeds[] = {
+        {"plain",    VARIANT_PLAIN},
+        {"f16",      VARIANT_F16},
+        {"q8_0",     VARIANT_Q8},
+        {"specials", VARIANT_SPECIALS},
+        {"nohead",   VARIANT_NO_HEAD},
+        {"novocab",  VARIANT_NO_VOCAB},
+    };
+    int written = 0;
+    for (const Seed& s : seeds) {
+        std::vector<Kv> kvs;
+        std::vector<Tensor> tensors;
+        build_model(kvs, tensors, s.variant);
+        const std::string path = dir + "/" + s.name + ".gguf";
+        if (!write_gguf(path, kvs, tensors)) {
+            fprintf(stderr, "cannot write fuzz seed %s\n", path.c_str());
+            continue;
+        }
+        written++;
+    }
+    return written;
+}
+
 /* ---- assertions on a produced vector ------------------------------------- */
 
 bool well_formed(const lembed_sparse_embedding_t& e, int vocab) {
@@ -1267,7 +1296,67 @@ static void test_cpu_backend_is_loaded(void) {
     if (features) printf("ggml CPU features: %s\n", features);
 }
 
-int main(void) {
+#ifdef LIBEMBEDDING_IMPLEMENTATION
+/* The fuzzer loads from memory (SparseSession::load_from_buffer); the public
+ * API loads from a path. Both must be the same loader: same refusals, same
+ * vectors. Needs the implementation in this translation unit, so it is skipped
+ * where the tests link the prebuilt DLL (Windows). */
+static void test_buffer_load_matches_file(void) {
+    const std::string path = fixture("buffer", VARIANT_PLAIN);
+    if (path.empty()) return;
+
+    std::vector<char> bytes;
+    if (FILE* f = fopen(path.c_str(), "rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
+        fclose(f);
+    }
+    CHECK(!bytes.empty(), "the fixture reads back");
+    if (bytes.empty()) return;
+
+    std::string err;
+    lembed::gguf::SparseSession from_file;
+    CHECK(from_file.load_from_file(path.c_str(), 1, 1, 0, err), "the fixture loads from its path");
+    lembed::gguf::SparseSession from_buffer;
+    CHECK(from_buffer.load_from_buffer(bytes.data(), bytes.size(), 1, 1, 0, err),
+          "the same bytes load from memory");
+    if (!err.empty()) fprintf(stderr, "  reason: %s\n", err.c_str());
+
+    const std::vector<std::string> texts{"hello world", "the quick brown fox"};
+    const std::vector<lembed::detail::SparseResult> a = from_file.embed(texts, 2);
+    const std::vector<lembed::detail::SparseResult> b = from_buffer.embed(texts, 2);
+    bool same = a.size() == texts.size() && b.size() == texts.size();
+    for (size_t i = 0; same && i < a.size(); i++) {
+        same = a[i].indices == b[i].indices && a[i].values.size() == b[i].values.size();
+        for (size_t j = 0; same && j < a[i].values.size(); j++) {
+            same = std::fabs(a[i].values[j] - b[i].values[j]) <= 1e-6f;
+        }
+    }
+    CHECK(same, "memory and path loads give the same vectors");
+
+    /* The refusals are shared too: a cut file and an empty buffer are refused
+     * with a reason, never crash. */
+    lembed::gguf::SparseSession cut;
+    err.clear();
+    CHECK(!cut.load_from_buffer(bytes.data(), bytes.size() / 2, 1, 1, 0, err) && !err.empty(),
+          "a truncated buffer is refused with a reason");
+    lembed::gguf::SparseSession empty;
+    err.clear();
+    CHECK(!empty.load_from_buffer(nullptr, 0, 1, 1, 0, err) && !err.empty(),
+          "an empty buffer is refused with a reason");
+}
+#endif
+
+/* `test_sparse_gguf --write-fuzz-seeds <dir>` writes the fuzzer's seed corpus
+ * instead of running the tests (see write_fuzz_seeds()). */
+int main(int argc, char** argv) {
+    if (argc == 3 && strcmp(argv[1], "--write-fuzz-seeds") == 0) {
+        const int n = write_fuzz_seeds(argv[2]);
+        printf("wrote %d fuzz seeds to %s\n", n, argv[2]);
+        return n > 0 ? 0 : 1;
+    }
+
     test_cpu_backend_is_loaded();
     test_output_shape();
     test_top_k_and_min_weight();
@@ -1283,6 +1372,9 @@ int main(void) {
     test_create_from_path_routes_gguf();
     test_quantised_weights();
     test_inspect_agrees_with_runtime();
+#ifdef LIBEMBEDDING_IMPLEMENTATION
+    test_buffer_load_matches_file();
+#endif
 
     printf("PASS: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

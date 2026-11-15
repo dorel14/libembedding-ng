@@ -251,6 +251,41 @@ file has no sparse head must not cost a hundred megabytes of copying.
 **capped** at the model's context length rather than refused: a longer sequence
 would index past the position table.
 
+### 4.1 Fuzzing the loader
+
+A GGUF is untrusted input. The bounds and shape checks above
+(`detail/gguf/gguf_weights.hpp`, `read_hparams()` and `validate_tensors()`) are
+exercised by a libFuzzer harness, `tests/fuzz/fuzz_gguf_loader.cpp`.
+
+- **Target**: `SparseSession::load_from_buffer()`, which runs the same checks as
+  loading from a path (gguf's reader is shared by `gguf_init_from_buffer` and
+  `gguf_init_from_file`). One input is one GGUF image in memory, no temp file.
+  An accepted file then embeds a short text: an accepted file must never reach
+  a `GGML_ASSERT`.
+- **Seeds**: `test_sparse_gguf --write-fuzz-seeds <dir>` writes the unit tests'
+  fixtures (F32, F16, Q8_0, headless, no `vocab_size`...). They are generated,
+  not committed.
+- **Build**: clang only, in a dedicated directory. The option instruments the
+  whole build (ggml included) with ASan, UBSan and libFuzzer coverage.
+
+```bash
+cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DLIBEMBEDDING_BUILD_FUZZERS=ON -DLIBEMBEDDING_CPU_DISPATCH=OFF -DGGML_OPENMP=OFF \
+  -DLIBEMBEDDING_BUILD_EXAMPLES=OFF
+cmake --build build-fuzz --parallel 4 --target fuzz_gguf_loader test_sparse_gguf
+mkdir -p corpus && build-fuzz/tests/test_sparse_gguf --write-fuzz-seeds corpus
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  build-fuzz/tests/fuzz/fuzz_gguf_loader corpus -max_total_time=60
+```
+
+CI (`.github/workflows/fuzz.yml`, Linux clang) runs it for 60 s on every PR
+that touches the loader or the harness, fails on any crash or ASan/UBSan
+report, and uploads the offending inputs as an artifact. An offending input
+replays with `fuzz_gguf_loader <file>`; fixed in our code, it becomes a
+regression test in `test_sparse_gguf`. A defect in ggml is reported, not
+patched in `third_party/`.
+
 ---
 
 ## 5. Measurements

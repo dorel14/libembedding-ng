@@ -168,24 +168,34 @@ public:
         }
 
         ggml_context* blob_ctx = nullptr;
-        gguf_init_params params{};
-        params.no_alloc = false; /* the blob has to be in RAM to be copied out */
-        params.ctx = &blob_ctx;
-
-        gguf_context* raw = gguf_init_from_file(path, params);
+        gguf_context* raw = gguf_init_from_file(path, blob_params(&blob_ctx));
         if (!raw) {
             err = std::string("cannot read GGUF file '") + path + "'";
             return false;
         }
-        /* raw is non-null, so adopt() cannot fail; asking it would only produce
-         * a branch that has already lost the pointer. */
-        probe_.adopt(raw);
-        blob_ctx_ = blob_ctx;
+        return adopt_blob(raw, blob_ctx, err);
+    }
 
-        if (!read_hparams(err)) return false;
+    /* Same as open(), from a GGUF image already in memory. gguf parses a buffer
+     * through the same reader it uses for a file (gguf_init_from_buffer and
+     * gguf_init_from_file both end in gguf_init_from_reader), and copies what
+     * it keeps, so `data` can be released as soon as this returns.
+     *
+     * Used by the fuzzer (tests/fuzz/fuzz_gguf_loader.cpp): one input is one
+     * buffer, with no file to write per run. */
+    bool open_buffer(const void* data, size_t size, std::string& err) {
+        if (!data || size == 0) {
+            err = "empty GGUF buffer";
+            return false;
+        }
 
-        read_special_ids();
-        return true;
+        ggml_context* blob_ctx = nullptr;
+        gguf_context* raw = gguf_init_from_buffer(data, size, blob_params(&blob_ctx));
+        if (!raw) {
+            err = "cannot read GGUF buffer";
+            return false;
+        }
+        return adopt_blob(raw, blob_ctx, err);
     }
 
     /* Copies every required tensor into the backend buffer. Call only after
@@ -295,6 +305,29 @@ public:
     ggml_backend_buffer_type_t buffer_type() const { return lembed::detail::ggml_cpu_buffer_type(); }
 
 private:
+    /* gguf reads the data blob only when no_alloc is false, and the blob has to
+     * be in RAM to be copied out. */
+    static gguf_init_params blob_params(ggml_context** blob_ctx) {
+        gguf_init_params params{};
+        params.no_alloc = false;
+        params.ctx = blob_ctx;
+        return params;
+    }
+
+    /* Takes ownership of a freshly parsed context, whatever it was read from,
+     * and resolves the hyper-parameters. */
+    bool adopt_blob(gguf_context* raw, ggml_context* blob_ctx, std::string& err) {
+        /* raw is non-null, so adopt() cannot fail; asking it would only produce
+         * a branch that has already lost the pointer. */
+        probe_.adopt(raw);
+        blob_ctx_ = blob_ctx;
+
+        if (!read_hparams(err)) return false;
+
+        read_special_ids();
+        return true;
+    }
+
     /* Tries each known spelling of a scalar field, first hit wins. Converters
      * disagree on the spelling and none of them is wrong. */
     static bool read_i32_any(const Probe& probe, const char* arch,
