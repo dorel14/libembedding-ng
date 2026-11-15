@@ -305,6 +305,22 @@ them (`build-wheel.yml`, step "Check licence texts").
 The iOS xcframework carries its own in each `libembedding.framework` (see
 [xcframework](#xcframework)).
 
+## Quality checks in CI
+
+- **Python versions**: `wheel-checks.yml` (called from `ci.yml` once the wheels
+  are built) installs the Linux x86_64 `py3-none` wheel on Python 3.9 to 3.13
+  and runs the tests against the installed package
+  (`LIBEMBEDDING_TEST_INSTALLED=1`, without the `network` tests). The wheel
+  build itself tests 3.12 with every test.
+- **`twine check --strict`** runs on every wheel built by CI.
+- **No sdist**: the package ships a prebuilt native library, so a source
+  distribution would install and then fail at import.
+- **CodeQL** (`codeql.yml`) analyses Python and C/C++ (no-build mode,
+  `third_party/` excluded) on pull requests, on `main`/`dev` and weekly. It is
+  not a required check for now.
+- **Dependabot** (`.github/dependabot.yml`) proposes weekly grouped updates of
+  GitHub Actions and of `python/` dependencies, on `dev`.
+
 ## See also
 
 - [Getting started](getting_started.html) — installation
