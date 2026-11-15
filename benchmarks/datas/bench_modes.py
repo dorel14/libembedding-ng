@@ -2,7 +2,7 @@
 customers-2000000 corpus.
 
 The presets are model selectors, not ONNX-config selectors:
-  fast      -> Xenova/paraphrase-multilingual-MiniLM-L12-v2
+  fast      -> sentence-transformers/all-MiniLM-L6-v2
   balanced  -> BAAI/bge-small-en-v1.5
   quality   -> BAAI/bge-base-en-v1.5
 

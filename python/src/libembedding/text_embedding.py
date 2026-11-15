@@ -27,7 +27,7 @@ from .models import (
 from .types import ModelDesc, Stats
 
 _MODE_TO_MODEL = {
-    "fast": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "fast": "sentence-transformers/all-MiniLM-L6-v2",
     "balanced": "BAAI/bge-small-en-v1.5",
     "quality": "BAAI/bge-base-en-v1.5",
 }
@@ -381,7 +381,8 @@ class TextEmbedding:
         """Create TextEmbedding from a quality/speed mode.
 
         Args:
-            mode: One of "fast", "balanced", "quality".
+            mode: One of "fast" (all-MiniLM-L6-v2), "balanced"
+                (bge-small-en-v1.5), "quality" (bge-base-en-v1.5).
             **kwargs: Additional arguments passed to TextEmbedding.
 
         Returns:

@@ -404,7 +404,7 @@ model = TextEmbedding(
 ### Preset modes
 
 ```python
-# FAST : speed priority
+# FAST : speed priority (all-MiniLM-L6-v2, 384 dim, ~90 MB)
 model = TextEmbedding.from_mode("fast")
 
 # BALANCED : speed/quality compromise (default)
