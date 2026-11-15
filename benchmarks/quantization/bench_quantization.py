@@ -66,6 +66,8 @@ try:
 except ImportError:
     psutil = None
 
+sys.path.insert(0, str(_REPO_ROOT))  # benchmarks/, for _benchmeta
+import _benchmeta as bm  # E402: needs the sys.path entry above
 from libembedding import TextEmbedding  # E402: needs the sys.path entry above
 from libembedding.models import list_text_models  # E402: same
 
@@ -1026,11 +1028,31 @@ def main() -> int:
             detail = ", ".join(f"{k}: {v}" for k, v in sorted(r.weight_types.items()))
         print(f"  {r.model_name:<38} {r.quantization:<9} {r.model_code:<42} {detail}")
 
+    # Shared run metadata (docs/benchmark_methodology.md): the mandatory fields
+    # of every benchmark report, in the same shape as the other benchmarks.
+    metadata = bm.build_report(
+        bm.collect_machine_metadata(_REPO_ROOT.parent),
+        bm.RunParams(
+            threads=0,  # library default (auto)
+            batch=args.batch_sizes,
+            warmup=warmup_size,
+            iterations=max(1, args.repeats),
+            format="onnx",
+            quantization=",".join(args.quantizations),
+            dataset=f"synthetic-{args.num_texts}",
+        ),
+        title="Quantization benchmark",
+    )
+    absent = bm.missing_fields(metadata)
+    if absent:
+        print(f"WARNING: missing metadata fields: {', '.join(absent)}")
+
     output_path = _REPO_ROOT / args.output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(
             {
+                "metadata": metadata,
                 "environment": env,
                 "runtime_consistency_problems": problems,
                 "warmup_texts": warmup_size,
