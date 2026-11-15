@@ -17,7 +17,7 @@ comme tel.
 | Plateforme | Livrable | Testé en CI | Jamais exécuté sur matériel physique ? |
 |---|---|---|---|
 | Windows x64 | wheel PyPI | oui (`windows-2022`) | — |
-| Linux x86_64 | wheel PyPI `manylinux_2_28_x86_64` | oui (`ubuntu-22.04`) | — |
+| Linux x86_64 | wheel PyPI `manylinux_2_31_x86_64` | oui (`ubuntu-22.04`) | — |
 | Linux aarch64 | wheel PyPI `manylinux_2_31_aarch64` | oui (runner ARM `ubuntu-22.04-arm`) | oui (Raspberry Pi) |
 | Linux armv7l (32 bits) | wheel PyPI `manylinux_2_35_armv7l` | oui (conteneur Debian 12 armhf sous QEMU) | oui (Raspberry Pi) |
 | macOS arm64 (Apple Silicon, macOS 14+) | wheel PyPI | oui (`macos-15`) | — |
@@ -36,12 +36,14 @@ hors périmètre avant la 1.x.
 
 ## Linux x86_64 : plancher glibc
 
-La wheel `manylinux_2_28_x86_64` s'installe sur tout Linux x86_64 avec glibc
-2.28 ou plus (Debian 10+, Ubuntu 18.10+, RHEL/Rocky/Alma 8+). Elle est
+La wheel `manylinux_2_31_x86_64` s'installe sur tout Linux x86_64 avec glibc
+2.31 ou plus (Debian 11+, Ubuntu 20.04+, RHEL/Rocky/Alma 9+). Elle est
 construite dans le conteneur `quay.io/pypa/manylinux_2_28_x86_64` par
 `scripts/build_wheel_manylinux.sh`, le même script que la wheel aarch64 ;
 auparavant, construite directement sur le runner `ubuntu-22.04`, elle portait
-le tag `manylinux_2_34` et excluait par exemple Debian 11 et Ubuntu 20.04.
+le tag `manylinux_2_34` et excluait Debian 11 et Ubuntu 20.04.
+Le tag `manylinux_2_28` n'est pas atteint : `libllama` (llama.cpp) référence
+`GLIBCXX_3.4.25`, que la politique `manylinux_2_28` d'auditwheel n'admet pas.
 La CI teste la wheel installée sur le runner `ubuntu-22.04` (glibc 2.35).
 
 ## Linux aarch64 et Raspberry Pi
