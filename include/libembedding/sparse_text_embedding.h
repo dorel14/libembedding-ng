@@ -128,6 +128,7 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -159,6 +160,16 @@ struct lembed_sparse_embedding {
     double   total_latency_ms = 0.0;
     int      stats_calls = 0;
     int      storage_format = 0;  /* lembed_sparse_format_t */
+
+    /* Thread safety (docs/en/advanced_usage.md, "Thread safety"). Both
+     * backends hold per-context mutable state: the tokenizer's scratch strings
+     * on ONNX, and on GGUF the workers' ggml backends and graph caches, which
+     * SparseSession::embed() reuses on every call. Calls on one context are
+     * therefore serialised; stats_mutex guards the counters alone so that the
+     * stats getters never wait for an inference. Lock order: call_mutex, then
+     * stats_mutex. */
+    std::mutex call_mutex;
+    mutable std::mutex stats_mutex;
 };
 
 /* Defined at the bottom of this file, in detail/sparse_text_embedding_gguf_impl.hpp.
@@ -333,6 +344,9 @@ lembed_status_t lembed_sparse_text_embedding_embed(
 
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
+    /* One call at a time per context, for both backends: see call_mutex. */
+    std::lock_guard<std::mutex> call_lock(ctx->call_mutex);
+
     if (ctx->gguf) {
         return lembed_sparse_text_embedding_embed_gguf(ctx, texts, num_texts,
                                                        batch_size, sparse_opts,
@@ -425,6 +439,7 @@ lembed_status_t lembed_sparse_text_embedding_embed(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += num_texts;
         ctx->batches_run += num_batches;
         ctx->total_latency_ms += elapsed_ms;
@@ -453,6 +468,7 @@ int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t*
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out) {
     if (!out) return;
     if (!ctx) { memset(out, 0, sizeof(*out)); return; }
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->texts_embedded = ctx->texts_embedded;
     out->batches_run = ctx->batches_run;
     out->avg_latency_ms = ctx->stats_calls > 0
@@ -468,6 +484,7 @@ void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* 
     if (!out) return;
     memset(out, 0, sizeof(*out));
     if (!ctx) return;
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->base.texts_embedded = ctx->texts_embedded;
     out->base.batches_run = ctx->batches_run;
     out->base.avg_latency_ms = ctx->stats_calls > 0

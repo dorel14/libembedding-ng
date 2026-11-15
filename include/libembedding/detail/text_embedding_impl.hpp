@@ -44,6 +44,7 @@ extern "C++" {
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <mutex>
 #ifdef __cplusplus
 }
 extern "C" {
@@ -107,6 +108,23 @@ struct lembed_text_embedding {
 
     /* Embedding cache */
     lembed::detail::LRUCache* cache = nullptr;
+
+    /* Thread safety (docs/en/advanced_usage.md, "Thread safety").
+     *
+     * A context shared between threads used to race on every call: the
+     * per-batch buffers above, the tokenizer's scratch strings
+     * (TokenizerWrapper::encode() is const but writes wp_scratch_/bpe_scratch_),
+     * the single llama_context of the GGUF backend (llama_encode() is not
+     * reentrant) and the stats counters. ORT's Session::Run is thread-safe, the
+     * rest is not, so calls on one context are serialised here: sharing a
+     * context is safe, and parallelism comes from one context per thread
+     * (TextEmbeddingPool).
+     *
+     * stats_mutex guards the counters only, so lembed_text_embedding_stats()
+     * never waits for an inference in flight. Lock order: call_mutex, then
+     * stats_mutex. */
+    std::mutex call_mutex;
+    mutable std::mutex stats_mutex;
 };
 
 /* =========================================================================
@@ -148,6 +166,9 @@ lembed_status_t lembed_text_embedding_embed(
 
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
+    /* One call at a time per context: see call_mutex. */
+    std::lock_guard<std::mutex> call_lock(ctx->call_mutex);
+
     try {
         int dim = ctx->dim;
         result->dim = dim;
@@ -170,6 +191,7 @@ lembed_status_t lembed_text_embedding_embed(
         };
 
         lembed_status_t s;
+        uint64_t batches = 0; /* committed to the stats on success only */
         if (ctx->cache) {
             /* Serve hits from the LRU cache, run the model on misses only */
             std::vector<const char*> miss_texts;
@@ -178,16 +200,21 @@ lembed_status_t lembed_text_embedding_embed(
             miss_texts.reserve(num_texts);
             miss_indices.reserve(num_texts);
 
+            uint64_t hits = 0;
             for (int i = 0; i < num_texts; i++) {
                 if (ctx->cache->get_copy(texts[i], hit_vec) && (int)hit_vec.size() == dim) {
                     std::memcpy(result->data + (size_t)i * dim, hit_vec.data(),
                                 (size_t)dim * sizeof(float));
-                    ctx->cache_hits++;
+                    hits++;
                 } else {
                     miss_texts.push_back(texts[i]);
                     miss_indices.push_back(i);
-                    ctx->cache_misses++;
                 }
+            }
+            {
+                std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
+                ctx->cache_hits += hits;
+                ctx->cache_misses += (uint64_t)miss_texts.size();
             }
 
             s = LEMBED_OK;
@@ -203,30 +230,24 @@ lembed_status_t lembed_text_embedding_embed(
                     }
                 }
             }
-            if (s == LEMBED_OK) {
-                ctx->texts_embedded += num_texts;
-                if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
-                    if (!miss_texts.empty()) ctx->batches_run++;
-                } else {
-                    ctx->batches_run += (uint64_t)onnx_batches;
-                }
+            if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
+                batches = miss_texts.empty() ? 0 : 1;
+            } else {
+                batches = (uint64_t)onnx_batches;
             }
         } else {
             std::vector<const char*> all_texts(texts, texts + num_texts);
             s = embed_subset(all_texts, result->data);
-            if (s == LEMBED_OK) {
-                ctx->texts_embedded += num_texts;
-                if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
-                    ctx->batches_run++;
-                } else {
-                    ctx->batches_run += (uint64_t)onnx_batches;
-                }
-            }
+            batches = (ctx->backend_type == LEMBED_BACKEND_LLAMACPP)
+                          ? 1 : (uint64_t)onnx_batches;
         }
 
         if (s == LEMBED_OK) {
             auto t_end = std::chrono::high_resolution_clock::now();
             double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+            std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
+            ctx->texts_embedded += num_texts;
+            ctx->batches_run += batches;
             ctx->total_latency_ms += elapsed_ms;
             ctx->stats_calls++;
         }
@@ -254,16 +275,22 @@ lembed_status_t lembed_text_embedding_embed_stream(
 
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
+    /* Held while the callback runs: the callback must not call back into this
+     * context (it would deadlock), see call_mutex. */
+    std::lock_guard<std::mutex> call_lock(ctx->call_mutex);
+
     try {
+        uint64_t batches;
         if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
             lembed__llama_embed_stream(ctx, texts, num_texts, callback, userdata);
-            ctx->texts_embedded += num_texts;
-            ctx->batches_run++;
+            batches = 1;
         } else {
             lembed__onnx_embed_stream(ctx, texts, num_texts, batch_size, callback, userdata);
-            ctx->texts_embedded += num_texts;
-            ctx->batches_run += lembed::detail::batch_count(num_texts, batch_size);
+            batches = (uint64_t)lembed::detail::batch_count(num_texts, batch_size);
         }
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
+        ctx->texts_embedded += num_texts;
+        ctx->batches_run += batches;
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
@@ -373,6 +400,7 @@ int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx) {
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out) {
     if (!out) return;
     if (!ctx) { memset(out, 0, sizeof(*out)); return; }
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->texts_embedded = ctx->texts_embedded;
     out->batches_run = ctx->batches_run;
     out->avg_latency_ms = ctx->stats_calls > 0
@@ -384,6 +412,7 @@ void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_s
     if (!out) return;
     memset(out, 0, sizeof(*out));
     if (!ctx) return;
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->base.texts_embedded = ctx->texts_embedded;
     out->base.batches_run = ctx->batches_run;
     out->base.avg_latency_ms = ctx->stats_calls > 0
