@@ -411,7 +411,10 @@ inline std::string ensure_model(const std::string& repo_code,
     /* Build model directory: cache_dir/models--repo_with_dashes/ */
     std::string repo_dir = repo_to_dirname(repo_code);
     std::string model_dir = cache_dir + "/models--" + repo_dir;
-    if (!mkdirs(model_dir)) {
+    /* Offline mode never downloads, so it never needs the directory: creating
+     * it here would leave an empty models--<repo> folder behind for every
+     * uncached model (e.g. each candidate of auto model selection). */
+    if (!offline && !mkdirs(model_dir)) {
         throw std::runtime_error("Cannot create model cache directory: " + model_dir);
     }
 
