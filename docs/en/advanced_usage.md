@@ -226,6 +226,39 @@ from libembedding import TextEmbedding
 model = TextEmbedding("BAAI/bge-small-en-v1.5", max_length=128)
 ```
 
+## Tokenizer fidelity (HuggingFace `tokenizers`)
+
+The built-in tokenizer is compared with the HuggingFace `tokenizers` library on a
+multilingual corpus (Greek, Cyrillic, Vietnamese, CJK, Arabic, Hebrew, Hindi, Thai,
+Korean, emoji, accented Latin, mixed case, punctuation, very long words). The
+references are JSON fixtures committed in `tests/data/tokenizer/`, produced by
+`scripts/gen_tokenizer_fixtures.py`; the `test_tokenizer_fidelity` test needs neither
+Python nor the `tokenizers` package.
+
+| Family | Models | Status |
+|---|---|---|
+| WordPiece + BertNormalizer (uncased) | MiniLM, bge-*-en, snowflake, gte-en, nomic, mxbai, SPLADE | identical to HF, 0/54 texts differ |
+| WordPiece, Chinese vocabulary | bge-*-zh | identical to HF, 0/54 |
+| WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identical to HF, 0/54 |
+| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | not implemented in the built-in tokenizer: measured, not covered |
+| Byte-level BPE | CLIP text, ModernBERT | not implemented in the built-in tokenizer: measured, not covered |
+
+Normalisation coverage (strip accents + lowercase), checked codepoint by codepoint up
+to U+2FFFF: Latin (Latin-1, Extended-A/B, Extended Additional including Vietnamese),
+IPA, combining diacritics, Greek and Coptic, Greek Extended (polytonic), Cyrillic,
+Armenian, Hebrew, Arabic, Devanagari, Thai, Hangul jamo and syllables (algorithmic
+decomposition), general punctuation and symbols (up to U+2BFF), kana, CJK, fullwidth
+forms, emoji: 0 mismatches. Still outside the tables (1.0% of the tested codepoints,
+1,835 of 183,376): CJK compatibility ideographs (U+F900-FAFF and U+2F800-2FA1F),
+Cherokee capitals, Glagolitic, Coptic, Cyrillic Extended-B, Deseret and other rare
+alphabets, precomposed Indic letters outside Devanagari, Hebrew presentation forms.
+These codepoints go through the tokenizer unchanged, which differs from HF.
+
+The same work fixed three pre-tokenisation differences with HF: a word with an unknown
+piece yields a single `[UNK]` (not the pieces already matched), a word longer than 100
+characters yields `[UNK]`, and Unicode punctuation, CJK ideographs and format
+characters (zero-width space, etc.) are handled as HF does.
+
 ## Model lookup by code
 
 libembedding automatically resolves models by HuggingFace name or ONNX repo code:
