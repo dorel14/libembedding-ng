@@ -1346,6 +1346,50 @@ static void test_buffer_load_matches_file(void) {
     CHECK(!empty.load_from_buffer(nullptr, 0, 1, 1, 0, err) && !err.empty(),
           "an empty buffer is refused with a reason");
 }
+
+/* Every fixture the fuzzer is seeded with goes through both loaders: they must
+ * agree on accept versus refuse, whatever the file holds. */
+static void test_buffer_and_file_agree_on_every_fixture(void) {
+    struct Case { const char* name; ModelVariant variant; };
+    const Case cases[] = {
+        {"agree_plain",    VARIANT_PLAIN},
+        {"agree_f16",      VARIANT_F16},
+        {"agree_q8_0",     VARIANT_Q8},
+        {"agree_specials", VARIANT_SPECIALS},
+        {"agree_nohead",   VARIANT_NO_HEAD},
+        {"agree_novocab",  VARIANT_NO_VOCAB},
+    };
+    for (const Case& c : cases) {
+        const std::string path = fixture(c.name, c.variant);
+        if (path.empty()) continue;
+
+        std::vector<char> bytes;
+        if (FILE* f = fopen(path.c_str(), "rb")) {
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
+            fclose(f);
+        }
+        CHECK(!bytes.empty(), "the fixture reads back");
+        if (bytes.empty()) continue;
+
+        std::string file_err, buffer_err;
+        lembed::gguf::SparseSession from_file;
+        const bool file_ok = from_file.load_from_file(path.c_str(), 1, 1, 0, file_err);
+        lembed::gguf::SparseSession from_buffer;
+        const bool buffer_ok =
+            from_buffer.load_from_buffer(bytes.data(), bytes.size(), 1, 1, 0, buffer_err);
+        if (file_ok != buffer_ok) {
+            fprintf(stderr, "  %s: file=%d (%s) buffer=%d (%s)\n", c.name, (int)file_ok,
+                    file_err.c_str(), (int)buffer_ok, buffer_err.c_str());
+        }
+        CHECK(file_ok == buffer_ok, "buffer and file loads agree on accept versus refuse");
+        if (!file_ok && !buffer_ok) {
+            CHECK(!file_err.empty() && !buffer_err.empty(),
+                  "both refusals carry a reason");
+        }
+    }
+}
 #endif
 
 /* `test_sparse_gguf --write-fuzz-seeds <dir>` writes the fuzzer's seed corpus
@@ -1374,6 +1418,7 @@ int main(int argc, char** argv) {
     test_inspect_agrees_with_runtime();
 #ifdef LIBEMBEDDING_IMPLEMENTATION
     test_buffer_load_matches_file();
+    test_buffer_and_file_agree_on_every_fixture();
 #endif
 
     printf("PASS: %d passed, %d failed\n", g_pass, g_fail);
