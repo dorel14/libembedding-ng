@@ -374,6 +374,27 @@ embeddings = pool.embed(texts)
 | Semantic search, max quality | `"quality"` |
 | General production | `"balanced"` (default) |
 
+### Candidates and the model cache
+
+The selection runs a QUICK autotune on each candidate. It only measures
+candidates that are already in the model cache: it downloads nothing, and it
+leaves nothing behind (no model folder is created for a candidate that is
+missing, which is skipped). To let the selection consider a model, download it
+first.
+
+| Candidate | Cache directory | Download |
+|---|---|---|
+| `Qdrant/all-MiniLM-L6-v2-onnx` | `models--Qdrant-all-MiniLM-L6-v2-onnx` | 90 MB |
+| `Xenova/all-MiniLM-L6-v2` (INT8) | `models--Xenova-all-MiniLM-L6-v2` | 23 MB |
+| `Xenova/all-MiniLM-L12-v2` | `models--Xenova-all-MiniLM-L12-v2` | 133 MB |
+| `Xenova/bge-small-en-v1.5` | `models--Xenova-bge-small-en-v1.5` | 133 MB |
+| `Xenova/bge-base-en-v1.5` | `models--Xenova-bge-base-en-v1.5` | 436 MB |
+| `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | `models--Xenova-paraphrase-multilingual-MiniLM-L12-v2` | 470 MB |
+| `intfloat/multilingual-e5-small` | `models--intfloat-multilingual-e5-small` | 470 MB |
+
+The cache is the default directory: `LIBEMBEDDING_CACHE_DIR`, then
+`FASTEMBED_CACHE_DIR`, then `~/.cache/libembedding`.
+
 ---
 
 ## llama.cpp / GGUF Performance
