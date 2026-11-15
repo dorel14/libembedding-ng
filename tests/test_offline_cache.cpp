@@ -94,12 +94,17 @@ int main(void) {
 
     /* 3. Auto model selection on an empty cache: every candidate is skipped
      *    and none leaves a folder. The status is not asserted: a tuning cache
-     *    on the machine could in theory make a candidate win. */
+     *    on the machine could in theory make a candidate win.
+     *    lembed_auto_select_model() is only built into the shared library, so
+     *    the header-only build (Linux/macOS) cannot call it here;
+     *    python/tests/test_auto_select_offline.py covers it on every OS. */
+#ifdef _WIN32
     {
         lembed_model_selection_t sel;
         (void)lembed_auto_select_model("balanced", &sel);
         ASSERT(count_model_dirs(cache) == 0, "auto_select_model leaves no models--* folder");
     }
+#endif
 
     std::error_code ec;
     fs::remove_all(root, ec);
