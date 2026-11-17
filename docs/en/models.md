@@ -243,6 +243,59 @@ other names of the ONNX model keep loading the ONNX model.
 
 ---
 
+## Compatibility matrix (reference validation)
+
+A model is *validated* only once libembedding reproduces a reference. The reference
+is the **same ONNX file** run with Python `onnxruntime`, fed with the ids, attention
+mask and token types of HuggingFace `tokenizers`, then pooled and normalised as the
+registry entry says. Weights and runtime are shared, so the gap measured here comes
+from libembedding's tokenizer, input packing and pooling only. The test is
+`python/tests/test_model_reference.py` (marker `network`, skipped when the model is
+not cached or `onnxruntime`/`tokenizers` are missing); the report is regenerated with
+`python python/tests/model_reference.py --json report.json`.
+
+Corpus: the 54 texts of `tests/data/tokenizer/corpus.json` (English, accented Latin,
+Vietnamese, Greek, Cyrillic, Arabic, Hebrew, Devanagari, CJK, Korean, Thai, emoji,
+punctuation, combining marks, full-width) plus a text of more than 512 tokens.
+Truncation is set to 512 on both sides. The *English* column excludes one edge case
+present on every WordPiece model: a word longer than 100 characters (`en-long-word`),
+for which HF emits `[UNK]` while libembedding splits it (cosine 0.36 to 0.88).
+
+Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999,
+**broken** < 0.99. Measured on 2026-11-17, quantized siblings in the same row (ranges).
+
+| Model | Tokenizer family | Min / mean cosine (all) | English | Status (all texts) | Status (English) |
+|---|---|---|---|---|---|
+| all-MiniLM-L6-v2 | WordPiece | 0.265-0.282 / 0.743-0.747 | 1.000 | broken | validated |
+| all-MiniLM-L12-v2 | WordPiece | 0.265-0.275 / 0.733-0.735 | 1.000 | broken | validated |
+| bge-small-en-v1.5 | WordPiece | 0.623-0.629 / 0.862-0.864 | 1.000 | broken | validated |
+| bge-base-en-v1.5 | WordPiece | 0.666-0.669 / 0.863-0.864 | 1.000 | broken | validated |
+| nomic-embed-text-v1.5 | WordPiece | 0.652-0.656 / 0.846-0.850 | 1.000 | broken | validated |
+| mxbai-embed-large-v1 (quantized) | WordPiece | 0.527 / 0.835 | 1.000 | broken | validated |
+| gte-base-en-v1.5 | WordPiece | 0.494-0.519 / 0.798-0.799 | 1.000 | broken | validated |
+| gte-large-en-v1.5 (quantized) | WordPiece | 0.628 / 0.858 | 1.000 | broken | validated |
+| snowflake-arctic-embed-xs / s | WordPiece | 0.815-0.860 / 0.955-0.958 | 1.000 | broken | validated |
+| snowflake-arctic-embed-m / m-long / l | WordPiece | 0.776-0.853 / 0.929-0.957 | 1.000 | broken | validated |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0.0015 / 0.343 | 0.034 | broken | broken |
+| multilingual-e5-small | Unigram (SentencePiece) | 0.768 / 0.824 | 0.768 | broken | broken |
+| clip-vit-base-patch32 (text) | BPE byte-level | 0.295 / 0.763 | 0.316 | broken | broken |
+| Splade_PP_en_v1 (sparse, cosine of the vectors) | WordPiece | 0.161 / 0.647 | 1.000 | broken | validated |
+| jina-reranker-v1-turbo-en (reranker, Pearson of the scores) | BPE (not byte-level) | 0.42-0.46 | n/a | broken | broken |
+
+Reading: **English text on a WordPiece model is exact** (cosine 1.000, including the
+text of more than 512 tokens). Everything that is not plain English falls off, because
+the normaliser only folds Latin-1 and Latin Extended-A and the tokenizer implements
+WordPiece and a rough BPE only. Unigram (XLM-R) and byte-level BPE (CLIP, ModernBERT)
+are broken even in English. The reranker also builds its pair as the text
+`query [SEP] document`, where HF encodes a real pair.
+
+Not measured (not in the local cache or over 560 MB; the family comes from the
+architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,
+bge-small/large-zh-v1.5, nomic-embed-text-v1 and jina-embeddings-v2 (WordPiece),
+bge-m3, multilingual-e5-base/large, paraphrase-multilingual-mpnet-base-v2 and the
+XLM-R rerankers (Unigram), modernbert-embed-large (byte-level BPE), embeddinggemma-300m
+(SentencePiece), the image models and the GGUF models. These are **not validated**.
+
 ## Querying model information
 
 ### From Python
