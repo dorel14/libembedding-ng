@@ -108,6 +108,12 @@ add_executable(test_sparse_gguf test_sparse_gguf.cpp)
 target_link_libraries(test_sparse_gguf PRIVATE libembedding ggml)
 add_test(NAME test_sparse_gguf COMMAND test_sparse_gguf)
 
+# Matryoshka truncation (lembed_embeddings_truncate) on synthetic vectors:
+# no model, no network.
+add_executable(test_matryoshka test_matryoshka.cpp)
+target_link_libraries(test_matryoshka PRIVATE libembedding)
+add_test(NAME test_matryoshka COMMAND test_matryoshka)
+
 # End-to-end GGUF profiler. It compiles the internal session with opt-in
 # instrumentation so the public API and normal DLL builds stay unchanged.
 # Invoke manually; this is a performance tool, not a pass/fail CTest.
@@ -129,13 +135,13 @@ endif()
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity integration_sparse_gguf)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity integration_sparse_gguf test_matryoshka)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity integration_sparse_gguf)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity integration_sparse_gguf test_matryoshka)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()

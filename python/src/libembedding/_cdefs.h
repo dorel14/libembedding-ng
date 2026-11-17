@@ -348,6 +348,7 @@ int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx);
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out);
 void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
+lembed_status_t lembed_embeddings_truncate(lembed_embeddings_t* emb, int new_dim, int renormalize);
 
 /* ═══ Functions: Sparse text embedding ═════════════════════════════ */
 

@@ -56,6 +56,37 @@ lembed_status_t lembed_text_embedding_embed_stream(
 /* Get embedding dimension */
 int lembed_text_embedding_dim(const lembed_text_embedding_t* ctx);
 
+/**
+ * @brief Matryoshka truncation of a dense result, in place.
+ *
+ * Keeps the first @p new_dim components of every row of @p emb, compacts the
+ * rows so that @c emb->data becomes a [num_embeddings * new_dim] array, and
+ * sets @c emb->dim to @p new_dim. Only meaningful for models trained with
+ * Matryoshka Representation Learning (e.g. nomic-embed-text-v1.5,
+ * mxbai-embed-large-v1, embeddinggemma-300m); on other models the prefix of a
+ * vector carries no quality guarantee.
+ *
+ * The buffer is neither reallocated nor freed: @c emb->data keeps its address,
+ * lembed_embeddings_free() still releases a library-allocated result, and a
+ * caller-owned buffer is accepted as well.
+ *
+ * @param emb          Dense result (from lembed_text_embedding_embed,
+ *                     lembed_image_embedding_embed or the caller). Modified
+ *                     in place.
+ * @param new_dim      Target dimension, 1 <= new_dim <= emb->dim. Equal to
+ *                     emb->dim is valid (only renormalises, if asked).
+ * @param renormalize  Non-zero: L2-renormalise each truncated row (an all-zero
+ *                     row stays zero). Zero: plain prefix, values unchanged.
+ * @return LEMBED_OK, or LEMBED_ERROR_INVALID_ARGUMENT when @p emb is NULL,
+ *         emb->dim <= 0, emb->num_embeddings < 0, emb->data is NULL with rows,
+ *         or @p new_dim is outside [1, emb->dim]. The detail is available from
+ *         lembed_last_error(); @p emb is left untouched on error.
+ */
+lembed_status_t lembed_embeddings_truncate(
+    lembed_embeddings_t* emb,
+    int new_dim,
+    int renormalize);
+
 /* Introspection
  * NOTE: the desc/desc_v2 pointers reference memory owned by the context.
  * They stay valid until the next create_* call on the same context and are

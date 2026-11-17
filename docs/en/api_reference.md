@@ -27,6 +27,7 @@ TextEmbedding(
     auto_workers=False,
     cache_size=0,
     quantization=None,
+    truncate_dim=None,
     num_threads=None,  # deprecated
 )
 ```
@@ -49,6 +50,7 @@ TextEmbedding(
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
 | `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
 | `preferred_quantization` | `str \| None` | `None` | `"auto"` = **measured selection**: the variants the registry actually ships for this model are benchmarked once per (model, machine, library version), the winner is cached, and later loads read the cache. Rule: no measurable FP32 baseline → FP32; a variant must beat FP32 by **more than 5 %**; and **dynamic INT8 is preferred** — another variant must beat it by **more than 15 %**. Cost: ~3.5 s on the very first load of a model, then free. See [Quantization](#quantization--fp32-vs-int8) for the measurements. |
+| `truncate_dim` | `int \| None` | `None` | [Matryoshka](matryoshka.md) truncation: keeps the first `truncate_dim` components of every vector, then L2-renormalises them. Between `1` and the native dimension (otherwise `ValueError`). Meant for Matryoshka-trained models (`nomic-embed-text-v1.5`, `mxbai-embed-large-v1`, `embeddinggemma-300m`). |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -58,7 +60,9 @@ TextEmbedding(
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed texts. Returns array of shape `(n, dim)` with `float32` dtype. L2-normalized. |
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
-| `dim` | `int` (property) | Embedding dimension |
+| `dim` | `int` (property) | Dimension of the returned vectors (`truncate_dim` when set) |
+| `native_dim` | `int` (property) | Dimension produced by the model, before truncation |
+| `truncate_dim` | `int \| None` (property) | Matryoshka truncation size, `None` when vectors are kept whole |
 | `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
 | `quantization_reason` | `str` (property) | Why `preferred_quantization="auto"` picked that mode, e.g. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Empty when nothing was measured (explicit mode, or a model with no quantized sibling). |
 | `batch_size` | `int` (property) | Configured batch size |

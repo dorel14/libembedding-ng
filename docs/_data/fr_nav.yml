@@ -9,6 +9,8 @@
   url: api_reference.html
 - title: Similarité
   url: similarity.html
+- title: Matryoshka
+  url: matryoshka.html
 - title: Cache LRU
   url: python/cache.html
 - title: Benchmark
