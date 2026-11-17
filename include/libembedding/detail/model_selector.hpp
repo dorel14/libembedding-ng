@@ -39,7 +39,7 @@ static const ModelCategory g_models[] = {
     /* Fast models (speed priority) */
     {"Qdrant/all-MiniLM-L6-v2-onnx", "all-MiniLM-L6-v2", 384, 512, 0, 7.0},
     {"Xenova/all-MiniLM-L6-v2", "all-MiniLM-L6-v2-Q", 384, 512, 2, 6.5},
-    {"Qdrant/all-MiniLM-L12-v2-onnx", "all-MiniLM-L12-v2", 384, 512, 0, 7.5},
+    {"Xenova/all-MiniLM-L12-v2", "all-MiniLM-L12-v2", 384, 512, 0, 7.5},
 
     /* Quality models */
     {"Xenova/bge-small-en-v1.5", "bge-small-en-v1.5", 384, 512, 0, 8.5},
