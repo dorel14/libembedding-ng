@@ -262,6 +262,16 @@ de plus de 100 caractères donne `[UNK]`, et les ponctuations Unicode, les idéo
 CJK et les caractères de format (espace de largeur nulle, etc.) sont traités comme
 dans HF.
 
+Les options du `BertNormalizer` sont lues indépendamment, comme dans HF : `lowercase`,
+`strip_accents` (absent ou `null` : suit `lowercase`), `clean_text` et
+`handle_chinese_chars`. Un normaliseur `Sequence` est pris en charge pour `Lowercase`,
+`StripAccents` et `NFD`/`NFKD` ; les accents ne sont retirés que si `StripAccents` et une
+décomposition sont tous deux présents. Les modes « minuscules seules » et « accents
+seuls » sont aussi vérifiés point de code par point de code. Le BPE byte-level garde
+son comportement historique (non conforme à HF) jusqu'à sa réécriture ; ses ids sont
+figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
+`tokenizer.json` exact est dans le cache du poste (sinon la famille est ignorée).
+
 ## Recherche de modèles par code
 
 libembedding recherche automatiquement les modèles par nom HuggingFace ou par code de repo ONNX :

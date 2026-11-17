@@ -282,6 +282,129 @@ static void test_multibyte_letters_stay_in_the_word(void) {
           "an accented letter does not cut the word");
 }
 
+/* ==========================================================================
+ * Independent normaliser switches (lowercase / strip_accents / Sequence)
+ * ========================================================================== */
+
+/* The synthetic vocabulary plus "café" (16) and "Cafe" (17), with the given
+ * normalizer JSON object in place of the default BertNormalizer. */
+static std::string make_json_with_normalizer(const std::string& normalizer) {
+    std::string json = make_tokenizer_json();
+    const std::string dflt = "{\"type\":\"BertNormalizer\",\"lowercase\":true}";
+    json.replace(json.find(dflt), dflt.size(), normalizer);
+    const std::string tail = "\"strasse\":15}";
+    json.replace(json.find(tail), tail.size(), "\"strasse\":15,\"caf\xc3\xa9\":16,\"Cafe\":17}");
+    return json;
+}
+
+static std::vector<int64_t> encode_with(const std::string& normalizer, const std::string& text) {
+    lembed::detail::TokenizerWrapper tok;
+    tok.load_from_blob(make_json_with_normalizer(normalizer), 512);
+    return encode_one(tok, text);
+}
+
+static void test_strip_accents_is_independent_of_lowercase(void) {
+    /* Regression (T26 review): accent stripping used to follow lowercase, and
+     * strip_accents / clean_text / handle_chinese_chars were never read. */
+    CHECK(encode_with("{\"type\":\"BertNormalizer\",\"lowercase\":true,\"strip_accents\":false}",
+                      "Caf\xc3\x89") == ids({2, 16, 3}),
+          "lowercase:true + strip_accents:false lowercases but keeps the accent");
+    CHECK(encode_with("{\"type\":\"BertNormalizer\",\"lowercase\":false,\"strip_accents\":true}",
+                      "Caf\xc3\xa9") == ids({2, 17, 3}),
+          "lowercase:false + strip_accents:true strips the accent but keeps the case");
+    CHECK(encode_with("{\"type\":\"BertNormalizer\",\"lowercase\":true,\"strip_accents\":null}",
+                      "Caf\xc3\x89") == ids({2, 4, 3}),
+          "strip_accents:null follows lowercase");
+    CHECK(encode_with("{\"type\":\"BertNormalizer\",\"lowercase\":false}", "Caf\xc3\x89") ==
+              ids({2, 1, 3}),
+          "lowercase:false alone changes nothing");
+}
+
+static void test_handle_chinese_and_clean_text_switches(void) {
+    const std::string zh = "\xe4\xb8\xad\xe6\x96\x87";
+    /* With handle_chinese_chars off an ideograph run is one word. */
+    lembed::detail::TokenizerWrapper on, off;
+    on.load_from_blob(make_json_with_normalizer("{\"type\":\"BertNormalizer\"}"), 512);
+    off.load_from_blob(make_json_with_normalizer(
+        "{\"type\":\"BertNormalizer\",\"handle_chinese_chars\":false}"), 512);
+    CHECK(encode_one(on, zh) == ids({2, 1, 1, 3}), "each ideograph is its own [UNK] by default");
+    CHECK(encode_one(off, zh) == ids({2, 1, 3}), "handle_chinese_chars:false keeps the run whole");
+    const std::vector<std::string> kept =
+        lembed::detail::basic_tokenize("a\xe2\x80\x8b" "b", false, true);
+    CHECK(kept.size() == 1 && kept[0] == "a\xe2\x80\x8b" "b",
+          "clean_text:false keeps format characters");
+}
+
+static void test_sequence_normalizer(void) {
+    CHECK(encode_with("{\"type\":\"Sequence\",\"normalizers\":[{\"type\":\"NFD\"},"
+                      "{\"type\":\"Lowercase\"},{\"type\":\"StripAccents\"}]}",
+                      "Caf\xc3\x89") == ids({2, 4, 3}),
+          "Sequence NFD + Lowercase + StripAccents lowercases and strips");
+    CHECK(encode_with("{\"type\":\"Sequence\",\"normalizers\":[{\"type\":\"Lowercase\"}]}",
+                      "Caf\xc3\x89") == ids({2, 16, 3}),
+          "Sequence with Lowercase only keeps the accent");
+    CHECK(encode_with("{\"type\":\"Sequence\",\"normalizers\":[{\"type\":\"NFD\"}]}",
+                      "Cafe") == ids({2, 17, 3}),
+          "Sequence without Lowercase keeps the case");
+}
+
+/* ==========================================================================
+ * Malformed UTF-8
+ * ========================================================================== */
+
+static void test_malformed_utf8_is_kept_verbatim(void) {
+    /* Regression (T26 review): a lone byte 0x80-0xFF used to be read as a
+     * Latin-1 codepoint (0xC9 -> E-acute -> "e"), and a lead byte followed by a
+     * non-continuation byte swallowed it. */
+    CHECK_STR(lembed::detail::bert_normalize("\xc3" "A"), "\xc3" "a",
+              "a lead byte before an ASCII letter does not swallow the letter");
+    CHECK_STR(lembed::detail::bert_normalize("\xc9"), "\xc9",
+              "a lone 0xC9 is not E-acute");
+    CHECK_STR(lembed::detail::bert_normalize("\xc0\x80"), "\xc0\x80", "overlong NUL is rejected");
+    CHECK_STR(lembed::detail::bert_normalize("\xed\xa0\x80"), "\xed\xa0\x80",
+              "an encoded surrogate is rejected");
+    CHECK_STR(lembed::detail::bert_normalize("\xf4\x90\x80\x80"), "\xf4\x90\x80\x80",
+              "a codepoint above U+10FFFF is rejected");
+    const std::vector<std::string> w = lembed::detail::basic_tokenize("a\xc9" "b c");
+    CHECK(w.size() == 2 && w[0] == "a\xc9" "b" && w[1] == "c",
+          "a stray byte stays inside its word");
+}
+
+/* ==========================================================================
+ * Byte-level BPE: legacy behaviour, pinned
+ *
+ * BPE keeps the pre-T26 normalisation and pre-tokenisation until its own
+ * rewrite. These ids are today's behaviour, not HF's: when BPE is rewritten
+ * they are meant to change, and this test is where that becomes explicit.
+ * ========================================================================== */
+
+static std::string make_bpe_json() {
+    return std::string("{") +
+        "\"normalizer\":{\"type\":\"BertNormalizer\",\"lowercase\":true}," +
+        "\"model\":{\"type\":\"BPE\",\"unk_token\":\"[UNK]\",\"vocab\":{"
+            "\"[PAD]\":0,\"[UNK]\":1,\"[CLS]\":2,\"[SEP]\":3,"
+            "\"a\":4,\"b\":5,\"c\":6,\"ab\":7,\"e\":8,\"\xc3\xa6\":9,\"\xc3\xa6" "c\":10},"
+            "\"merges\":[\"a b\",\"\xc3\xa6 c\"]}," +
+        "\"post_processor\":{\"type\":\"TemplateProcessing\"}," +
+        "\"added_tokens\":["
+            "{\"id\":0,\"content\":\"[PAD]\"},"
+            "{\"id\":1,\"content\":\"[UNK]\"},"
+            "{\"id\":2,\"content\":\"[CLS]\"},"
+            "{\"id\":3,\"content\":\"[SEP]\"}]}";
+}
+
+static void test_bpe_legacy_behaviour_is_pinned(void) {
+    lembed::detail::TokenizerWrapper tok;
+    tok.load_from_blob(make_bpe_json(), 512);
+    CHECK(encode_one(tok, "Ab c") == ids({2, 7, 6, 3}), "BPE merges within a word");
+    CHECK(encode_one(tok, "\xc3\x89") == ids({2, 8, 3}),
+          "legacy: BPE folds E-acute to e (HF byte-level BPE would not)");
+    CHECK(encode_one(tok, "\xc3\xa6" "c") == ids({2, 9, 6, 3}),
+          "legacy: a non-ASCII character is its own word, so ae-ligature + c never merge");
+    CHECK(encode_one(tok, "\xc3") == ids({2, 1, 3}),
+          "a truncated multi-byte sequence is handled without reading past the end");
+}
+
 int main(void) {
     test_plain_ascii();
     test_accents_are_stripped();
@@ -298,6 +421,11 @@ int main(void) {
     test_lowercase_disabled_keeps_accents();
     test_special_tokens_are_added_once();
     test_multibyte_letters_stay_in_the_word();
+    test_strip_accents_is_independent_of_lowercase();
+    test_handle_chinese_and_clean_text_switches();
+    test_sequence_normalizer();
+    test_malformed_utf8_is_kept_verbatim();
+    test_bpe_legacy_behaviour_is_pinned();
 
     printf("%s: %d passed, %d failed\n",
            g_fail == 0 ? "PASS" : "FAIL", g_pass, g_fail);

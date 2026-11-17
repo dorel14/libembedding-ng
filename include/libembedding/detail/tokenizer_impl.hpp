@@ -93,36 +93,53 @@ static inline std::string to_lower_ascii(const std::string& s) {
  * left alone because they are already lowercase.
  * ========================================================================= */
 
-/* Decode one UTF-8 codepoint. Returns bytes consumed and stores the codepoint;
- * malformed bytes are passed through so nothing is silently dropped. */
+/* Sentinel codepoint for a byte that is not part of well-formed UTF-8. It is
+ * outside every table, so callers keep the byte verbatim instead of
+ * reinterpreting it as a Latin-1 letter. */
+static constexpr uint32_t kInvalidCp = 0xFFFFFFFFu;
+
+/* Decode one UTF-8 codepoint. Returns bytes consumed and stores the codepoint.
+ * Strict: continuation bytes, overlong forms, surrogates and values above
+ * U+10FFFF are rejected; a malformed byte is consumed alone and reported as
+ * kInvalidCp. */
 static inline size_t utf8_next(const std::string& s, size_t i, uint32_t& cp) {
-    unsigned char c = (unsigned char)s[i];
+    const size_t size = s.size();
+    const unsigned char c = (unsigned char)s[i];
     if (c < 0x80) { cp = c; return 1; }
-    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+    auto cont = [&](size_t k) { return k < size && ((unsigned char)s[k] & 0xC0) == 0x80; };
+    if (c >= 0xC2 && c <= 0xDF && cont(i + 1)) {
         cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)s[i + 1] & 0x3F);
         return 2;
     }
-    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) {
-        cp = ((uint32_t)(c & 0x0F) << 12) |
-             (((unsigned char)s[i + 1] & 0x3F) << 6) |
+    if (c >= 0xE0 && c <= 0xEF && cont(i + 1) && cont(i + 2)) {
+        const unsigned char b1 = (unsigned char)s[i + 1];
+        if ((c == 0xE0 && b1 < 0xA0) || (c == 0xED && b1 > 0x9F)) { cp = kInvalidCp; return 1; }
+        cp = ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)(b1 & 0x3F) << 6) |
              ((unsigned char)s[i + 2] & 0x3F);
         return 3;
     }
-    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) {
-        cp = ((uint32_t)(c & 0x07) << 18) |
-             (((unsigned char)s[i + 1] & 0x3F) << 12) |
-             (((unsigned char)s[i + 2] & 0x3F) << 6) |
+    if (c >= 0xF0 && c <= 0xF4 && cont(i + 1) && cont(i + 2) && cont(i + 3)) {
+        const unsigned char b1 = (unsigned char)s[i + 1];
+        if ((c == 0xF0 && b1 < 0x90) || (c == 0xF4 && b1 > 0x8F)) { cp = kInvalidCp; return 1; }
+        cp = ((uint32_t)(c & 0x07) << 18) | ((uint32_t)(b1 & 0x3F) << 12) |
+             ((uint32_t)((unsigned char)s[i + 2] & 0x3F) << 6) |
              ((unsigned char)s[i + 3] & 0x3F);
         return 4;
     }
-    cp = c;
+    cp = kInvalidCp;
     return 1;
 }
 
-/* BertNormalizer(strip_accents=true, lowercase=true) without clean_text and
- * without CJK padding (those live in basic_tokenize), per codepoint: NFD then
- * drop the nonspacing marks, then lowercase. See tokenizer_unicode.hpp. */
-static inline std::string bert_normalize(const std::string& s) {
+/* BertNormalizer's case and accent steps, without clean_text and without CJK
+ * padding (those live in basic_tokenize), per codepoint. The two switches are
+ * independent, as in HF:
+ *   strip  NFD, then drop the nonspacing marks (Mn)
+ *   lower  lowercase
+ * Both: the default uncased BERT. Only strip: the base letter keeps its case.
+ * Only lower: accented letters stay composed. See tokenizer_unicode.hpp. */
+static inline std::string bert_normalize(const std::string& s, bool lower = true,
+                                         bool strip = true) {
+    if (!lower && !strip) return s;
     std::string out;
     out.reserve(s.size());
     for (size_t i = 0; i < s.size();) {
@@ -131,12 +148,32 @@ static inline std::string bert_normalize(const std::string& s) {
         i += n;
 
         if (cp < 0x80) {
-            out += (cp >= 'A' && cp <= 'Z') ? (char)(cp - 'A' + 'a') : (char)cp;
+            out += (lower && cp >= 'A' && cp <= 'Z') ? (char)(cp - 'A' + 'a') : (char)cp;
             continue;
         }
-        if (unicode::bert_is_stripped(cp)) continue;
-        if (unicode::append_hangul_nfd(out, cp)) continue;
-        const uint32_t f = unicode::bert_fold(cp);
+        uint32_t f = cp;
+        if (strip) {
+            if (unicode::bert_is_stripped(cp)) continue;
+            if (unicode::append_hangul_nfd(out, cp)) continue;
+            const uint32_t both = unicode::bert_fold(cp);   /* strip, then lowercase */
+            if (lower) {
+                f = both;
+            } else {
+                /* Strip alone: a letter that merely lowercases is unchanged; a
+                 * decomposed one yields its base letter, upper-cased again when
+                 * the source was upper case. */
+                const uint32_t lc = unicode::bert_lower(cp);
+                if (cp == 0x0130) f = 'I';          /* I-dot -> I + dot above */
+                else if (cp == 0x212A) f = 'K';     /* Kelvin sign -> K */
+                else if (cp == 0x2126) f = 0x03A9;  /* Ohm sign -> capital omega */
+                else if (both != lc) f = (lc != cp) ? unicode::bert_upper(both) : both;
+            }
+        } else if (cp == 0x0130) {
+            out += "i\xCC\x87";   /* HF lowercases I-dot to i + combining dot */
+            continue;
+        } else {
+            f = unicode::bert_lower(cp);
+        }
         if (f == cp) out.append(s, i - n, n);   /* keeps malformed bytes verbatim */
         else unicode::append_utf8(out, f);
     }
@@ -144,22 +181,45 @@ static inline std::string bert_normalize(const std::string& s) {
 }
 
 /* BertNormalizer(clean_text, handle_chinese_chars) + BertPreTokenizer: drop
- * control/format characters, split on whitespace, make every CJK ideograph its
- * own word, and split on punctuation (each mark is a word). Everything else,
- * including accented letters, kana, Hangul and emoji, stays glued into words. */
-static inline std::vector<std::string> basic_tokenize(const std::string& text) {
+ * control/format characters (clean_text), split on whitespace, make every CJK
+ * ideograph its own word (handle_chinese_chars), and split on punctuation (each
+ * mark is a word). Everything else, including accented letters, kana, Hangul
+ * and emoji, stays glued into words. */
+static inline std::vector<std::string> basic_tokenize(const std::string& text,
+                                                      bool clean_text = true,
+                                                      bool handle_chinese = true) {
     std::vector<std::string> tokens;
+    tokens.reserve(text.size() / 4 + 1);
     std::string current;
     auto flush = [&]() {
         if (!current.empty()) { tokens.push_back(current); current.clear(); }
     };
     for (size_t i = 0; i < text.size();) {
+        const unsigned char c = (unsigned char)text[i];
+        if (c < 0x80) {
+            /* ASCII fast path, no table lookup. */
+            i++;
+            if (c == ' ' || (c >= 0x09 && c <= 0x0D)) {
+                /* \v and \f are deleted by clean_text, whitespace otherwise */
+                if (clean_text && (c == 0x0B || c == 0x0C)) continue;
+                flush();
+            } else if (c < 0x20 || c == 0x7F) {
+                if (!clean_text) current += (char)c;
+            } else if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+                       (c >= '[' && c <= '`') || (c >= '{' && c <= '~')) {
+                flush();
+                tokens.emplace_back(1, (char)c);
+            } else {
+                current += (char)c;
+            }
+            continue;
+        }
         uint32_t cp = 0;
         const size_t n = utf8_next(text, i, cp);
         i += n;
-        if (unicode::bert_is_removed(cp)) continue;
+        if (clean_text && unicode::bert_is_removed(cp)) continue;
         if (unicode::bert_is_whitespace(cp)) { flush(); continue; }
-        if (unicode::bert_is_chinese(cp) || unicode::bert_is_punct(cp)) {
+        if ((handle_chinese && unicode::bert_is_chinese(cp)) || unicode::bert_is_punct(cp)) {
             flush();
             tokens.push_back(text.substr(i - n, n));
             continue;
@@ -167,6 +227,102 @@ static inline std::vector<std::string> basic_tokenize(const std::string& text) {
         current.append(text, i - n, n);
     }
     flush();
+    return tokens;
+}
+
+/* =========================================================================
+ * Legacy pre-tokenisation, kept ONLY for byte-level BPE models.
+ *
+ * Byte-level BPE (CLIP, ModernBERT) is not implemented faithfully here and is
+ * due a dedicated rewrite; until then its behaviour is deliberately left as it
+ * was before the WordPiece fidelity work (T26): Latin-1 / Extended-A accent
+ * folding and lowercasing, and every non-ASCII character as its own word.
+ * Pinned by test_tokenizer so that the later change is explicit.
+ * ========================================================================= */
+
+/* Base ASCII letter of a Latin-1 Supplement codepoint, or -1 when the codepoint
+ * has no canonical decomposition. */
+static inline int legacy_latin1_base(uint32_t cp) {
+    static const int kBases[64] = {
+        'a', 'a', 'a', 'a', 'a', 'a', -1, 'c', 'e', 'e', 'e', 'e', 'i', 'i', 'i', 'i',
+        -1, 'n', 'o', 'o', 'o', 'o', 'o', -1, -1, 'u', 'u', 'u', 'u', 'y', -1, -1,
+        'a', 'a', 'a', 'a', 'a', 'a', -1, 'c', 'e', 'e', 'e', 'e', 'i', 'i', 'i', 'i',
+        -1, 'n', 'o', 'o', 'o', 'o', 'o', -1, -1, 'u', 'u', 'u', 'u', 'y', -1, 'y',
+    };
+    if (cp >= 0x00C0 && cp <= 0x00FF) return kBases[cp - 0x00C0];
+    return -1;
+}
+
+static inline int legacy_extended_a_base(uint32_t cp) {
+    switch (cp) {
+        case 0x0110: case 0x0111: case 0x0126: case 0x0127: case 0x0132: case 0x0133:
+        case 0x013F: case 0x0140: case 0x014A: case 0x014B: case 0x0152: case 0x0153:
+        case 0x0166: case 0x0167:
+            return -1;
+        default:
+            break;
+    }
+    if (cp == 0x0130 || cp == 0x0131) return 'i';
+    if (cp == 0x017F) return 's';
+    const uint32_t base = (cp % 2 == 0) ? cp : (cp - 1);
+    if (base >= 0x00C0 && base <= 0x00FF) return legacy_latin1_base(base);
+    return -1;
+}
+
+static inline std::string legacy_bert_normalize(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        uint32_t cp = 0;
+        const size_t n = utf8_next(s, i, cp);
+        i += n;
+        if (cp >= 'A' && cp <= 'Z') { out += (char)(cp - 'A' + 'a'); continue; }
+        if (cp >= 0x00C0 && cp <= 0x00DE && cp != 0x00D7) {
+            const int b = legacy_latin1_base(cp);
+            if (b >= 0) { out += (char)b; continue; }
+            out.append(s, i - n, n);
+            continue;
+        }
+        int folded = -1;
+        if (cp >= 0x00C0 && cp <= 0x00FF) folded = legacy_latin1_base(cp);
+        else if (cp >= 0x0100 && cp <= 0x017F) folded = legacy_extended_a_base(cp);
+        if (folded >= 0) { out += (char)folded; continue; }
+        out.append(s, i - n, n);
+    }
+    return out;
+}
+
+static inline std::vector<std::string> legacy_basic_tokenize(const std::string& text) {
+    std::vector<std::string> tokens;
+    std::string current;
+    for (size_t i = 0; i < text.size(); ) {
+        unsigned char c = (unsigned char)text[i];
+        if (c <= 0x20) {
+            if (!current.empty()) { tokens.push_back(current); current.clear(); }
+            i++;
+        } else if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+                   (c >= '[' && c <= '`') || (c >= '{' && c <= '~')) {
+            if (!current.empty()) { tokens.push_back(current); current.clear(); }
+            current += (char)c;
+            tokens.push_back(current);
+            current.clear();
+            i++;
+        } else if (c >= 0x80) {
+            if (!current.empty()) { tokens.push_back(current); current.clear(); }
+            int bytes = 1;
+            if ((c & 0xE0) == 0xC0) bytes = 2;
+            else if ((c & 0xF0) == 0xE0) bytes = 3;
+            else if ((c & 0xF8) == 0xF0) bytes = 4;
+            for (int b = 0; b < bytes && i < text.size(); b++, i++)
+                current += text[i];
+            tokens.push_back(current);
+            current.clear();
+        } else {
+            current += (char)c;
+            i++;
+        }
+    }
+    if (!current.empty()) tokens.push_back(current);
     return tokens;
 }
 
@@ -246,7 +402,7 @@ public:
              * (HF default 100). */
             cJSON* maxc = cJSON_GetObjectItem(model, "max_input_chars_per_word");
             if (maxc && cJSON_IsNumber(maxc) && maxc->valueint > 0)
-                wp_max_chars_ = (size_t)maxc->valueint;
+                wp_max_chars_ = (size_t)std::min(maxc->valueint, 10000);
 
             /* unk_token */
             cJSON* unk = cJSON_GetObjectItem(model, "unk_token");
@@ -283,6 +439,10 @@ public:
         } else {
             do_lower_case_ = false;
         }
+
+        /* WordPiece normalisation switches, independent of one another as in
+         * HF (do_lower_case_ above only drives the legacy BPE path). */
+        parse_wordpiece_normalizer(normalizer);
 
         /* Post-processor: detect special tokens to add */
         cJSON* post = cJSON_GetObjectItem(root, "post_processor");
@@ -415,6 +575,7 @@ public:
         type_ = WORDPIECE;
         wp_prefix_ = "##";
         do_lower_case_ = true;   /* every SPLADE export is uncased */
+        lower_ = strip_ = clean_text_ = handle_chinese_ = true;
         add_special_tokens_ = add_special_tokens;
         max_length_ = max_length > 0 ? max_length : 512;
 
@@ -470,19 +631,63 @@ private:
     int unk_token_id_;
     Type type_;
     bool do_lower_case_;
+    /* WordPiece normalisation, as BertNormalizer's four switches. */
+    bool lower_ = true;
+    bool strip_ = true;
+    bool clean_text_ = true;
+    bool handle_chinese_ = true;
     bool add_special_tokens_;
+
+    /* Read the normalizer section of tokenizer.json into the four switches.
+     * BertNormalizer: `lowercase` (default true), `strip_accents` (null or
+     * absent follows `lowercase`), `clean_text` and `handle_chinese_chars`
+     * (default true). Lowercase alone lowercases only. Sequence: Lowercase,
+     * StripAccents and NFD/NFKD are honoured, accents being stripped only when
+     * both StripAccents and a decomposition are present, as in HF. Anything
+     * else (or no normalizer) leaves all four off. */
+    void parse_wordpiece_normalizer(const cJSON* normalizer) {
+        lower_ = strip_ = clean_text_ = handle_chinese_ = false;
+        if (!normalizer) return;
+        auto flag = [](const cJSON* n, const char* key, bool dflt) {
+            const cJSON* v = cJSON_GetObjectItem(const_cast<cJSON*>(n), key);
+            if (cJSON_IsTrue(v)) return true;
+            if (cJSON_IsFalse(v)) return false;
+            return dflt;
+        };
+        auto bert = [&](const cJSON* n) {
+            lower_ = flag(n, "lowercase", true);
+            const cJSON* sa = cJSON_GetObjectItem(const_cast<cJSON*>(n), "strip_accents");
+            strip_ = (cJSON_IsTrue(sa) || cJSON_IsFalse(sa)) ? cJSON_IsTrue(sa) : lower_;
+            clean_text_ = flag(n, "clean_text", true);
+            handle_chinese_ = flag(n, "handle_chinese_chars", true);
+        };
+        const cJSON* type = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "type");
+        if (!type || !type->valuestring) return;
+        const std::string t = type->valuestring;
+        if (t == "BertNormalizer") {
+            bert(normalizer);
+        } else if (t == "Lowercase") {
+            lower_ = true;
+        } else if (t == "Sequence") {
+            bool strip_accents = false, decomposed = false;
+            const cJSON* list = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "normalizers");
+            for (const cJSON* sub = cJSON_IsArray(list) ? list->child : nullptr; sub; sub = sub->next) {
+                const cJSON* st = cJSON_GetObjectItem(const_cast<cJSON*>(sub), "type");
+                if (!st || !st->valuestring) continue;
+                const std::string s = st->valuestring;
+                if (s == "Lowercase") lower_ = true;
+                else if (s == "StripAccents") strip_accents = true;
+                else if (s == "NFD" || s == "NFKD") decomposed = true;
+                else if (s == "BertNormalizer") bert(sub);
+            }
+            if (strip_accents && decomposed) strip_ = true;
+        }
+    }
     mutable std::string wp_scratch_;
     mutable std::string bpe_scratch_;
 
     /* Encode a single text to token IDs */
     std::vector<int> encode_single(const std::string& text) const {
-        /* HuggingFace's basic_tokenizer does strip_accents *then* lowercase when
-         * lowercase is on, and BertTokenizer leaves strip_accents following
-         * do_lower_case. Gating the whole thing on do_lower_case_ therefore
-         * reproduces both settings rather than only the lowercase one. */
-        std::string processed =
-            do_lower_case_ ? bert_normalize(text) : text;
-
         std::vector<int> ids;
 
         /* Add [CLS] for BERT-style models */
@@ -490,8 +695,16 @@ private:
             ids.push_back(cls_token_id_);
         }
 
-        /* Pre-tokenize into words */
-        auto words = basic_tokenize(processed);
+        /* Normalise and pre-tokenize into words. WordPiece follows HF's
+         * BertNormalizer switches; byte-level BPE keeps its legacy path. */
+        std::vector<std::string> words;
+        if (type_ == BPE) {
+            words = legacy_basic_tokenize(
+                do_lower_case_ ? legacy_bert_normalize(text) : text);
+        } else {
+            words = basic_tokenize(bert_normalize(text, lower_, strip_),
+                                   clean_text_, handle_chinese_);
+        }
 
         for (const auto& word : words) {
             if (type_ == WORDPIECE) {
@@ -579,8 +792,10 @@ private:
             if ((c & 0xE0) == 0xC0) bytes = 2;
             else if ((c & 0xF0) == 0xE0) bytes = 3;
             else if ((c & 0xF8) == 0xF0) bytes = 4;
-            symbols.push_back(word.substr(i, bytes));
-            i += bytes;
+            /* A truncated trailing sequence is kept as the bytes that are there. */
+            const size_t len = std::min((size_t)bytes, word.size() - i);
+            symbols.push_back(word.substr(i, len));
+            i += len;
         }
 
         /* Iteratively merge the highest-priority pair */

@@ -150,10 +150,14 @@ static const Block kBlocks[] = {
     {0x1FB00, 0x2FFFF, "SMP/SIP (rest)", false},
 };
 
-static void test_normalizer(const std::string& dir) {
+/* `lower` / `strip` select the BertNormalizer mode the fixture was generated
+ * with: both (hf_normalizer.json), lowercase only, or strip_accents only.
+ * `all_covered` makes every block binding (the lowercase table is complete). */
+static void test_normalizer(const std::string& dir, const char* file, const char* label,
+                            bool lower, bool strip, bool all_covered) {
     std::string blob;
-    if (!read_file(dir + "/hf_normalizer.json", blob)) {
-        fprintf(stderr, "FAIL: cannot read %s/hf_normalizer.json\n", dir.c_str());
+    if (!read_file(dir + "/" + file, blob)) {
+        fprintf(stderr, "FAIL: cannot read %s/%s\n", dir.c_str(), file);
         g_fail++;
         return;
     }
@@ -161,7 +165,7 @@ static void test_normalizer(const std::string& dir) {
     cJSON* changed = root ? cJSON_GetObjectItem(root, "changed") : nullptr;
     cJSON* step_item = root ? cJSON_GetObjectItem(root, "hangul_step") : nullptr;
     if (!changed || !cJSON_IsNumber(step_item)) {
-        fprintf(stderr, "FAIL: hf_normalizer.json is malformed\n");
+        fprintf(stderr, "FAIL: %s is malformed\n", file);
         g_fail++;
         cJSON_Delete(root);
         return;
@@ -174,7 +178,7 @@ static void test_normalizer(const std::string& dir) {
     }
     cJSON_Delete(root);
 
-    printf("\n[1] Normaliser vs BertNormalizer(strip_accents, lowercase), per codepoint\n");
+    printf("\n[1] Normaliser vs BertNormalizer (%s), per codepoint\n", label);
     printf("    %-30s %8s %8s %9s  %s\n", "block", "checked", "differ", "rate", "scope");
     long total_checked = 0, total_differ = 0;
     for (const Block& b : kBlocks) {
@@ -186,11 +190,12 @@ static void test_normalizer(const std::string& dir) {
             const std::string in = utf8(cp);
             auto e = expected.find(cp);
             const std::string& want = e != expected.end() ? e->second : in;
-            const std::string got = lembed::detail::bert_normalize(in);
+            const std::string got = lembed::detail::bert_normalize(in, lower, strip);
+            const bool covered = b.covered || all_covered;
             checked++;
             if (got != want) {
                 differ++;
-                if (b.covered && shown < 5) {
+                if (covered && shown < 5) {
                     fprintf(stderr, "FAIL: normalise U+%04X: got \"%s\", want \"%s\"\n",
                             (unsigned)cp, show(got).c_str(), show(want).c_str());
                     shown++;
@@ -201,8 +206,8 @@ static void test_normalizer(const std::string& dir) {
         total_differ += differ;
         printf("    %-30s %8ld %8ld %8.2f%%  %s\n", b.name, checked, differ,
                checked ? 100.0 * differ / checked : 0.0,
-               b.covered ? "covered" : "not covered");
-        if (b.covered) {
+               (b.covered || all_covered) ? "covered" : "not covered");
+        if (b.covered || all_covered) {
             if (differ == 0) g_pass++; else g_fail++;
         }
     }
@@ -460,7 +465,9 @@ int main(int argc, char** argv) {
     }
     printf("fixtures: %s (%zu texts)\n", dir, corpus.size());
 
-    test_normalizer(dir);
+    test_normalizer(dir, "hf_normalizer.json", "strip_accents + lowercase", true, true, false);
+    test_normalizer(dir, "hf_normalizer_lower.json", "lowercase only", true, false, true);
+    test_normalizer(dir, "hf_normalizer_strip.json", "strip_accents only", false, true, false);
     test_pretokenizer(dir, corpus);
     test_ids(dir, corpus);
 

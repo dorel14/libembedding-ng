@@ -259,6 +259,15 @@ piece yields a single `[UNK]` (not the pieces already matched), a word longer th
 characters yields `[UNK]`, and Unicode punctuation, CJK ideographs and format
 characters (zero-width space, etc.) are handled as HF does.
 
+`BertNormalizer` options are read independently, as in HF: `lowercase`, `strip_accents`
+(absent or `null` follows `lowercase`), `clean_text` and `handle_chinese_chars`. A
+`Sequence` normalizer is supported for `Lowercase`, `StripAccents` and `NFD`/`NFKD`;
+accents are stripped only when both `StripAccents` and a decomposition are present. The
+"lowercase only" and "strip accents only" modes are also checked codepoint by codepoint.
+Byte-level BPE keeps its legacy behaviour (not HF-faithful) until it is rewritten; its
+ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
+`tokenizer.json` is in the machine's model cache (the family is skipped otherwise).
+
 ## Model lookup by code
 
 libembedding automatically resolves models by HuggingFace name or ONNX repo code:
