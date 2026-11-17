@@ -44,6 +44,29 @@ add_executable(test_offline_cache test_offline_cache.cpp)
 target_link_libraries(test_offline_cache PRIVATE libembedding)
 add_test(NAME test_offline_cache COMMAND test_offline_cache)
 
+# Thread-safety contract (docs "Thread safety"): shared contexts, pool, caches,
+# last_error. Model tests load from the local cache and skip when a model is
+# missing (LEMBED_TEST_ALLOW_DOWNLOAD allows downloads); the cache tests need
+# no model. Also run under ThreadSanitizer by .github/workflows/tsan.yml.
+add_executable(test_concurrency test_concurrency.cpp)
+target_link_libraries(test_concurrency PRIVATE libembedding)
+if(WIN32)
+    target_link_libraries(test_concurrency PRIVATE ONNXRuntime::ONNXRuntime)
+endif()
+add_test(NAME test_concurrency COMMAND test_concurrency)
+
+# Memory stability over 10 000 repeated calls (minutes): off by default.
+option(LIBEMBEDDING_STABILITY_TESTS "Build the slow repeated-call RSS stability test" OFF)
+if(LIBEMBEDDING_STABILITY_TESTS)
+    add_executable(test_repeated_calls test_repeated_calls.cpp)
+    target_link_libraries(test_repeated_calls PRIVATE libembedding)
+    if(WIN32)
+        target_link_libraries(test_repeated_calls PRIVATE Psapi)
+    endif()
+    add_test(NAME test_repeated_calls COMMAND test_repeated_calls)
+    set_tests_properties(test_repeated_calls PROPERTIES TIMEOUT 3000)
+endif()
+
 # Test the ABI of the structs shared with the cffi bindings (no network)
 add_executable(test_struct_sizes test_struct_sizes.cpp)
 target_link_libraries(test_struct_sizes PRIVATE libembedding)
@@ -125,13 +148,13 @@ endif()
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf test_matryoshka)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf test_matryoshka)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()

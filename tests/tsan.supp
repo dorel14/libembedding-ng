@@ -1,0 +1,11 @@
+# ThreadSanitizer suppressions for test_concurrency (.github/workflows/tsan.yml).
+#
+# Rule: suppress only races inside third-party code we do not build with
+# -fsanitize=thread; a race in libembedding's own code is a bug to fix, never
+# an entry here. Each entry needs a comment saying what it is and since when.
+#
+# ONNX Runtime is a prebuilt, uninstrumented binary: TSan sees its thread-pool
+# and Eigen spin-waits without the synchronisation (futex, custom atomics) it
+# cannot model, and reports races that are not ones. Everything reached from
+# the ORT library is ignored; our own frames that call into it stay checked.
+called_from_lib:libonnxruntime.so*
