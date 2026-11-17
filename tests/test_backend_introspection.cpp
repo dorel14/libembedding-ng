@@ -260,16 +260,28 @@ static void test_cached_gguf_reranker() {
 }
 
 int main(void) {
+    /* Unbuffered: a crash must not swallow the progress lines (ctest only
+     * shows what reached the pipe). */
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
+
+    printf("stage: null contexts\n");
     test_null_contexts();
 
+    printf("stage: fake model dir\n");
     fs::path dir = make_fake_model_dir();
+    printf("stage: explicit provider unavailable\n");
     test_explicit_provider_unavailable(dir);
+    printf("stage: CPU is not unsupported\n");
     test_cpu_is_not_unsupported(dir);
     std::error_code ec;
     fs::remove_all(dir, ec);
 
+    printf("stage: cached ONNX text\n");
     test_cached_onnx_text();
+    printf("stage: cached GGUF text\n");
     test_cached_gguf_text();
+    printf("stage: cached GGUF reranker\n");
     test_cached_gguf_reranker();
 
     printf("test_backend_introspection: %d passed, %d failed\n", passes, failures);
