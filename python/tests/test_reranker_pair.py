@@ -29,7 +29,8 @@ DOCS = [
 ]
 
 
-def _reference_scores(model_dir: Path, onnx_name: str) -> np.ndarray:
+def _reference_scores(model_dir: Path, onnx_name: str, *, literal: bool = False) -> np.ndarray:
+    """HF reference scores; literal=True is the old buggy single-sequence input."""
     ort = pytest.importorskip("onnxruntime")
     tokenizers = pytest.importorskip("tokenizers")
     tok = tokenizers.Tokenizer.from_file(str(model_dir / "tokenizer.json"))
@@ -41,7 +42,7 @@ def _reference_scores(model_dir: Path, onnx_name: str) -> np.ndarray:
     wanted = {i.name for i in sess.get_inputs()}
     scores = []
     for doc in DOCS:
-        enc = tok.encode(QUERY, doc)
+        enc = tok.encode(QUERY + " [SEP] " + doc) if literal else tok.encode(QUERY, doc)
         feed = {
             "input_ids": np.array([enc.ids], dtype=np.int64),
             "attention_mask": np.array([enc.attention_mask], dtype=np.int64),
@@ -74,6 +75,17 @@ def test_reranker_matches_pair_reference(repo, onnx_name, quant):
         reranker.close()
 
     ref = _reference_scores(model_dir, onnx_name)
-    corr = float(np.corrcoef(ours, ref)[0, 1])
+    bad = _reference_scores(model_dir, onnx_name, literal=True)
+
+    def pearson(x, y):
+        return float(np.corrcoef(x, y)[0, 1])
+
+    corr, corr_bad, corr_refs = pearson(ours, ref), pearson(ours, bad), pearson(ref, bad)
+    print(
+        f"\nPearson ours~pair={corr:.6f} ours~literal[SEP]={corr_bad:.6f} "
+        f"pair~literal={corr_refs:.6f} max|pair-literal|={np.abs(ref - bad).max():.4f}"
+    )
+    # Negative control: the two references must differ, else the test proves nothing.
+    assert corr_refs < 0.99 or np.abs(ref - bad).max() > 0.05, "test cannot discriminate"
     assert corr >= 0.999, f"Pearson {corr:.4f} vs HF pair reference"
     assert list(np.argsort(-ours)) == list(np.argsort(-ref)), "ranking differs"
