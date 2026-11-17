@@ -129,7 +129,7 @@ lembed_status_t lembed_text_embedding_create(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
-        return LEMBED_ERROR_ONNX_RUNTIME;
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
     }
 }
 
@@ -258,7 +258,7 @@ lembed_status_t lembed_text_embedding_create_custom(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
-        return LEMBED_ERROR_ONNX_RUNTIME;
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
     }
 }
 

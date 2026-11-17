@@ -19,6 +19,7 @@ from .models import (
     _PROVIDER_MAP,
     _QUANTIZATION_ENUM,
     _QUANTIZATION_NAMES,
+    _c_string,
     _desc_from_c,
     _is_gguf_model,
     _is_local_path,
@@ -427,7 +428,30 @@ class TextEmbedding:
     def info(self) -> ModelDesc:
         """Get runtime model descriptor."""
         desc_ptr = lib.lembed_text_embedding_desc_v2(self._ctx)
-        return _desc_from_c(desc_ptr.base, desc_ptr)
+        return _desc_from_c(
+            desc_ptr.base,
+            desc_ptr,
+            backend=self.backend,
+            effective_provider=self.provider,
+        )
+
+    @property
+    def backend(self) -> str:
+        """Runtime serving the model: ``"onnxruntime"`` or ``"llama.cpp"``."""
+        return _c_string(lib.lembed_text_embedding_backend_name(self._ctx))
+
+    @property
+    def provider(self) -> str:
+        """Execution provider in use, lowercase (``"cpu"``, ``"cuda"``...).
+
+        A provider other than ``"cpu"`` that cannot be attached raises
+        ``UnsupportedError`` at construction, so this never reports a provider
+        that is not running the model. llama.cpp reports ``"cpu"``, or
+        ``"gpu"`` when layers are offloaded to a ggml GPU device.
+        """
+        return _c_string(
+            lib.lembed_text_embedding_effective_provider(self._ctx)
+        ).lower()
 
     @classmethod
     def from_mode(cls, mode: str = "balanced", **kwargs):

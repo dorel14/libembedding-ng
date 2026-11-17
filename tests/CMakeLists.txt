@@ -123,15 +123,22 @@ if(MSVC)
     )
 endif()
 
+# Effective backend and provider introspection, and the LEMBED_ERROR_UNSUPPORTED
+# returned for an explicit provider that cannot be attached (no network: fake
+# model files; the cached-model checks skip when the model is absent).
+add_executable(test_backend_introspection test_backend_introspection.cpp)
+target_link_libraries(test_backend_introspection PRIVATE libembedding)
+add_test(NAME test_backend_introspection COMMAND test_backend_introspection)
+
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf test_matryoshka)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf test_matryoshka test_backend_introspection)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf test_matryoshka)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer integration_sparse_gguf test_matryoshka test_backend_introspection)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()

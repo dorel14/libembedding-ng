@@ -55,6 +55,14 @@ class ModelDesc:
     device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    # Runtime actually serving the model: "onnxruntime", "llama.cpp" or
+    # "ggml-sparse" (the in-house SPLADE runtime). "" when not reported.
+    backend: str = ""
+    # Execution provider actually in use, lowercase: "cpu", "cuda", "coreml",
+    # "directml", "tensorrt", or "gpu" for llama.cpp offload. Unlike
+    # `provider` (the requested value, "llama" for every GGUF context), this
+    # names the device. "" when not reported.
+    effective_provider: str = ""
 
 
 @dataclass(frozen=True)

@@ -15,6 +15,7 @@ from ._status import check_status
 from .exceptions import ModelNotFoundError
 from .models import (
     _PROVIDER_MAP,
+    _c_string,
     _desc_from_c,
     _is_local_path,
     list_sparse_models,
@@ -417,7 +418,29 @@ class SparseTextEmbedding:
     def info(self) -> ModelDesc:
         """Return runtime model descriptor."""
         desc_ptr = lib.lembed_sparse_text_embedding_desc(self._ctx)
-        return _desc_from_c(desc_ptr)
+        return _desc_from_c(
+            desc_ptr, backend=self.backend, effective_provider=self.provider
+        )
+
+    @property
+    def backend(self) -> str:
+        """Runtime serving the model: ``"onnxruntime"`` or ``"ggml-sparse"``.
+
+        ``"ggml-sparse"`` is the library's own ggml runtime for GGUF SPLADE
+        models, not llama.cpp.
+        """
+        return _c_string(lib.lembed_sparse_text_embedding_backend_name(self._ctx))
+
+    @property
+    def provider(self) -> str:
+        """Execution provider in use, lowercase (``"cpu"``, ``"cuda"``...).
+
+        A provider other than ``"cpu"`` that cannot be attached raises
+        ``UnsupportedError`` at construction. ``"ggml-sparse"`` reports ``"cpu"``.
+        """
+        return _c_string(
+            lib.lembed_sparse_text_embedding_effective_provider(self._ctx)
+        ).lower()
 
     @property
     def name(self) -> str:

@@ -790,17 +790,22 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | Enum | Backend |
 |---|---|
 | `LEMBED_PROVIDER_CPU` | CPU (default, always available) |
-| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), falls back to CPU if unavailable |
-| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU) |
-| `LEMBED_PROVIDER_CUDA` | Reserved: runs on CPU (GPU support is planned after 1.x) |
-| `LEMBED_PROVIDER_DIRECTML` | Reserved: runs on CPU (GPU support is planned after 1.x) |
-| `LEMBED_PROVIDER_TENSORRT` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), `LEMBED_ERROR_UNSUPPORTED` if it cannot be attached |
+| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU); `LEMBED_ERROR_UNSUPPORTED` on an ONNX model |
+| `LEMBED_PROVIDER_CUDA` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_DIRECTML` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_TENSORRT` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
 
 GPU acceleration is out of scope before 1.x. The CUDA, DirectML and TensorRT
 values exist so the enum stays stable, but no build enables them
-(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`): a
-model created with one of them runs on the CPU. ggml is built without GPU
-backends, so `llama_n_gpu_layers` has no effect.
+(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`). A
+provider other than `LEMBED_PROVIDER_CPU` that cannot be attached makes the
+create function fail with `LEMBED_ERROR_UNSUPPORTED` and a reason in
+`lembed_last_error()` instead of silently running on the CPU.
+`lembed_*_backend_name(ctx)` and `lembed_*_effective_provider(ctx)` report the
+runtime and provider actually serving a context (see
+[docs/en/api_reference.md](docs/en/api_reference.md#effective-backend-and-provider-c-api)).
+ggml is built without GPU backends, so `llama_n_gpu_layers` has no effect.
 
 ### Versioned options (v2)
 

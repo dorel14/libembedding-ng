@@ -41,6 +41,22 @@ extern "C++" {
 extern "C" {
 #endif
 
+/* True when ggml has a GPU device registered, i.e. when llama_n_gpu_layers can
+ * actually move layers off the CPU. The shipped builds compile only the ggml
+ * CPU backend, but a build with a GPU backend (Metal is ggml's default on
+ * Apple) would offload, and lembed_text_embedding_effective_provider() must
+ * not claim CPU then. Read after the model is loaded, once the registry holds
+ * every backend. */
+static bool lembed__ggml_has_gpu_device() {
+    for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+        enum ggml_backend_dev_type t = ggml_backend_dev_type(ggml_backend_dev_get(i));
+        if (t == GGML_BACKEND_DEVICE_TYPE_GPU || t == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* =========================================================================
  * llama.cpp backend: creation from GGUF path
  * ========================================================================= */
@@ -83,6 +99,8 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
         }
         ctx->dim = ctx->llama.session.dimension();
         if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
+        ctx->llama_gpu_offload = options->llama_n_gpu_layers != 0 &&
+                                 lembed__ggml_has_gpu_device();
 
         if (options->cache_size > 0) {
             ctx->cache = new lembed::detail::LRUCache((size_t)options->cache_size, 0);

@@ -69,6 +69,8 @@ TextEmbedding(
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `model_name` | `str` (property) | Nom de registre du modèle chargé |
+| `backend` | `str` (property) | Runtime qui sert réellement le modèle : `"onnxruntime"` ou `"llama.cpp"` (voir [Backend et provider effectifs](#backend-et-provider-effectifs)) |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé, en minuscules : `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"` ; `"gpu"` pour llama.cpp avec des couches déportées |
 | `info()` | `ModelDesc` | Descripteur du modèle chargé |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources C sous-jacentes |
@@ -149,6 +151,8 @@ SparseTextEmbedding(
 | `embed(texts, batch_size=0)` | `list[SparseEmbedding]` | Retourne une liste d'objets `SparseEmbedding` |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | `"onnxruntime"` ou `"ggml-sparse"` (runtime ggml maison des GGUF SPLADE, pas llama.cpp) |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé (`"cpu"` pour `"ggml-sparse"`) |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
@@ -200,6 +204,8 @@ ImageEmbedding(
 | `dim` | `int` (property) | Dimension de l'embedding |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | Toujours `"onnxruntime"` |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `close()` | `None` | Libère les ressources |
 | `list_supported_models()` | `list[ModelInfo]` | (static) Liste les modèles image |
@@ -266,6 +272,8 @@ Reranker(
 | `rerank(query, documents, batch_size=0)` | `list[RerankResult]` | Retourne les résultats triés par score décroissant |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | `"onnxruntime"` ou `"llama.cpp"` : avec `backend="auto"`, un modèle sans fichiers ONNX peut être servi par son équivalent GGUF, et c'est ici que la bascule se voit |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé (`"cpu"` pour llama.cpp) |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
@@ -529,11 +537,54 @@ class ModelDesc:
     pooling: str   # "cls" ou "mean"
     num_threads: int
     batch_size: int
-    provider: str
-    device_id: int
+    provider: str = "cpu"          # provider demandé ("llama" pour tout contexte GGUF)
+    device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    backend: str = ""              # "onnxruntime", "llama.cpp" ou "ggml-sparse"
+    effective_provider: str = ""   # provider réellement utilisé : "cpu", "cuda", ...
 ```
+
+`backend` et `effective_provider` sont ajoutés en fin de classe avec une valeur
+par défaut : le code qui construit un `ModelDesc` par position continue de
+fonctionner. `info()` les remplit toujours.
+
+### Backend et provider effectifs
+
+Chaque modèle indique quel runtime le sert et sur quel provider il tourne
+réellement (propriétés `backend` / `provider`, champs `info().backend` /
+`info().effective_provider`) :
+
+| `backend` | Signification | `provider` |
+|---|---|---|
+| `"onnxruntime"` | Modèle ONNX | `"cpu"`, ou le provider demandé s'il a pu être attaché |
+| `"llama.cpp"` | Modèle GGUF dense ou reranker | `"cpu"` ; `"gpu"` si `llama_n_gpu_layers != 0` et que ggml dispose d'un périphérique GPU (aucun dans les builds livrés) |
+| `"ggml-sparse"` | Modèle GGUF SPLADE (runtime ggml maison) | `"cpu"` |
+
+**Provider demandé explicitement mais indisponible : erreur.** `"cpu"` est la
+valeur par défaut et il n'existe pas de provider « auto » : toute autre valeur
+est une demande explicite. Si elle ne peut pas être attachée (build sans CUDA,
+DirectML ou TensorRT, CoreML hors Apple, `"llama"` sur un modèle ONNX, valeur
+inconnue), la construction lève `UnsupportedError` avec la raison, au lieu de
+tourner sur CPU sans le dire. La vérification a lieu avant l'analyse du modèle.
+
+```python
+from libembedding import TextEmbedding
+from libembedding.exceptions import UnsupportedError
+
+try:
+    model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda")
+except UnsupportedError as e:
+    print(e.detail)  # "Execution provider CUDA was requested but is not available: ..."
+
+model = TextEmbedding("BAAI/bge-small-en-v1.5")
+print(model.backend, model.provider)  # onnxruntime cpu
+```
+
+**Bascule `Reranker(backend="auto")` vers GGUF : conservée mais visible.** Quand
+le modèle demandé n'a pas de fichiers ONNX et qu'un équivalent GGUF existe, le
+reranker est servi par llama.cpp : `reranker.backend` vaut alors `"llama.cpp"`,
+et `LIBEMBEDDING_VERBOSE=1` écrit la bascule sur stderr.
 
 ---
 
@@ -758,3 +809,51 @@ if (lembed_cache_get(cache, "Hello world", &vec, &dim)) {
 
 lembed_cache_free(cache);
 ```
+
+### Backend et provider effectifs (C API)
+
+Deux accesseurs par type de contexte. Ils renvoient des chaînes statiques (à ne
+pas libérer), `NULL` si le contexte est `NULL`. Aucun champ n'est ajouté à
+`lembed_model_desc_t` : sa taille (ABI) ne change pas.
+
+| Fonction | Valeurs |
+|---|---|
+| `lembed_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_text_embedding_effective_provider(ctx)` | `"CPU"`, `"CUDA"`, `"CoreML"`, `"DirectML"`, `"TensorRT"` ; llama.cpp : `"CPU"`, ou `"GPU"` si des couches sont déportées sur un périphérique GPU ggml |
+| `lembed_sparse_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"ggml-sparse"` |
+| `lembed_sparse_text_embedding_effective_provider(ctx)` | idem ONNX ; `"CPU"` pour `"ggml-sparse"` |
+| `lembed_reranker_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_reranker_effective_provider(ctx)` | idem ONNX ; `"CPU"` pour llama.cpp |
+| `lembed_image_embedding_backend_name(ctx)` | `"onnxruntime"` |
+| `lembed_image_embedding_effective_provider(ctx)` | idem ONNX |
+
+Les noms de provider suivent l'orthographe de `lembed_execution_provider_name()`.
+
+```c
+lembed_text_options_t opts = lembed_text_options_default();
+opts.provider = LEMBED_PROVIDER_CUDA;
+lembed_text_embedding_t* ctx = NULL;
+lembed_status_t s = lembed_text_embedding_create(&opts, &ctx);
+if (s == LEMBED_ERROR_UNSUPPORTED) {
+    /* "Execution provider CUDA was requested but is not available: ..." */
+    fprintf(stderr, "%s\n", lembed_last_error());
+    opts.provider = LEMBED_PROVIDER_CPU;
+    s = lembed_text_embedding_create(&opts, &ctx);
+}
+printf("%s on %s\n", lembed_text_embedding_backend_name(ctx),
+       lembed_text_embedding_effective_provider(ctx));  /* onnxruntime on CPU */
+```
+
+**Changement de comportement (décision D3).** Un provider autre que
+`LEMBED_PROVIDER_CPU` qui ne peut pas être attaché à la session ONNX Runtime fait
+échouer la création avec `LEMBED_ERROR_UNSUPPORTED` et un message dans
+`lembed_last_error()`, au lieu de basculer silencieusement sur CPU.
+`LEMBED_PROVIDER_CPU` est la valeur par défaut des structures d'options et il
+n'existe pas de provider « auto » : toute autre valeur est une demande explicite.
+Cela vaut aussi pour `LEMBED_PROVIDER_LLAMACPP` passé à un modèle ONNX et pour
+une valeur hors énumération. Les chemins GGUF (llama.cpp, `ggml-sparse`)
+ignorent le provider comme avant.
+
+La bascule `LEMBED_BACKEND_AUTO` du reranker (modèle ONNX introuvable, entrée
+GGUF correspondante) est conservée : `lembed_reranker_backend_name()` renvoie
+alors `"llama.cpp"` et `LIBEMBEDDING_VERBOSE=1` journalise la bascule.

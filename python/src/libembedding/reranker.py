@@ -15,6 +15,7 @@ from .exceptions import ModelNotFoundError
 from .models import (
     _PROVIDER_MAP,
     _QUANTIZATION_ENUM,
+    _c_string,
     _desc_from_c,
     _is_local_path,
     list_reranker_models,
@@ -194,7 +195,32 @@ class Reranker:
     def info(self) -> ModelDesc:
         """Return runtime model descriptor."""
         desc_ptr = lib.lembed_reranker_desc_v2(self._ctx)
-        return _desc_from_c(desc_ptr.base, desc_ptr)
+        return _desc_from_c(
+            desc_ptr.base,
+            desc_ptr,
+            backend=self.backend,
+            effective_provider=self.provider,
+        )
+
+    @property
+    def backend(self) -> str:
+        """Runtime serving the model: ``"onnxruntime"`` or ``"llama.cpp"``.
+
+        With ``backend="auto"`` a model without ONNX files may be served by
+        its GGUF counterpart; this is where that switch shows.
+        """
+        return _c_string(lib.lembed_reranker_backend_name(self._ctx))
+
+    @property
+    def provider(self) -> str:
+        """Execution provider in use, lowercase (``"cpu"``, ``"cuda"``...).
+
+        A provider other than ``"cpu"`` that cannot be attached raises
+        ``UnsupportedError`` at construction. llama.cpp reports ``"cpu"``.
+        """
+        return _c_string(
+            lib.lembed_reranker_effective_provider(self._ctx)
+        ).lower()
 
     @property
     def name(self) -> str:
