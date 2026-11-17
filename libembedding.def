@@ -50,6 +50,7 @@ lembed_ggml_cpu_features
     lembed_text_embedding_stats
     lembed_text_embedding_stats_v2
     lembed_text_embedding_free
+    lembed_embeddings_truncate
 
     ; ---- Sparse text embedding ----
     lembed_sparse_text_embedding_create
