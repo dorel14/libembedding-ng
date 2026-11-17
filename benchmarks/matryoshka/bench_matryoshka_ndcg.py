@@ -33,14 +33,16 @@ SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sparse"))
+_BENCH_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_BENCH_DIR))
+sys.path.insert(0, str(_BENCH_DIR / "sparse"))
+import _benchmeta as bm
 from bench_sparse_onnx_vs_gguf import load_beir
 
 # Prompts from each model card. Both models are trained with asymmetric
@@ -147,8 +149,20 @@ def main() -> int:
             print(f"  {name:<40} dim {k:>5}: nDCG@10 = {row[str(k)]:.4f}")
         results[name] = row
 
+    run = bm.RunParams(
+        threads=args.threads, batch=args.batch_size, warmup=0, iterations=1,
+        format="onnx", quantization="fp32",
+        dataset=f"BEIR {args.beir.name} ({args.split}, {len(data.docs)} docs, "
+                f"{len(data.queries)} queries, max_length {args.max_length})",
+    )
+    report = bm.build_report(
+        bm.collect_machine_metadata(), run,
+        results={"metric": "nDCG@10", "ndcg_at_10": results},
+        title="Matryoshka truncation: nDCG@10 per dimension",
+    )
+    print(bm.to_markdown(report))
     if args.json:
-        args.json.write_text(json.dumps(results, indent=2), encoding="utf-8")
+        bm.write_json(report, args.json)
     return 0
 
 
