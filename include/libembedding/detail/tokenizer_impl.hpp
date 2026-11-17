@@ -379,6 +379,19 @@ public:
                 /* Check for [CLS] and [SEP] in template */
                 add_special_tokens_ = true;
             }
+            pair_tmpl_.clear();
+            parse_pair_processor(post);
+        }
+
+        /* Truncation strategy used when a pair does not fit */
+        cJSON* trunc = cJSON_GetObjectItem(root, "truncation");
+        if (trunc && cJSON_IsObject(trunc)) {
+            cJSON* st = cJSON_GetObjectItem(trunc, "strategy");
+            if (st && st->valuestring) {
+                if (strcmp(st->valuestring, "OnlyFirst") == 0) trunc_strategy_ = 1;
+                else if (strcmp(st->valuestring, "OnlySecond") == 0) trunc_strategy_ = 2;
+                else trunc_strategy_ = 0;
+            }
         }
 
         /* Added tokens (for [CLS], [SEP], [PAD], [UNK], etc.) */
@@ -424,8 +437,67 @@ public:
         return encode_batch(all_ids);
     }
 
+    /* Encodes (a, b) as a real sequence pair, the way HF tokenizers does with the
+     * tokenizer.json post_processor: special tokens and segment (type) ids come
+     * from the pair template (TemplateProcessing / BertProcessing /
+     * RobertaProcessing), BERT style `[CLS] a [SEP] b [SEP]` when none is
+     * declared. When the pair exceeds max_length it is truncated with the
+     * tokenizer's strategy (default longest_first: trim the longer segment). */
+    void encode_pair(const std::string& a, const std::string& b,
+                     std::vector<int>& ids, std::vector<int>& types) const {
+        std::vector<int> ta, tb;
+        tokenize_body(a, ta);
+        tokenize_body(b, tb);
+
+        std::vector<PairItem> tmpl;
+        if (!pair_tmpl_.empty()) {
+            tmpl = pair_tmpl_;
+        } else {
+            tmpl = {{0, cls_token_id_, 0}, {1, 0, 0}, {0, sep_token_id_, 0},
+                    {2, 0, 1}, {0, sep_token_id_, 1}};
+        }
+        int nspecial = 0;
+        for (const auto& it : tmpl) if (it.kind == 0) nspecial++;
+        const int budget = std::max(0, max_length_ - nspecial);
+
+        size_t na = ta.size(), nb = tb.size();
+        while ((int)(na + nb) > budget) {
+            if (trunc_strategy_ == 1) {
+                if (na == 0) break;
+                na--;
+            } else if (trunc_strategy_ == 2) {
+                if (nb == 0) break;
+                nb--;
+            } else if (na > nb) {
+                na--;
+            } else if (nb > 0) {
+                nb--;
+            } else {
+                break;
+            }
+        }
+        ta.resize(na);
+        tb.resize(nb);
+
+        ids.clear();
+        types.clear();
+        for (const auto& it : tmpl) {
+            if (it.kind == 0) {
+                ids.push_back(it.id);
+                types.push_back(it.type);
+            } else {
+                const std::vector<int>& seg = (it.kind == 1) ? ta : tb;
+                for (int t : seg) {
+                    ids.push_back(t);
+                    types.push_back(it.type);
+                }
+            }
+        }
+    }
+
     EncodingBatch encode_batch(
-        const std::vector<std::vector<int>>& all_ids) const {
+        const std::vector<std::vector<int>>& all_ids,
+        const std::vector<std::vector<int>>* all_types = nullptr) const {
         EncodingBatch result;
         result.seq_length = 0;
         for (const auto& ids : all_ids) {
@@ -451,6 +523,8 @@ public:
             for (int j = 0; j < len; j++) {
                 result.input_ids[i][j] = (int64_t)all_ids[i][j];
                 result.attention_mask[i][j] = 1;
+                if (all_types && j < (int)(*all_types)[i].size())
+                    result.token_type_ids[i][j] = (*all_types)[i][j];
             }
         }
 
@@ -559,25 +633,91 @@ private:
     mutable std::string wp_scratch_;
     mutable std::string bpe_scratch_;
 
-    /* Encode a single text to token IDs */
-    std::vector<int> encode_single(const std::string& text) const {
+    /* One element of a pair template: kind 0 = special token `id`,
+     * 1 = first sequence, 2 = second sequence; `type` is the segment id. */
+    struct PairItem { int kind; int id; int type; };
+    std::vector<PairItem> pair_tmpl_;
+    int trunc_strategy_ = 0; /* 0 longest_first, 1 only_first, 2 only_second */
+
+    /* Reads the pair layout of a post_processor node (recursing into
+     * `Sequence`). Leaves pair_tmpl_ empty when nothing usable is found. */
+    void parse_pair_processor(cJSON* post) {
+        cJSON* ptype = cJSON_GetObjectItem(post, "type");
+        if (!ptype || !ptype->valuestring) return;
+        const std::string t = ptype->valuestring;
+        if (t == "Sequence") {
+            cJSON* procs = cJSON_GetObjectItem(post, "processors");
+            if (procs && cJSON_IsArray(procs)) {
+                int n = cJSON_GetArraySize(procs);
+                for (int i = 0; i < n && pair_tmpl_.empty(); i++)
+                    parse_pair_processor(cJSON_GetArrayItem(procs, i));
+            }
+        } else if (t == "BertProcessing" || t == "RobertaProcessing") {
+            cJSON* sep = cJSON_GetObjectItem(post, "sep");
+            cJSON* cls = cJSON_GetObjectItem(post, "cls");
+            if (!sep || !cls || !cJSON_IsArray(sep) || !cJSON_IsArray(cls)) return;
+            cJSON* sid = cJSON_GetArrayItem(sep, 1);
+            cJSON* cid = cJSON_GetArrayItem(cls, 1);
+            if (!sid || !cid || !cJSON_IsNumber(sid) || !cJSON_IsNumber(cid)) return;
+            const int s = sid->valueint, c = cid->valueint;
+            if (t == "BertProcessing") {
+                pair_tmpl_ = {{0, c, 0}, {1, 0, 0}, {0, s, 0}, {2, 0, 1}, {0, s, 1}};
+            } else {
+                pair_tmpl_ = {{0, c, 0}, {1, 0, 0}, {0, s, 0}, {0, s, 0},
+                              {2, 0, 0}, {0, s, 0}};
+            }
+        } else if (t == "TemplateProcessing") {
+            cJSON* pair = cJSON_GetObjectItem(post, "pair");
+            cJSON* specials = cJSON_GetObjectItem(post, "special_tokens");
+            if (!pair || !cJSON_IsArray(pair)) return;
+            std::vector<PairItem> out;
+            int n = cJSON_GetArraySize(pair);
+            for (int i = 0; i < n; i++) {
+                cJSON* el = cJSON_GetArrayItem(pair, i);
+                cJSON* seq = cJSON_GetObjectItem(el, "Sequence");
+                cJSON* sp = cJSON_GetObjectItem(el, "SpecialToken");
+                if (seq) {
+                    cJSON* id = cJSON_GetObjectItem(seq, "id");
+                    cJSON* ty = cJSON_GetObjectItem(seq, "type_id");
+                    if (!id || !id->valuestring) return;
+                    out.push_back({strcmp(id->valuestring, "B") == 0 ? 2 : 1, 0,
+                                   ty && cJSON_IsNumber(ty) ? ty->valueint : 0});
+                } else if (sp) {
+                    cJSON* id = cJSON_GetObjectItem(sp, "id");
+                    cJSON* ty = cJSON_GetObjectItem(sp, "type_id");
+                    if (!id || !id->valuestring) return;
+                    const int type = ty && cJSON_IsNumber(ty) ? ty->valueint : 0;
+                    cJSON* def = specials ? cJSON_GetObjectItem(specials, id->valuestring) : nullptr;
+                    cJSON* ids = def ? cJSON_GetObjectItem(def, "ids") : nullptr;
+                    if (ids && cJSON_IsArray(ids) && cJSON_GetArraySize(ids) > 0) {
+                        int m = cJSON_GetArraySize(ids);
+                        for (int k = 0; k < m; k++) {
+                            cJSON* v = cJSON_GetArrayItem(ids, k);
+                            if (!v || !cJSON_IsNumber(v)) return;
+                            out.push_back({0, v->valueint, type});
+                        }
+                    } else {
+                        auto vit = vocab_.find(id->valuestring);
+                        if (vit == vocab_.end()) return;
+                        out.push_back({0, vit->second, type});
+                    }
+                } else {
+                    return;
+                }
+            }
+            pair_tmpl_ = out;
+        }
+    }
+
+    /* Normalise, pre-tokenize and sub-tokenize `text`; no special tokens. */
+    void tokenize_body(const std::string& text, std::vector<int>& ids) const {
         /* HuggingFace's basic_tokenizer does strip_accents *then* lowercase when
          * lowercase is on, and BertTokenizer leaves strip_accents following
          * do_lower_case. Gating the whole thing on do_lower_case_ therefore
          * reproduces both settings rather than only the lowercase one. */
         std::string processed =
             do_lower_case_ ? bert_normalize(text) : text;
-
-        std::vector<int> ids;
-
-        /* Add [CLS] for BERT-style models */
-        if (add_special_tokens_) {
-            ids.push_back(cls_token_id_);
-        }
-
-        /* Pre-tokenize into words */
         auto words = basic_tokenize(processed);
-
         for (const auto& word : words) {
             if (type_ == WORDPIECE) {
                 wordpiece_tokenize(word, ids);
@@ -585,6 +725,18 @@ private:
                 bpe_tokenize(word, ids);
             }
         }
+    }
+
+    /* Encode a single text to token IDs */
+    std::vector<int> encode_single(const std::string& text) const {
+        std::vector<int> ids;
+
+        /* Add [CLS] for BERT-style models */
+        if (add_special_tokens_) {
+            ids.push_back(cls_token_id_);
+        }
+
+        tokenize_body(text, ids);
 
         /* Add [SEP] */
         if (add_special_tokens_) {

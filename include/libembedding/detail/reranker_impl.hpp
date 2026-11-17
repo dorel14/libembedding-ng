@@ -377,13 +377,15 @@ lembed_status_t lembed_reranker_rerank(
                  * of 256 a whole request used to be one batch padded to its
                  * longest pair (same defect, same fix as the dense path). */
                 const int n_miss = (int)miss_indices.size();
-                std::vector<std::string> pairs((size_t)n_miss);
+                /* Real sequence pair (post_processor template, segment ids). */
+                std::vector<std::vector<int>> pair_ids((size_t)n_miss);
+                std::vector<std::vector<int>> pair_types((size_t)n_miss);
                 std::vector<int> pair_tokens((size_t)n_miss, 0);
                 for (int i = 0; i < n_miss; i++) {
-                    pairs[(size_t)i] = std::string(query) + " [SEP] " + documents[miss_indices[i]];
-                    pair_tokens[(size_t)i] = std::min(
-                        ctx->max_length,
-                        (int)ctx->onnx.tokenizer.encode(pairs[(size_t)i]).size());
+                    ctx->onnx.tokenizer.encode_pair(query, documents[miss_indices[i]],
+                                                    pair_ids[(size_t)i], pair_types[(size_t)i]);
+                    pair_tokens[(size_t)i] = std::min(ctx->max_length,
+                                                      (int)pair_ids[(size_t)i].size());
                 }
                 std::vector<int> order((size_t)n_miss);
                 for (int i = 0; i < n_miss; i++) order[(size_t)i] = i;
@@ -410,13 +412,15 @@ lembed_status_t lembed_reranker_rerank(
                     onnx_batches++;
                     int bsz = range.end - range.start;
 
-                    std::vector<std::string> pair_texts;
-                    pair_texts.reserve(bsz);
+                    std::vector<std::vector<int>> b_ids, b_types;
+                    b_ids.reserve(bsz);
+                    b_types.reserve(bsz);
                     for (int i = range.start; i < range.end; i++) {
-                        pair_texts.push_back(pairs[(size_t)order[(size_t)i]]);
+                        b_ids.push_back(pair_ids[(size_t)order[(size_t)i]]);
+                        b_types.push_back(pair_types[(size_t)order[(size_t)i]]);
                     }
 
-                    auto enc = ctx->onnx.tokenizer.encode_batch(pair_texts);
+                    auto enc = ctx->onnx.tokenizer.encode_batch(b_ids, &b_types);
                     int seq_len = enc.seq_length;
 
                     std::vector<int64_t> ids_flat(bsz * seq_len);
@@ -427,6 +431,7 @@ lembed_status_t lembed_reranker_rerank(
                         for (int j = 0; j < seq_len; j++) {
                             ids_flat[i * seq_len + j] = enc.input_ids[i][j];
                             mask_flat[i * seq_len + j] = enc.attention_mask[i][j];
+                            type_flat[i * seq_len + j] = enc.token_type_ids[i][j];
                         }
                     }
 

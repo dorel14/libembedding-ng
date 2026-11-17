@@ -220,6 +220,8 @@ print(embeddings.shape)  # (2, 512)
 
 Scores and sorts documents by relevance to a query (cross-encoder).
 
+On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared.
+
 #### Constructor
 
 ```python
