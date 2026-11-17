@@ -1,0 +1,111 @@
+# libembedding - .github/workflows/fuzz.yml
+# Fuzzes the sparse GGUF loader (tests/fuzz/fuzz_gguf_loader.cpp) for 60 s
+# with libFuzzer, ASan and UBSan. Fails on any crash, leak, timeout or
+# sanitizer report and uploads the offending inputs.
+#
+# Auteur: David Orel
+# Version: 1.14.0
+#
+# SPDX-License-Identifier: MIT
+
+name: Fuzz GGUF loader
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "include/libembedding/detail/gguf/**"
+      - "include/libembedding/detail/sparse_text_embedding_gguf_impl.hpp"
+      - "include/libembedding/detail/ggml_cpu_backend.hpp"
+      - "include/libembedding/detail/tokenizer_impl.hpp"
+      - "include/libembedding/gguf_inspect.h"
+      - "tests/fuzz/**"
+      - "tests/test_sparse_gguf.cpp"
+      - "third_party/llama.cpp/ggml/**"
+      - "tests/CMakeLists.txt"
+      - "CMakeLists.txt"
+      - ".github/workflows/fuzz.yml"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Fuzzing time in seconds"
+        required: false
+        default: "60"
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+  CLANG_VERSION: "18"
+
+jobs:
+  fuzz-gguf-loader:
+    name: fuzz_gguf_loader (linux, clang, ASan+UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang, libFuzzer and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libcurl4-openssl-dev \
+            "clang-${CLANG_VERSION}" "libclang-rt-${CLANG_VERSION}-dev"
+          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz" | tar xz
+          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}" >> "$GITHUB_ENV"
+
+      # CPU dispatch off: one static ggml-cpu, no backend module to locate at
+      # run time, and every byte of ggml instrumented. OpenMP off: the harness
+      # runs one thread, and an uninstrumented libomp only adds noise.
+      - name: Configure
+        run: |
+          cmake -S . -B build-fuzz -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER="clang-${CLANG_VERSION}" \
+            -DCMAKE_CXX_COMPILER="clang++-${CLANG_VERSION}" \
+            -DLIBEMBEDDING_BUILD_FUZZERS=ON \
+            -DLIBEMBEDDING_CPU_DISPATCH=OFF \
+            -DGGML_OPENMP=OFF \
+            -DLIBEMBEDDING_BUILD_TESTS=ON \
+            -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
+            -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
+            -DLIBEMBEDDING_BUILD_SHARED=OFF \
+            -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
+
+      - name: Build harness and seed generator
+        run: cmake --build build-fuzz --parallel 4 --target fuzz_gguf_loader test_sparse_gguf
+
+      - name: Sparse GGUF unit tests under ASan + UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: build-fuzz/tests/test_sparse_gguf
+
+      - name: Write seed corpus
+        run: |
+          mkdir -p corpus crashes
+          build-fuzz/tests/test_sparse_gguf --write-fuzz-seeds corpus
+          ls -l corpus
+
+      - name: Fuzz
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          SECONDS_TO_RUN: ${{ github.event.inputs.seconds || '60' }}
+        run: |
+          build-fuzz/tests/fuzz/fuzz_gguf_loader corpus \
+            -max_total_time="$SECONDS_TO_RUN" \
+            -timeout=10 \
+            -rss_limit_mb=2048 \
+            -artifact_prefix=crashes/ \
+            -print_final_stats=1
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-gguf-loader-crashes
+          path: crashes/
+          if-no-files-found: ignore

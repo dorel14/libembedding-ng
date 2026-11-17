@@ -55,6 +55,28 @@ option(LIBEMBEDDING_CPU_DISPATCH "Build every ggml CPU variant and select one at
 # their kernels at run time. ON is for local builds that never leave the
 # machine, never for wheels or release binaries.
 option(LIBEMBEDDING_ARCH_AVX2 "Compile libembedding's own code for AVX2 (not portable)" OFF)
+# libFuzzer harnesses (tests/fuzz/), clang only. ON instruments the whole build
+# -- ggml's gguf reader included, since that is half of the loader under test --
+# with ASan, UBSan and libFuzzer's coverage, so use a dedicated build directory
+# (build-fuzz/) and never ship what it produces.
+option(LIBEMBEDDING_BUILD_FUZZERS "Build libFuzzer harnesses (clang, ASan + UBSan)" OFF)
+if(LIBEMBEDDING_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR MSVC)
+        message(FATAL_ERROR "LIBEMBEDDING_BUILD_FUZZERS needs clang (libFuzzer); "
+                            "configure with -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++")
+    endif()
+    # fuzzer-no-link: coverage counters everywhere, libFuzzer's main() only in
+    # the harness (tests/fuzz/CMakeLists.txt).
+    # UBSan skips third_party/ through an ignorelist instead of switching checks
+    # off globally: ggml reads an enum straight from an untrusted byte (gguf.cpp,
+    # gguf_type) and calls its vec_dot kernels through one generic pointer type
+    # (ggml-cpu.c), both flagged by UBSan and neither ours to patch. Every check
+    # stays on for libembedding's own code, and ASan still covers ggml.
+    add_compile_options(-fsanitize=address,undefined -fsanitize=fuzzer-no-link
+                        "-fsanitize-ignorelist=${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/ubsan_ignorelist.txt"
+                        -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+endif()
 
 # =========================================================================
 # Dependencies
@@ -649,6 +671,10 @@ endif()
 if(LIBEMBEDDING_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(LIBEMBEDDING_BUILD_FUZZERS)
+    add_subdirectory(tests/fuzz)
 endif()
 
 # =========================================================================

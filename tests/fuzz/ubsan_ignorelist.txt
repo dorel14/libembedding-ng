@@ -1,0 +1,16 @@
+# libembedding - tests/fuzz/ubsan_ignorelist.txt
+# Compile-time UBSan ignorelist for the fuzz build (-fsanitize-ignorelist=).
+#
+# third_party/ is vendored and never patched here. ggml loads an enum straight
+# from an untrusted byte (gguf.cpp, gguf_type) and calls its vec_dot kernels
+# through one generic function pointer type; UBSan flags both, and neither is
+# ours to fix. Skipping UBSan instrumentation of third_party/ code keeps every
+# check on for libembedding's own sources. AddressSanitizer is unaffected: this
+# list only has an [undefined] section, so memory errors inside ggml still fail
+# the run.
+#
+# Auteur: David Orel
+# SPDX-License-Identifier: MIT
+
+[undefined]
+src:*/third_party/*
