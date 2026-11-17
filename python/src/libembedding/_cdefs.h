@@ -359,6 +359,7 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(const char* 
 lembed_status_t lembed_sparse_text_embedding_embed(lembed_sparse_embedding_ctx_t* ctx, const char* const* texts, int num_texts, int batch_size, const lembed_sparse_options_t* sparse_opts, lembed_sparse_embeddings_t* result);
 const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);
+lembed_status_t lembed_sparse_text_embedding_set_max_batch_tokens(lembed_sparse_embedding_ctx_t* ctx, int max_batch_tokens);
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx);
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
 void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
@@ -672,6 +673,9 @@ typedef struct {
     double throughput_docs_sec;
     double latency_ms;
     double memory_mb;
+    int workers;
+    int max_batch_tokens;
+    int from_cache;
 } lembed_sparse_tuning_result_t;
 
 lembed_status_t lembed_sparse_best_config(

@@ -28,7 +28,7 @@ EXPECTED_SIZES_64 = {
     "lembed_text_options_t": 88,
     "lembed_text_options_v2_t": 96,
     "lembed_tuning_result_t": 40,
-    "lembed_sparse_tuning_result_t": 48,
+    "lembed_sparse_tuning_result_t": 64,
     "lembed_reranker_tuning_result_t": 48,
     "lembed_unified_tuning_result_t": 64,
     "lembed_autotune_options_t": 48,

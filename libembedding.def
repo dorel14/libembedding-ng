@@ -64,6 +64,7 @@ lembed_ggml_cpu_features
     lembed_sparse_text_embedding_stats
     lembed_sparse_text_embedding_stats_v2
     lembed_sparse_text_embedding_free
+    lembed_sparse_text_embedding_set_max_batch_tokens
 
     ;@IF NOT LIBEMBEDDING_NO_IMAGE
     ; ---- Image embedding ----

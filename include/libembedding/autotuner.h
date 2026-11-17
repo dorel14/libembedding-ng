@@ -241,12 +241,25 @@ typedef struct {
     double throughput_docs_sec;
     double latency_ms;
     double memory_mb;
+    /* Appended fields, filled for the sparse GGUF runtime (0 for ONNX models):
+     * workers: shared-weight workers, to pass as lembed_sparse_options_t.workers
+     *          (0 = the runtime's automatic choice).
+     * max_batch_tokens: token budget per batch, to apply with
+     *          lembed_sparse_text_embedding_set_max_batch_tokens().
+     * from_cache: 1 when the result was read from the tune cache. */
+    int workers;
+    int max_batch_tokens;
+    int from_cache;
 } lembed_sparse_tuning_result_t;
 
 /* Run auto-tuning for sparse embedding
  * Optimizes threads x batch_size for throughput. top_k, min_weight and
  * storage_format change the output vectors, so they are not tuned: the result
- * reports the model defaults. */
+ * reports the model defaults.
+ * model_name may also be a sparse GGUF registry name ("SPLADE-PP-En-v1-GGUF",
+ * cached locally) or a path ending in ".gguf": the GGUF runtime is then tuned
+ * over threads x workers x batch_size x max_batch_tokens. The default
+ * configuration is part of the grid and is returned when no candidate beats it. */
 lembed_status_t lembed_sparse_autotune(
     const char* model_name,
     lembed_autotune_mode_t mode,
