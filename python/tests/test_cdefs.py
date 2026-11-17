@@ -28,7 +28,9 @@ EXPECTED_SIZES_64 = {
     "lembed_text_options_t": 88,
     "lembed_text_options_v2_t": 96,
     "lembed_tuning_result_t": 40,
-    "lembed_sparse_tuning_result_t": 64,
+    "lembed_sparse_tuning_result_t": 48,
+    # v1 (48) + 3 ints = 60, padded to 8.
+    "lembed_sparse_tuning_result_v2_t": 64,
     "lembed_reranker_tuning_result_t": 48,
     "lembed_unified_tuning_result_t": 64,
     "lembed_autotune_options_t": 48,
@@ -54,6 +56,9 @@ EXPECTED_SIZES_32 = {
     "lembed_text_options_v2_t": 80,
     # 3 enums, ptr @12, int @16 -> 24, double @24, int @32 -> 40.
     "lembed_autotune_options_t": 40,
+    # No pointer: same as 64-bit.
+    "lembed_sparse_tuning_result_t": 48,
+    "lembed_sparse_tuning_result_v2_t": 64,
 }
 
 IS_64_BIT = struct.calcsize("P") == 8

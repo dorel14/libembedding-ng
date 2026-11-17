@@ -445,12 +445,8 @@ inline lembed_status_t sparse_autotune_run(const char* model_name,
     return LEMBED_OK;
 }
 
-inline lembed_sparse_tuning_result_t to_sparse_result(const lembed_unified_tuning_result_t& u,
-                                                      bool from_cache = false) {
+inline lembed_sparse_tuning_result_t to_sparse_result(const lembed_unified_tuning_result_t& u) {
     lembed_sparse_tuning_result_t r = {0};
-    r.workers = u.workers;
-    r.max_batch_tokens = u.max_tokens;
-    r.from_cache = from_cache ? 1 : 0;
     r.top_k = u.top_k;
     r.min_weight = u.min_weight;
     r.storage_format = u.storage_format;
@@ -462,19 +458,34 @@ inline lembed_sparse_tuning_result_t to_sparse_result(const lembed_unified_tunin
     return r;
 }
 
-extern "C" lembed_status_t lembed_sparse_autotune(const char* model_name,
-                                                  lembed_autotune_mode_t mode,
-                                                  lembed_sparse_tuning_result_t* result) {
+extern "C" lembed_status_t lembed_sparse_autotune_v2(const char* model_name,
+                                                     lembed_autotune_mode_t mode,
+                                                     lembed_sparse_tuning_result_v2_t* result) {
     if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
-    *result = lembed_sparse_tuning_result_t{0};
+    *result = lembed_sparse_tuning_result_v2_t{};
     return autotune_guard("sparse_autotune", [&]() {
         lembed_unified_tuning_result_t u;
         bool hit = false;
         lembed_status_t s =
             sparse_autotune_run(model_name, {}, mode, sparse_default_objective(), 0.0, &u, &hit);
-        if (s == LEMBED_OK) *result = to_sparse_result(u, hit);
+        if (s == LEMBED_OK) {
+            result->base = to_sparse_result(u);
+            result->workers = u.workers;
+            result->max_batch_tokens = u.max_tokens;
+            result->from_cache = hit ? 1 : 0;
+        }
         return s;
     });
+}
+
+extern "C" lembed_status_t lembed_sparse_autotune(const char* model_name,
+                                                  lembed_autotune_mode_t mode,
+                                                  lembed_sparse_tuning_result_t* result) {
+    if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_sparse_tuning_result_v2_t v2;
+    lembed_status_t s = lembed_sparse_autotune_v2(model_name, mode, &v2);
+    *result = v2.base;
+    return s;
 }
 
 /* NULL clears every sparse entry; otherwise the model's entries only. */

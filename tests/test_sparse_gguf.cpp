@@ -1418,33 +1418,44 @@ static void test_autotune_gguf(void) {
     set_test_env("LOCALAPPDATA", cache_root + "_" + std::to_string((long long)std::time(nullptr)));
     set_test_env("HOME", cache_root + "_" + std::to_string((long long)std::time(nullptr)));
 
-    lembed_sparse_tuning_result_t first;
+    lembed_sparse_tuning_result_v2_t first;
     memset(&first, 0, sizeof(first));
-    if (expect_ok(lembed_sparse_autotune(path.c_str(), LEMBED_AUTOTUNE_QUICK, &first),
+    if (expect_ok(lembed_sparse_autotune_v2(path.c_str(), LEMBED_AUTOTUNE_QUICK, &first),
                   "autotune accepts a .gguf path")) {
         CHECK(first.from_cache == 0, "the first call runs the grid");
-        CHECK(first.threads >= 1 && first.batch_size >= 1, "threads and batch are set");
+        CHECK(first.base.threads >= 1 && first.base.batch_size >= 1,
+              "threads and batch are set");
         CHECK(first.workers >= 0, "workers is set (0 = automatic)");
         CHECK(first.max_batch_tokens >= 1, "max_batch_tokens is set");
         const lembed_sparse_options_t defaults = lembed_sparse_options_default();
-        CHECK(first.top_k == defaults.top_k && first.storage_format == defaults.storage_format &&
-                  first.min_weight == defaults.min_weight,
+        CHECK(first.base.top_k == defaults.top_k &&
+                  first.base.storage_format == defaults.storage_format &&
+                  first.base.min_weight == defaults.min_weight,
               "output-changing options are reported, never tuned");
 
-        lembed_sparse_tuning_result_t second;
+        lembed_sparse_tuning_result_v2_t second;
         memset(&second, 0, sizeof(second));
-        if (expect_ok(lembed_sparse_autotune(path.c_str(), LEMBED_AUTOTUNE_QUICK, &second),
+        if (expect_ok(lembed_sparse_autotune_v2(path.c_str(), LEMBED_AUTOTUNE_QUICK, &second),
                       "second autotune call")) {
             CHECK(second.from_cache == 1, "the second call is answered from the cache");
-            CHECK(second.threads == first.threads && second.workers == first.workers &&
-                      second.batch_size == first.batch_size &&
+            CHECK(second.base.threads == first.base.threads && second.workers == first.workers &&
+                      second.base.batch_size == first.base.batch_size &&
                       second.max_batch_tokens == first.max_batch_tokens,
                   "the cached configuration is the persisted one");
         }
 
+        /* The v1 entry point keeps working and fills the v1 fields only. */
+        lembed_sparse_tuning_result_t v1;
+        memset(&v1, 0, sizeof(v1));
+        if (expect_ok(lembed_sparse_autotune(path.c_str(), LEMBED_AUTOTUNE_QUICK, &v1),
+                      "v1 autotune call")) {
+            CHECK(v1.threads == first.base.threads && v1.batch_size == first.base.batch_size,
+                  "v1 reports the same configuration");
+        }
+
         /* The result is usable: build a context with it and embed. */
         lembed_sparse_options_t opts = lembed_sparse_options_default();
-        opts.num_threads = first.threads;
+        opts.num_threads = first.base.threads;
         opts.workers = first.workers;
         lembed_sparse_embedding_ctx_t* ctx = nullptr;
         if (expect_ok(lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx),

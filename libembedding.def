@@ -163,6 +163,7 @@ lembed_resolve_sparse_model
     ; ---- Sparse / image auto-tuner ----
     lembed_sparse_autotune
     lembed_sparse_best_config
+    lembed_sparse_autotune_v2
 ;@IF NOT LIBEMBEDDING_NO_IMAGE
     lembed_image_autotune
 ;@ENDIF

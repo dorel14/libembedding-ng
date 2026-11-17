@@ -266,8 +266,9 @@ vitesse : ils ne sont plus choisis par le tuner (seuls threads × batch le sont)
 textes. Reranker : threads (cœurs physiques et logiques en QUICK ; + 1, 2, P/2 en
 FULL) × `max_tokens` × batch. Sparse (ONNX) et image : threads × batch.
 
-**Runtime GGUF sparse.** `sparse_autotune()` (et `lembed_sparse_autotune()`)
-acceptent aussi le nom du registre GGUF sparse (`"SPLADE-PP-En-v1-GGUF"`, déjà en
+**Runtime GGUF sparse.** `sparse_autotune()` (et `lembed_sparse_autotune()`, dont
+la structure de résultat est inchangée ; `lembed_sparse_autotune_v2()` renvoie en
+plus `workers`, `max_batch_tokens` et `from_cache`) acceptent aussi le nom du registre GGUF sparse (`"SPLADE-PP-En-v1-GGUF"`, déjà en
 cache local : le tuner ne télécharge jamais) ou un chemin se terminant par
 `.gguf` ; le backend se choisit par le nom, il n'y a pas de paramètre `backend=`.
 La grille est threads × workers (graphes partageant les poids) × batch ×

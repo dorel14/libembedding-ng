@@ -29,14 +29,14 @@ class _FakeLib:
     def __init__(self) -> None:
         self.seen: list[bytes] = []
 
-    def lembed_sparse_autotune(self, name, mode, result):
+    def lembed_sparse_autotune_v2(self, name, mode, result):
         self.seen.append(bytes(name))
-        result.threads = 4
-        result.batch_size = 16
+        result.base.threads = 4
+        result.base.batch_size = 16
         result.workers = 2
         result.max_batch_tokens = 1024
         result.from_cache = len(self.seen) > 1
-        result.throughput_docs_sec = 10.0
+        result.base.throughput_docs_sec = 10.0
         return 0  # LEMBED_OK
 
 

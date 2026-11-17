@@ -673,10 +673,14 @@ typedef struct {
     double throughput_docs_sec;
     double latency_ms;
     double memory_mb;
+} lembed_sparse_tuning_result_t;
+
+typedef struct {
+    lembed_sparse_tuning_result_t base;
     int workers;
     int max_batch_tokens;
     int from_cache;
-} lembed_sparse_tuning_result_t;
+} lembed_sparse_tuning_result_v2_t;
 
 lembed_status_t lembed_sparse_best_config(
     const char* model_name,
@@ -688,6 +692,11 @@ lembed_status_t lembed_sparse_autotune(
     const char* model_name,
     lembed_autotune_mode_t mode,
     lembed_sparse_tuning_result_t* result);
+
+lembed_status_t lembed_sparse_autotune_v2(
+    const char* model_name,
+    lembed_autotune_mode_t mode,
+    lembed_sparse_tuning_result_v2_t* result);
 
 /* ═══ Image Auto-Tuner ═════════════════════════════════════════════ */
 

@@ -490,7 +490,7 @@ def sparse_autotune(
         >>> print(f"Optimal: threads={result.threads}, batch={result.batch_size}")
     """
     mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
-    result = ffi.new("lembed_sparse_tuning_result_t *")
+    result = ffi.new("lembed_sparse_tuning_result_v2_t *")
 
     # Resolve model code
     code = model_name
@@ -500,17 +500,18 @@ def sparse_autotune(
             code = m.model_code
             break
 
-    check_status(lib.lembed_sparse_autotune(code.encode("utf-8"), mode, result))
+    check_status(lib.lembed_sparse_autotune_v2(code.encode("utf-8"), mode, result))
 
+    base = result.base
     return SparseTuningResult(
-        top_k=result.top_k,
-        min_weight=result.min_weight,
-        storage_format=result.storage_format,
-        threads=result.threads,
-        batch_size=result.batch_size,
-        throughput_docs_sec=result.throughput_docs_sec,
-        latency_ms=result.latency_ms,
-        memory_mb=result.memory_mb,
+        top_k=base.top_k,
+        min_weight=base.min_weight,
+        storage_format=base.storage_format,
+        threads=base.threads,
+        batch_size=base.batch_size,
+        throughput_docs_sec=base.throughput_docs_sec,
+        latency_ms=base.latency_ms,
+        memory_mb=base.memory_mb,
         workers=result.workers,
         max_batch_tokens=result.max_batch_tokens,
         from_cache=bool(result.from_cache),

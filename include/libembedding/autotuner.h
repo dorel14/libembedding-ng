@@ -241,16 +241,18 @@ typedef struct {
     double throughput_docs_sec;
     double latency_ms;
     double memory_mb;
-    /* Appended fields, filled for the sparse GGUF runtime (0 for ONNX models):
-     * workers: shared-weight workers, to pass as lembed_sparse_options_t.workers
-     *          (0 = the runtime's automatic choice).
-     * max_batch_tokens: token budget per batch, to apply with
-     *          lembed_sparse_text_embedding_set_max_batch_tokens().
-     * from_cache: 1 when the result was read from the tune cache. */
-    int workers;
-    int max_batch_tokens;
-    int from_cache;
 } lembed_sparse_tuning_result_t;
+
+/* Sparse auto-tuner result, v2: the v1 result plus the GGUF runtime knobs
+ * (0 for ONNX models). */
+typedef struct {
+    lembed_sparse_tuning_result_t base;
+    int workers;           /* shared-weight workers, for lembed_sparse_options_t.workers
+                              (0 = the runtime's automatic choice) */
+    int max_batch_tokens;  /* token budget per batch, to apply with
+                              lembed_sparse_text_embedding_set_max_batch_tokens() */
+    int from_cache;        /* 1 when read from the tune cache, no benchmark ran */
+} lembed_sparse_tuning_result_v2_t;
 
 /* Run auto-tuning for sparse embedding
  * Optimizes threads x batch_size for throughput. top_k, min_weight and
@@ -258,12 +260,20 @@ typedef struct {
  * reports the model defaults.
  * model_name may also be a sparse GGUF registry name ("SPLADE-PP-En-v1-GGUF",
  * cached locally) or a path ending in ".gguf": the GGUF runtime is then tuned
- * over threads x workers x batch_size x max_batch_tokens. The default
- * configuration is part of the grid and is returned when no candidate beats it. */
+ * (see lembed_sparse_autotune_v2). */
 lembed_status_t lembed_sparse_autotune(
     const char* model_name,
     lembed_autotune_mode_t mode,
     lembed_sparse_tuning_result_t* result);
+
+/* Same as lembed_sparse_autotune(), also reporting workers, max_batch_tokens and
+ * whether the result came from the cache. For a GGUF model the grid is
+ * threads x workers x batch_size x max_batch_tokens; the default configuration
+ * is part of the grid and is returned when no candidate beats it. */
+lembed_status_t lembed_sparse_autotune_v2(
+    const char* model_name,
+    lembed_autotune_mode_t mode,
+    lembed_sparse_tuning_result_v2_t* result);
 
 /* Unified auto-tune entry point
  * Routes to the appropriate implementation based on task type.
