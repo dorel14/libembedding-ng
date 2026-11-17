@@ -1398,7 +1398,7 @@ static void test_buffer_and_file_agree_on_every_fixture(void) {
  * from the tune cache (from_cache) with the very same configuration. The tune
  * cache is redirected to a private directory so that no earlier run can turn the
  * first call into a hit. */
-static void set_test_env(const char* name, const std::string& value) {
+[[maybe_unused]] static void set_test_env(const char* name, const std::string& value) {
 #ifdef _WIN32
     _putenv_s(name, value.c_str());
 #else
@@ -1406,7 +1406,7 @@ static void set_test_env(const char* name, const std::string& value) {
 #endif
 }
 
-static void test_autotune_gguf(void) {
+[[maybe_unused]] static void test_autotune_gguf(void) {
     const std::string path = fixture("autotune", VARIANT_PLAIN);
     if (path.empty()) return;
 
@@ -1504,7 +1504,13 @@ int main(int argc, char** argv) {
     test_create_from_path_routes_gguf();
     test_quantised_weights();
     test_inspect_agrees_with_runtime();
+#ifdef _WIN32
+    /* lembed_sparse_autotune*() live in detail/autotune_bench_sparse.hpp, which
+     * only the shared library compiles; the header-only Linux/macOS build of
+     * this test cannot link them. python/tests/test_sparse_autotune_gguf.py
+     * covers the GGUF autotune on every OS. */
     test_autotune_gguf();
+#endif
 #ifdef LIBEMBEDDING_IMPLEMENTATION
     test_buffer_load_matches_file();
     test_buffer_and_file_agree_on_every_fixture();
