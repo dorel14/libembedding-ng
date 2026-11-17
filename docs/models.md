@@ -240,38 +240,31 @@ rapport se régénère avec `python python/tests/model_reference.py --json repor
 Corpus : les 54 textes de `tests/data/tokenizer/corpus.json` (anglais, latin accentué,
 vietnamien, grec, cyrillique, arabe, hébreu, devanagari, CJK, coréen, thaï, emoji,
 ponctuation, accents combinants, pleine chasse) plus un texte de plus de 512 jetons.
-La troncature est fixée à 512 des deux côtés. La colonne *Anglais* exclut un cas limite
-présent sur tous les modèles WordPiece : un mot de plus de 100 caractères
-(`en-long-word`), que HF remplace par `[UNK]` alors que libembedding le découpe (cosinus
-0,36 à 0,88).
+La troncature est fixée à 512 des deux côtés. Mesuré avec la correction de normalisation
+WordPiece de la PR #62 (0 écart d'ids avec HF sur le corpus).
 
 Statut selon le cosinus minimal : **validé** >= 0,999, **dégradé** 0,99 à 0,999,
 **cassé** < 0,99. Mesuré le 2026-11-17 ; les variantes quantifiées sont dans la même
-ligne (plages).
+ligne.
 
-| Modèle | Famille de tokenizer | Cosinus min / moyen (tous) | Anglais | Statut (tous textes) | Statut (anglais) |
-|---|---|---|---|---|---|
-| all-MiniLM-L6-v2 | WordPiece | 0,265-0,282 / 0,743-0,747 | 1,000 | cassé | validé |
-| all-MiniLM-L12-v2 | WordPiece | 0,265-0,275 / 0,733-0,735 | 1,000 | cassé | validé |
-| bge-small-en-v1.5 | WordPiece | 0,623-0,629 / 0,862-0,864 | 1,000 | cassé | validé |
-| bge-base-en-v1.5 | WordPiece | 0,666-0,669 / 0,863-0,864 | 1,000 | cassé | validé |
-| nomic-embed-text-v1.5 | WordPiece | 0,652-0,656 / 0,846-0,850 | 1,000 | cassé | validé |
-| mxbai-embed-large-v1 (quantifié) | WordPiece | 0,527 / 0,835 | 1,000 | cassé | validé |
-| gte-base-en-v1.5 | WordPiece | 0,494-0,519 / 0,798-0,799 | 1,000 | cassé | validé |
-| gte-large-en-v1.5 (quantifié) | WordPiece | 0,628 / 0,858 | 1,000 | cassé | validé |
-| snowflake-arctic-embed-xs / s | WordPiece | 0,815-0,860 / 0,955-0,958 | 1,000 | cassé | validé |
-| snowflake-arctic-embed-m / m-long / l | WordPiece | 0,776-0,853 / 0,929-0,957 | 1,000 | cassé | validé |
-| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0,0015 / 0,343 | 0,034 | cassé | cassé |
-| multilingual-e5-small | Unigram (SentencePiece) | 0,768 / 0,824 | 0,768 | cassé | cassé |
-| clip-vit-base-patch32 (texte) | BPE byte-level | 0,295 / 0,763 | 0,316 | cassé | cassé |
-| Splade_PP_en_v1 (sparse, cosinus des vecteurs) | WordPiece | 0,161 / 0,647 | 1,000 | cassé | validé |
-| jina-reranker-v1-turbo-en (reranker, Pearson des scores) | BPE (non byte-level) | 0,42-0,46 | n/d | cassé | cassé |
+| Modèle | Famille de tokenizer | Cosinus min / moyen (tous) | Anglais min | Statut |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2, L12-v2 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| bge-small-en-v1.5, bge-base-en-v1.5 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| nomic-embed-text-v1.5 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| mxbai-embed-large-v1 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| gte-base-en-v1.5, gte-large-en-v1.5 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| Splade_PP_en_v1 (sparse, cosinus des vecteurs) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0,021 / 0,347 | 0,034 | cassé |
+| multilingual-e5-small | Unigram (SentencePiece) | 0,768 / 0,823 | 0,768 | cassé |
+| clip-vit-base-patch32 (texte) | BPE byte-level | 0,295 / 0,763 | 0,316 | cassé |
+| jina-reranker-v1-turbo-en (reranker, Pearson des scores) | BPE (non byte-level) | 0,42-0,46 | n/d | cassé |
 
-Lecture : **l'anglais sur un modèle WordPiece est exact** (cosinus 1,000, y compris le
-texte de plus de 512 jetons). Tout ce qui n'est pas de l'anglais simple décroche, car le
-normaliseur ne replie que Latin-1 et Latin Extended-A et le tokenizer n'implémente que
-WordPiece et un BPE approximatif. Unigram (XLM-R) et BPE byte-level (CLIP, ModernBERT)
-sont cassés même en anglais. Le reranker construit en outre sa paire comme le texte
+Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
+corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
+BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
+tokenizer (T38). Le reranker construit en outre sa paire comme le texte
 `query [SEP] document`, là où HF encode une vraie paire.
 
 Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de

@@ -10,11 +10,10 @@ file run by Python onnxruntime on HuggingFace ``tokenizers`` ids (see
 ``model_reference.py``). Nothing is downloaded: a model that is not cached, or a
 machine without onnxruntime/tokenizers, skips.
 
-The registry has known tokenizer gaps (Unigram/SentencePiece, byte-level BPE,
-non-Latin normalisation, words over 100 characters), so the assertions encode
-a baseline, not perfection:
+The registry has known tokenizer gaps (Unigram/SentencePiece, byte-level BPE),
+so the assertions encode a baseline, not perfection:
 
-* WordPiece models must match on English (``en_core_min`` >= 0.999);
+* WordPiece models must match on the whole corpus (min cosine >= 0.999);
 * no model may fall below its committed baseline (``data/model_baselines.json``)
   by more than ``SLACK``;
 * a cached model absent from the baseline fails: measure it and add it.
@@ -77,6 +76,7 @@ def test_dense_matches_reference(key):
     floor = EN_CORE_FLOOR.get(base["family"])
     if floor is not None:
         assert core >= floor, f"{name}: English cosine {core:.4f} < {floor}"
+        assert res["all"]["min"] >= floor, f"{name}: min cosine {res['all']['min']:.4f}"
     assert res["all"]["min"] >= base["min"] - SLACK
     assert res["all"]["mean"] >= base["mean"] - SLACK
 
@@ -91,7 +91,7 @@ def test_sparse_matches_reference(key):
     res = ref.measure_sparse(idx, info, directory, ref.load_corpus())
     floor = EN_CORE_FLOOR.get(base["family"])
     if floor is not None:
-        assert ref.english_core(res["per_text"]) >= floor
+        assert res["all"]["min"] >= floor
     assert res["all"]["mean"] >= base["mean"] - SLACK
 
 

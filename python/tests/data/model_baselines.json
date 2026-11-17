@@ -3,104 +3,104 @@
  "models": {
   "text|sentence-transformers/all-MiniLM-L6-v2|model.onnx": {
    "family": "wordpiece",
-   "min": 0.2648,
-   "mean": 0.7429,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|sentence-transformers/all-MiniLM-L6-v2|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.282,
-   "mean": 0.747,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|sentence-transformers/all-MiniLM-L12-v2|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.2749,
-   "mean": 0.7345,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|sentence-transformers/all-MiniLM-L12-v2|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.2645,
-   "mean": 0.7333,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|BAAI/bge-base-en-v1.5|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.6689,
-   "mean": 0.8642,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|BAAI/bge-base-en-v1.5|model_optimized.onnx": {
    "family": "wordpiece",
-   "min": 0.6664,
-   "mean": 0.8634,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|BAAI/bge-small-en-v1.5|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.6289,
-   "mean": 0.8637,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|BAAI/bge-small-en-v1.5|model_optimized.onnx": {
    "family": "wordpiece",
-   "min": 0.6284,
-   "mean": 0.8634,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|nomic-ai/nomic-embed-text-v1.5|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.6559,
-   "mean": 0.8498,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|nomic-ai/nomic-embed-text-v1.5|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.6521,
-   "mean": 0.8459,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2|onnx/model.onnx": {
    "family": "unigram",
-   "min": 0.0015,
-   "mean": 0.3428,
+   "min": 0.0207,
+   "mean": 0.3474,
    "en_core_min": 0.0335
   },
   "text|sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2|model_optimized.onnx": {
    "family": "unigram",
-   "min": 0.0015,
-   "mean": 0.3427,
+   "min": 0.0206,
+   "mean": 0.3473,
    "en_core_min": 0.0334
   },
   "text|intfloat/multilingual-e5-small|onnx/model.onnx": {
    "family": "unigram",
    "min": 0.7675,
-   "mean": 0.8242,
+   "mean": 0.8231,
    "en_core_min": 0.7675
   },
   "text|mixedbread-ai/mxbai-embed-large-v1|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.5265,
-   "mean": 0.8346,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|Alibaba-NLP/gte-base-en-v1.5|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.4942,
-   "mean": 0.7976,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|Alibaba-NLP/gte-base-en-v1.5|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.5187,
-   "mean": 0.7992,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|Alibaba-NLP/gte-large-en-v1.5|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.6279,
-   "mean": 0.8579,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|openai/clip-vit-base-patch32|model.onnx": {
@@ -111,68 +111,68 @@
   },
   "text|snowflake/snowflake-arctic-embed-xs|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.815,
-   "mean": 0.9584,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-xs|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.8265,
-   "mean": 0.9563,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-s|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.8492,
-   "mean": 0.9572,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-s|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.8601,
-   "mean": 0.9546,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-m|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.7764,
-   "mean": 0.9366,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-m|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.7853,
-   "mean": 0.9288,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-m-long|onnx/model.onnx": {
    "family": "wordpiece",
-   "min": 0.8325,
-   "mean": 0.9524,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-m-long|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.8129,
-   "mean": 0.944,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-l|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.8527,
-   "mean": 0.9574,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "text|BAAI/bge-small-en-v1.5|onnx/model_quantized.onnx": {
    "family": "wordpiece",
-   "min": 0.6229,
-   "mean": 0.8625,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "sparse|prithivida/Splade_PP_en_v1|model.onnx": {
    "family": "wordpiece",
-   "min": 0.1605,
-   "mean": 0.6472,
+   "min": 1.0,
+   "mean": 1.0,
    "en_core_min": 1.0
   },
   "reranker|jinaai/jina-reranker-v1-turbo-en|onnx/model.onnx": {

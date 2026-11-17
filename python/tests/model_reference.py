@@ -394,17 +394,9 @@ def main(argv: list[str]) -> int:
 
 
 BASELINE_FILE = Path(__file__).resolve().parent / "data" / "model_baselines.json"
-# English texts the tokenizer gets wrong on every WordPiece model (a word longer
-# than 100 characters: HF emits [UNK], libembedding splits it). Tracked apart so
-# that "English works" stays a testable claim. See the matrix in docs/models.md.
-KNOWN_ENGLISH_GAP = "en-long-word"
-
-
 def english_core(per_text: dict[str, float]) -> float:
-    vals = [
-        v for k, v in per_text.items()
-        if (k.startswith("en-") and k != KNOWN_ENGLISH_GAP) or k == "long"
-    ]
+    """Minimum cosine over the English texts and the text over 512 tokens."""
+    vals = [v for k, v in per_text.items() if k.startswith("en-") or k == "long"]
     return min(vals)
 
 
