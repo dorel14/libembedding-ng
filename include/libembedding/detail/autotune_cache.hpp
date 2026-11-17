@@ -15,6 +15,8 @@
 #include <onnxruntime_c_api.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -25,8 +27,10 @@
 #include <limits>
 #include <ostream>
 #include <sstream>
+#include <functional>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -381,7 +385,17 @@ inline bool json_string_in_file(const std::string& path, const char* key, std::s
  * ========================================================================= */
 
 inline bool write_file_atomic(const std::string& path, const std::string& content) {
-    std::string tmp = path + ".tmp";
+    /* The temporary name is unique per call: with a fixed "<path>.tmp", two
+     * threads (or processes) saving the same entry truncated each other's
+     * file, and the loser's rename then failed or published a torn document.
+     * It still ends in ".json.tmp": the cache cleaners match on that. */
+    static std::atomic<unsigned long long> sequence(0);
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto thread_id = std::hash<std::thread::id>()(std::this_thread::get_id());
+    std::string tmp = path + "." + std::to_string(tick) + "-" +
+                      std::to_string(thread_id) + "-" +
+                      std::to_string(sequence.fetch_add(1, std::memory_order_relaxed)) +
+                      ".json.tmp";
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f.is_open()) return false;
@@ -395,9 +409,17 @@ inline bool write_file_atomic(const std::string& path, const std::string& conten
         }
     }
     std::error_code ec;
-    std::filesystem::rename(tmp, path, ec);
+    /* On Windows, replacing a file another thread has open for reading (or is
+     * itself renaming over) fails transiently with a sharing violation, so the
+     * rename is retried briefly before anything is removed. */
+    for (int attempt = 0; attempt < 50; attempt++) {
+        ec.clear();
+        std::filesystem::rename(tmp, path, ec);
+        if (!ec) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
     if (ec) {
-        /* Some filesystems refuse to replace an existing file; retry once. */
+        /* Some filesystems refuse to replace an existing file: last resort. */
         std::error_code rm;
         std::filesystem::remove(path, rm);
         ec.clear();
