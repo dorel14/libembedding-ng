@@ -299,6 +299,35 @@ static void test_grid_search() {
           "racing is off for the memory objective");
 }
 
+/* The default configuration sits at index 0 of a grid. The tuner must never
+ * return a point that is not strictly better than it. */
+static void test_keep_baseline() {
+    autotune_constraints none;
+    autotune_search_result<int> r;
+    r.grid = {0, 1, 2};
+
+    /* A clearly faster candidate wins. */
+    r.measurements = {meas(10, 11, 100), meas(5, 6, 200), meas(9, 10, 110)};
+    r.best = 1;
+    CHECK(!autotune_keep_baseline(r, 0, LEMBED_OBJECTIVE_THROUGHPUT, none) && r.best == 1,
+          "a better candidate is kept");
+
+    /* A selection that is not better than the baseline falls back to it. */
+    r.measurements = {meas(10, 11, 100), meas(10, 11, 100), meas(12, 13, 80)};
+    r.best = 2;
+    CHECK(autotune_keep_baseline(r, 0, LEMBED_OBJECTIVE_THROUGHPUT, none) && r.best == 0,
+          "a candidate that is not better than the default yields the default");
+    r.best = 1;
+    CHECK(autotune_keep_baseline(r, 0, LEMBED_OBJECTIVE_THROUGHPUT, none) && r.best == 0,
+          "an equal candidate yields the default");
+
+    /* A baseline that failed to run cannot be returned. */
+    r.measurements = {meas(0, 0, 0, 0, false), meas(5, 6, 200), meas(9, 10, 110)};
+    r.best = 1;
+    CHECK(!autotune_keep_baseline(r, 0, LEMBED_OBJECTIVE_THROUGHPUT, none) && r.best == 1,
+          "a failed default does not block the search result");
+}
+
 static void test_racing_protocol() {
     autotune_protocol proto;
     proto.warmup = 0;
@@ -412,6 +441,7 @@ int main() {
     test_objectives();
     test_grid_search();
     test_racing_protocol();
+    test_keep_baseline();
     test_session_cache();
     test_cache_entries();
     std::printf("test_autotune_core: %d passed, %d failed\n", g_pass, g_fail);

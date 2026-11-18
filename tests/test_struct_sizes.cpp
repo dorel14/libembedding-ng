@@ -55,6 +55,7 @@ int main(void) {
     ASSERT_SIZE(lembed_text_options_v2_t, 96);
     ASSERT_SIZE(lembed_tuning_result_t, 40);
     ASSERT_SIZE(lembed_sparse_tuning_result_t, 48);
+    ASSERT_SIZE(lembed_sparse_tuning_result_v2_t, 64);
     ASSERT_SIZE(lembed_reranker_tuning_result_t, 48);
     ASSERT_SIZE(lembed_unified_tuning_result_t, 64);
     ASSERT_SIZE(lembed_autotune_options_t, 48);
@@ -96,6 +97,8 @@ int main(void) {
         ASSERT_SIZE(lembed_tuning_result_t, 40);
         /* int, float, 3 ints (20) padded to 24, + 3 doubles */
         ASSERT_SIZE(lembed_sparse_tuning_result_t, 48);
+        /* v1 (48) + 3 ints = 60, padded to 64 */
+        ASSERT_SIZE(lembed_sparse_tuning_result_v2_t, 64);
         /* 3 ints padded to 16, + 4 doubles */
         ASSERT_SIZE(lembed_reranker_tuning_result_t, 48);
         /* 8 ints/floats (32) + 4 doubles */

@@ -220,6 +220,18 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
                                                               &opts, out);
 }
 
+lembed_status_t lembed_sparse_text_embedding_set_max_batch_tokens(
+        lembed_sparse_embedding_ctx_t* ctx,
+        int max_batch_tokens) {
+    if (!ctx || max_batch_tokens < 0) return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!ctx->gguf) {
+        lembed::detail::set_error("max_batch_tokens applies to the GGUF runtime only");
+        return LEMBED_ERROR_UNSUPPORTED;
+    }
+    ctx->gguf->set_max_batch_tokens(max_batch_tokens);
+    return LEMBED_OK;
+}
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

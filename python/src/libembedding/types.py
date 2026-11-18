@@ -105,6 +105,12 @@ class SparseTuningResult:
     throughput_docs_sec: float
     latency_ms: float
     memory_mb: float
+    # GGUF runtime only (0 for ONNX models). workers: pass as ``workers=``
+    # (0 = automatic); max_batch_tokens: apply with ``set_max_batch_tokens()``.
+    workers: int = 0
+    max_batch_tokens: int = 0
+    # True when the result was read from the tune cache (no benchmark ran).
+    from_cache: bool = False
 
 
 @dataclass(frozen=True)
