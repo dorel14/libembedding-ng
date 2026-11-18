@@ -243,6 +243,53 @@ other names of the ONNX model keep loading the ONNX model.
 
 ---
 
+## Compatibility matrix (reference validation)
+
+A model is *validated* only once libembedding reproduces a reference. The reference
+is the **same ONNX file** run with Python `onnxruntime`, fed with the ids, attention
+mask and token types of HuggingFace `tokenizers`, then pooled and normalised as the
+registry entry says. Weights and runtime are shared, so the gap measured here comes
+from libembedding's tokenizer, input packing and pooling only. The test is
+`python/tests/test_model_reference.py` (marker `network`, skipped when the model is
+not cached or `onnxruntime`/`tokenizers` are missing); the report is regenerated with
+`python python/tests/model_reference.py --json report.json`.
+
+Corpus: the 54 texts of `tests/data/tokenizer/corpus.json` (English, accented Latin,
+Vietnamese, Greek, Cyrillic, Arabic, Hebrew, Devanagari, CJK, Korean, Thai, emoji,
+punctuation, combining marks, full-width) plus a text of more than 512 tokens.
+Truncation is set to 512 on both sides. Measured with the WordPiece normalisation fix
+of PR #62 (0 id mismatches against HF on the corpus).
+
+Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999,
+**broken** < 0.99. Measured on 2026-11-17, quantized siblings in the same row.
+
+| Model | Tokenizer family | Min / mean cosine (all) | English min | Status |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2, L12-v2 | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| bge-small-en-v1.5, bge-base-en-v1.5 | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| nomic-embed-text-v1.5 | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| mxbai-embed-large-v1 (quantized) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| gte-base-en-v1.5, gte-large-en-v1.5 (quantized) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| Splade_PP_en_v1 (sparse, cosine of the vectors) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0.021 / 0.347 | 0.034 | broken |
+| multilingual-e5-small | Unigram (SentencePiece) | 0.768 / 0.823 | 0.768 | broken |
+| clip-vit-base-patch32 (text) | BPE byte-level | 0.295 / 0.763 | 0.316 | broken |
+| jina-reranker-v1-turbo-en (reranker, Pearson of the scores) | BPE (not byte-level) | 0.42-0.46 | n/a | broken |
+
+Reading: **every measured WordPiece model matches the reference** on the whole
+multilingual corpus (lowest min cosine 0.9999999999999984). Unigram (XLM-R) and
+byte-level BPE (CLIP, ModernBERT) are broken even in English: they need their own
+tokenizer (T38). The reranker also builds its pair as the text `query [SEP] document`,
+where HF encodes a real pair.
+
+Not measured (not in the local cache or over 560 MB; the family comes from the
+architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,
+bge-small/large-zh-v1.5, nomic-embed-text-v1 and jina-embeddings-v2 (WordPiece),
+bge-m3, multilingual-e5-base/large, paraphrase-multilingual-mpnet-base-v2 and the
+XLM-R rerankers (Unigram), modernbert-embed-large (byte-level BPE), embeddinggemma-300m
+(SentencePiece), the image models and the GGUF models. These are **not validated**.
+
 ## Querying model information
 
 ### From Python

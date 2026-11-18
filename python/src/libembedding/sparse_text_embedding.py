@@ -439,6 +439,18 @@ class SparseTextEmbedding:
             cache_misses=s.cache_misses,
         )
 
+    def set_max_batch_tokens(self, max_batch_tokens: int) -> None:
+        """Set the token budget per batch of the GGUF runtime (0 = no cap).
+
+        Apply the ``max_batch_tokens`` of :func:`sparse_autotune` with it.
+        Raises for a model that is not run by the GGUF runtime.
+        """
+        check_status(
+            lib.lembed_sparse_text_embedding_set_max_batch_tokens(
+                self._ctx, max_batch_tokens
+            )
+        )
+
     def close(self) -> None:
         if self._ctx is not None:
             lib.lembed_sparse_text_embedding_free(self._ctx)
@@ -459,20 +471,26 @@ def sparse_autotune(
     """Run auto-tuning to find optimal sparse embedding configuration.
 
     Args:
-        model_name: Model name (e.g. "prithivida/Splade_PP_en_v1")
+        model_name: Model name (e.g. "prithivida/Splade_PP_en_v1"), the sparse
+            GGUF registry name ("SPLADE-PP-En-v1-GGUF", must be cached
+            locally) or a local ``.gguf`` path. The backend follows the name,
+            as in :class:`SparseTextEmbedding`.
         full: If True, run the FULL grid, else the QUICK one
 
     Returns:
-        SparseTuningResult with the optimal threads and batch_size. top_k,
+        SparseTuningResult with the optimal threads and batch_size. For a GGUF
+        model it also carries ``workers`` and ``max_batch_tokens``, and never
+        describes a configuration slower than the default one. top_k,
         min_weight and storage_format change the output vectors, so they are
-        not tuned: they report the model defaults.
+        not tuned: they report the model defaults. ``from_cache`` is True when
+        the result came from the tune cache without running a benchmark.
 
     Example:
         >>> result = sparse_autotune("prithivida/Splade_PP_en_v1")
         >>> print(f"Optimal: threads={result.threads}, batch={result.batch_size}")
     """
     mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
-    result = ffi.new("lembed_sparse_tuning_result_t *")
+    result = ffi.new("lembed_sparse_tuning_result_v2_t *")
 
     # Resolve model code
     code = model_name
@@ -482,17 +500,21 @@ def sparse_autotune(
             code = m.model_code
             break
 
-    check_status(lib.lembed_sparse_autotune(code.encode("utf-8"), mode, result))
+    check_status(lib.lembed_sparse_autotune_v2(code.encode("utf-8"), mode, result))
 
+    base = result.base
     return SparseTuningResult(
-        top_k=result.top_k,
-        min_weight=result.min_weight,
-        storage_format=result.storage_format,
-        threads=result.threads,
-        batch_size=result.batch_size,
-        throughput_docs_sec=result.throughput_docs_sec,
-        latency_ms=result.latency_ms,
-        memory_mb=result.memory_mb,
+        top_k=base.top_k,
+        min_weight=base.min_weight,
+        storage_format=base.storage_format,
+        threads=base.threads,
+        batch_size=base.batch_size,
+        throughput_docs_sec=base.throughput_docs_sec,
+        latency_ms=base.latency_ms,
+        memory_mb=base.memory_mb,
+        workers=result.workers,
+        max_batch_tokens=result.max_batch_tokens,
+        from_cache=bool(result.from_cache),
     )
 
 
