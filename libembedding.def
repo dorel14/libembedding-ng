@@ -68,6 +68,7 @@ lembed_ggml_cpu_features
     lembed_sparse_text_embedding_free
     lembed_sparse_text_embedding_backend_name
     lembed_sparse_text_embedding_effective_provider
+    lembed_sparse_text_embedding_set_max_batch_tokens
 
     ;@IF NOT LIBEMBEDDING_NO_IMAGE
     ; ---- Image embedding ----
@@ -170,6 +171,7 @@ lembed_resolve_sparse_model
     ; ---- Sparse / image auto-tuner ----
     lembed_sparse_autotune
     lembed_sparse_best_config
+    lembed_sparse_autotune_v2
 ;@IF NOT LIBEMBEDDING_NO_IMAGE
     lembed_image_autotune
 ;@ENDIF

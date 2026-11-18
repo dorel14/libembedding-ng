@@ -231,6 +231,51 @@ from libembedding import TextEmbedding
 model = TextEmbedding("BAAI/bge-small-en-v1.5", max_length=128)
 ```
 
+## Fidélité du tokenizer (HuggingFace `tokenizers`)
+
+Le tokenizer intégré est comparé à la bibliothèque HuggingFace `tokenizers` sur un
+corpus multilingue (grec, cyrillique, vietnamien, CJK, arabe, hébreu, hindi, thaï,
+coréen, emoji, latin accentué, casse mixte, ponctuation, mots très longs). Les
+références sont des fixtures JSON versionnées dans `tests/data/tokenizer/`, produites
+par `scripts/gen_tokenizer_fixtures.py` ; le test `test_tokenizer_fidelity` n'a besoin
+ni de Python ni du paquet `tokenizers`.
+
+| Famille | Modèles | Statut |
+|---|---|---|
+| WordPiece + BertNormalizer (uncased) | MiniLM, bge-*-en, snowflake, gte-en, nomic, mxbai, SPLADE | identique à HF, 0/54 textes différents |
+| WordPiece, vocabulaire chinois | bge-*-zh | identique à HF, 0/54 |
+| WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identique à HF, 0/54 |
+| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+| BPE byte-level | CLIP texte, ModernBERT | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+
+Couverture de la normalisation (strip accents + minuscules), vérifiée point de code par
+point de code jusqu'à U+2FFFF : Latin (Latin-1, Étendu-A/B, Étendu additionnel dont le
+vietnamien), IPA, diacritiques combinants, grec et copte, grec étendu (polytonique),
+cyrillique, arménien, hébreu, arabe, devanagari, thaï, jamo et syllabes hangul
+(décomposition algorithmique), ponctuation et symboles généraux (jusqu'à U+2BFF),
+kana, CJK, formes pleine chasse, emoji : 0 écart. Reste hors table (1,0 % des points
+de code testés, 1 835 sur 183 376) : formes de compatibilité CJK (U+F900-FAFF et
+U+2F800-2FA1F), capitales cherokee, glagolitique, copte, cyrillique étendu B, deseret
+et autres alphabets rares, lettres indiennes précomposées hors devanagari, formes de
+présentation hébraïques. Ces points de code traversent le tokenizer inchangés, ce qui
+diffère de HF.
+
+Le même travail a corrigé trois écarts de pré-tokenisation avec HF : un mot dont une
+partie est inconnue donne un seul `[UNK]` (et non les morceaux déjà trouvés), un mot
+de plus de 100 caractères donne `[UNK]`, et les ponctuations Unicode, les idéogrammes
+CJK et les caractères de format (espace de largeur nulle, etc.) sont traités comme
+dans HF.
+
+Les options du `BertNormalizer` sont lues indépendamment, comme dans HF : `lowercase`,
+`strip_accents` (absent ou `null` : suit `lowercase`), `clean_text` et
+`handle_chinese_chars`. Un normaliseur `Sequence` est pris en charge pour `Lowercase`,
+`StripAccents` et `NFD`/`NFKD` ; les accents ne sont retirés que si `StripAccents` et une
+décomposition sont tous deux présents. Les modes « minuscules seules » et « accents
+seuls » sont aussi vérifiés point de code par point de code. Le BPE byte-level garde
+son comportement historique (non conforme à HF) jusqu'à sa réécriture ; ses ids sont
+figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
+`tokenizer.json` exact est dans le cache du poste (sinon la famille est ignorée).
+
 ## Recherche de modèles par code
 
 libembedding recherche automatiquement les modèles par nom HuggingFace ou par code de repo ONNX :

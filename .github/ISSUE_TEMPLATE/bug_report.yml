@@ -1,0 +1,53 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issue? Do not file it here: use a private security advisory (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: libembedding-ng version
+      description: "`python -c \"import libembedding; print(libembedding.__version__)\"` or LIBEMBEDDING_VERSION_STRING"
+      placeholder: "1.14.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and architecture
+      placeholder: "Windows 11 x86_64, Ubuntu 24.04 aarch64, macOS 15 arm64"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend (model file type)
+      options:
+        - ".onnx (ONNX Runtime)"
+        - ".gguf (llama.cpp or sparse ggml runtime)"
+        - "Both / not sure"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Registry name, Hugging Face identifier or local file name
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Code or command, input, what you expected, what happened. Include the full error text.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Install method (wheel, header-only, DLL), CPU model, logs.

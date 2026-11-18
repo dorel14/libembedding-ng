@@ -341,6 +341,8 @@ cmake --build . --parallel
 .\run_tests.ps1 --integration  # Include integration tests (downloads models)
 ```
 
+Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: see [SECURITY.md](SECURITY.md).
+
 ### Run Examples
 
 ```powershell

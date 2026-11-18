@@ -129,6 +129,13 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
     const lembed_sparse_options_t* options,
     lembed_sparse_embedding_ctx_t** out);
 
+/* Sets the token budget (batch x sequence length) of a GGUF sparse context; a
+ * larger batch is split to stay under it. 0 = no cap. Returns
+ * LEMBED_ERROR_UNSUPPORTED for a context that is not backed by the GGUF runtime. */
+lembed_status_t lembed_sparse_text_embedding_set_max_batch_tokens(
+    lembed_sparse_embedding_ctx_t* ctx,
+    int max_batch_tokens);
+
 #ifdef __cplusplus
 }
 #endif
