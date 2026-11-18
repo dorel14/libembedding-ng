@@ -140,6 +140,11 @@ lembed_status_t lembed_image_embedding_create(
         lembed_image_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_image_model_info(options->model, &info);
@@ -183,6 +188,9 @@ lembed_status_t lembed_image_embedding_create(
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the image embedding");
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
 
@@ -191,6 +199,11 @@ lembed_status_t lembed_image_embedding_create_from_path(
         const lembed_image_options_t* options,
         lembed_image_embedding_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
 
     try {
         /* Read model.onnx */
@@ -242,6 +255,9 @@ lembed_status_t lembed_image_embedding_create_from_path(
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the image model");
+        return LEMBED_ERROR_IO;
     }
 }
 

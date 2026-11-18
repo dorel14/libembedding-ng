@@ -77,6 +77,11 @@ lembed_status_t lembed_text_embedding_create(
         return LEMBED_ERROR_INVALID_ARGUMENT;
     }
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_text_model_info(options->model, &info);
@@ -130,6 +135,9 @@ lembed_status_t lembed_text_embedding_create(
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the text embedding");
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
 
@@ -232,6 +240,11 @@ lembed_status_t lembed_text_embedding_create_custom(
     if (!model || !out || !model->onnx_data || !model->tokenizer_json)
         return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     try {
         std::unique_ptr<lembed_text_embedding_t,
                         decltype(&lembed_text_embedding_free)>
@@ -259,6 +272,9 @@ lembed_status_t lembed_text_embedding_create_custom(
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the text embedding");
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
 

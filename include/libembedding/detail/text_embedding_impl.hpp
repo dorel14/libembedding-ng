@@ -291,7 +291,12 @@ lembed_status_t lembed_text_embedding_create_from_path(
         return lembed_text_embedding_create_from_gguf_path(dir_path, options, out);
     }
 
-    /* ONNX backend from local directory */
+    /* ONNX backend from local directory. An unavailable provider is answered
+     * with a status, before any file is read and without throwing. */
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
     try {
         std::string onnx_path = std::string(dir_path) + "/model.onnx";
         std::string onnx_data = lembed::detail::read_file_to_string(onnx_path);
@@ -346,6 +351,9 @@ lembed_status_t lembed_text_embedding_create_from_path(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the model");
         return LEMBED_ERROR_IO;
     }
 }

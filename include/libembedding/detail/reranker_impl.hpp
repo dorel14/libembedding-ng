@@ -121,6 +121,9 @@ static lembed_status_t lembed__reranker_create_onnx_impl(
     lembed_status_t s = LEMBED_OK;
     std::string model_dir;
 
+    s = lembed::detail::onnx_provider_precheck((int)options->provider);
+    if (s != LEMBED_OK) return s;
+
     try {
         lembed_model_info_t info;
         s = lembed_get_reranker_model_info(options->model, &info);
@@ -184,6 +187,14 @@ static lembed_status_t lembed__reranker_create_onnx_impl(
         }
         if (model_dir_cstr) lembed_free_string(model_dir_cstr);
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the reranker");
+        if (ctx) {
+            delete ctx->cache;
+            delete ctx;
+        }
+        if (model_dir_cstr) lembed_free_string(model_dir_cstr);
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
 
@@ -279,6 +290,11 @@ lembed_status_t lembed_reranker_create_from_path(
         return lembed_reranker_create_from_gguf_path(path, options, out);
     }
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     lembed_reranker_t* ctx = nullptr;
 
     try {
@@ -342,6 +358,13 @@ lembed_status_t lembed_reranker_create_from_path(
             delete ctx;
         }
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the reranker model");
+        if (ctx) {
+            delete ctx->cache;
+            delete ctx;
+        }
+        return LEMBED_ERROR_IO;
     }
 }
 

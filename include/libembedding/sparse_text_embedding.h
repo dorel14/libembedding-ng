@@ -218,6 +218,11 @@ lembed_status_t lembed_sparse_text_embedding_create(
         lembed_sparse_embedding_ctx_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_sparse_model_info(options->model, &info);
@@ -268,6 +273,9 @@ lembed_status_t lembed_sparse_text_embedding_create(
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the sparse embedding");
+        return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
 
@@ -283,6 +291,11 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
     if (ends_with_gguf(dir_path, strlen(dir_path))) {
         return lembed_sparse_text_embedding_create_from_gguf_path(dir_path, options,
                                                                    out);
+    }
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
     }
 
     try {
@@ -342,6 +355,9 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the sparse model");
+        return LEMBED_ERROR_IO;
     }
 }
 

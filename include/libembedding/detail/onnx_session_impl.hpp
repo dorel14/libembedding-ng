@@ -156,6 +156,83 @@ inline lembed_status_t onnx_create_status(const std::exception& e,
         ? LEMBED_ERROR_UNSUPPORTED : fallback;
 }
 
+/* Non-throwing check for the providers this build can never attach (no
+ * USE_CUDA / USE_DML / USE_TENSORRT, CoreML off Apple, llama.cpp, unknown
+ * value). Returns true and fills *message when `provider` is one of them.
+ *
+ * The create functions call it first through onnx_provider_precheck(), so the
+ * common "explicit provider unavailable" failure is a plain status return and
+ * never an exception crossing the extern "C" boundary: MSVC /EHsc treats
+ * extern "C" functions as nothrow and, under /O2, may drop the handlers
+ * around code it inlined into them. A provider that is compiled in but fails to
+ * attach at runtime still throws from apply_provider_config(). */
+inline bool provider_never_available(int provider, std::string* message) {
+    const char* name = nullptr;
+    const char* why = nullptr;
+    std::string unknown;
+    switch (provider) {
+        case 0: /* CPU */
+            return false;
+        case 1: /* CUDA */
+#ifdef USE_CUDA
+            return false;
+#else
+            name = "CUDA";
+            why = "this build has no CUDA support (USE_CUDA)";
+            break;
+#endif
+        case 2: /* CoreML */
+#if defined(__APPLE__)
+            return false;
+#else
+            name = "CoreML";
+            why = "CoreML exists on Apple platforms only";
+            break;
+#endif
+        case 3: /* DirectML (Windows only, requires onnxruntime-dml) */
+#if (defined(_WIN32) || defined(WIN32)) && defined(USE_DML)
+            return false;
+#else
+            name = "DirectML";
+            why = "this build has no DirectML support (USE_DML)";
+            break;
+#endif
+        case 4: /* TensorRT */
+#ifdef USE_TENSORRT
+            return false;
+#else
+            name = "TensorRT";
+            why = "this build has no TensorRT support (USE_TENSORRT)";
+            break;
+#endif
+        case 5: /* LEMBED_PROVIDER_LLAMACPP */
+            name = "llama.cpp";
+            why = "it is not an ONNX Runtime execution provider; load a .gguf "
+                  "model to use the llama.cpp backend";
+            break;
+        default:
+            unknown = std::to_string(provider);
+            name = unknown.c_str();
+            why = "unknown lembed_execution_provider_t value";
+            break;
+    }
+    if (message) {
+        *message = std::string("Execution provider ") + name +
+                   " was requested but is not available: " + why +
+                   ". Use LEMBED_PROVIDER_CPU (provider=\"cpu\") to run on the CPU.";
+    }
+    return true;
+}
+
+/* LEMBED_OK when `provider` may be attempted, else LEMBED_ERROR_UNSUPPORTED
+ * with the thread-local error set. Never throws for those cases. */
+inline lembed_status_t onnx_provider_precheck(int provider) {
+    std::string message;
+    if (!provider_never_available(provider, &message)) return LEMBED_OK;
+    set_error(message);
+    return LEMBED_ERROR_UNSUPPORTED;
+}
+
 /* Releases an OrtSessionOptions when the scope ends, exception or not. */
 struct SessionOptionsGuard {
     OrtSessionOptions* opts;
@@ -554,59 +631,48 @@ private:
     void apply_provider_config(const OrtApi* api, OrtSessionOptions* opts, int provider) {
         (void)api;
         (void)opts;
+        /* Providers this build can never attach: same check the create
+         * functions run first (onnx_provider_precheck), kept here for direct
+         * callers of load_from_*. */
+        std::string message;
+        if (provider_never_available(provider, &message))
+            throw provider_unavailable_error(message);
+
         switch (provider) {
-            case 0: /* CPU */
-                return;
-            case 1: { /* CUDA */
 #ifdef USE_CUDA
+            case 1: { /* CUDA */
                 OrtCUDAProviderOptions cuda_opts;
                 memset(&cuda_opts, 0, sizeof(cuda_opts));
                 append_or_throw(api,
                     api->SessionOptionsAppendExecutionProvider_CUDA(opts, &cuda_opts),
                     "CUDA");
                 return;
-#else
-                provider_unavailable("CUDA", "this build has no CUDA support (USE_CUDA)");
-#endif
             }
-            case 2: { /* CoreML */
+#endif
 #if defined(__APPLE__)
+            case 2: /* CoreML */
                 append_or_throw(api,
                     OrtSessionOptionsAppendExecutionProvider_CoreML(opts, 0), "CoreML");
                 return;
-#else
-                provider_unavailable("CoreML", "CoreML exists on Apple platforms only");
 #endif
-            }
-            case 3: { /* DirectML (Windows only, requires onnxruntime-dml) */
 #if (defined(_WIN32) || defined(WIN32)) && defined(USE_DML)
+            case 3: /* DirectML (Windows only, requires onnxruntime-dml) */
                 append_or_throw(api,
                     OrtSessionOptionsAppendExecutionProvider_Dml(opts, 0), "DirectML");
                 return;
-#else
-                provider_unavailable("DirectML", "this build has no DirectML support (USE_DML)");
 #endif
-            }
-            case 4: { /* TensorRT */
 #ifdef USE_TENSORRT
+            case 4: { /* TensorRT */
                 OrtTensorRTProviderOptions trt_opts;
                 memset(&trt_opts, 0, sizeof(trt_opts));
                 append_or_throw(api,
                     api->SessionOptionsAppendExecutionProvider_TensorRT(opts, &trt_opts),
                     "TensorRT");
                 return;
-#else
-                provider_unavailable("TensorRT", "this build has no TensorRT support (USE_TENSORRT)");
+            }
 #endif
-            }
-            case 5: /* LEMBED_PROVIDER_LLAMACPP */
-                provider_unavailable("llama.cpp",
-                    "it is not an ONNX Runtime execution provider; load a .gguf "
-                    "model to use the llama.cpp backend");
-            default: {
-                std::string v = std::to_string(provider);
-                provider_unavailable(v.c_str(), "unknown lembed_execution_provider_t value");
-            }
+            default: /* CPU */
+                return;
         }
     }
 };
