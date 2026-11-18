@@ -53,8 +53,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libcurl4-openssl-dev \
             "clang-${CLANG_VERSION}" "libclang-rt-${CLANG_VERSION}-dev"
-          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz" | tar xz
-          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}" >> "$GITHUB_ENV"
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "${ONNXRUNTIME_VERSION}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       # CPU dispatch off: one static ggml-cpu, no backend module to locate at
       # run time, and every byte of ggml instrumented. OpenMP off: the harness

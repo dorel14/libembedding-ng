@@ -74,13 +74,11 @@ jobs:
           # built for 14.0, so nothing lower can load it. Used by CMake
           # (MACOSX_DEPLOYMENT_TARGET) and for the wheel's platform tag.
           echo "MACOS_MIN_VERSION=14.0" >> "$GITHUB_ENV"
-          if [ "$(uname -m)" = "arm64" ]; then
-            curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-osx-arm64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-            echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-osx-arm64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
-          else
-            curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-osx-x86_64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-            echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-osx-x86_64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
-          fi
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh;
+          # NuGet has no osx-x86_64 build).
+          if [ "$(uname -m)" = "arm64" ]; then ort_plat=osx-arm64; else ort_plat=osx-x86_64; fi
+          ort_root="$(bash scripts/fetch_onnxruntime.sh "$ort_plat" "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
@@ -91,21 +89,6 @@ jobs:
           # Install curl via vcpkg (MSVC-compatible import library + headers)
           & "C:\vcpkg\vcpkg.exe" install curl:x64-windows
 
-          # Download ONNX Runtime for Windows
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-win-x64-${{ env.ONNXRUNTIME_VERSION }}.zip"
-          Invoke-WebRequest -Uri $url -OutFile "onnxruntime-win-x64.zip"
-          Expand-Archive -Path "onnxruntime-win-x64.zip" -DestinationPath "onnxruntime-win-x64"
-
-          # The zip may contain a root folder; flatten if needed
-          $inner = Get-ChildItem -Path "onnxruntime-win-x64" -Directory | Where-Object { $_.Name -like "onnxruntime-win-x64*" } | Select-Object -First 1
-          if ($inner) {
-            Write-Host "Flattening nested directory: $($inner.Name)"
-            Move-Item "$($inner.FullName)/*" "onnxruntime-win-x64/" -Force
-            Remove-Item $inner.FullName
-          }
-
-          echo "ONNXRUNTIME_ROOT=${{ github.workspace }}\onnxruntime-win-x64" >> $env:GITHUB_ENV
-
           # vcpkg toolchain so CMake's find_package(CURL) works
           echo "CMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
 
@@ -115,6 +98,14 @@ jobs:
 
           # vcpkg bin dir (for copying DLLs into the wheel)
           echo "VCPKG_BIN=C:\vcpkg\installed\x64-windows\bin" >> $env:GITHUB_ENV
+
+      - name: Fetch ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh win-x64 "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cygpath -w "$(cd "$ort_root" && pwd)")" >> "$GITHUB_ENV"
 
       # ── Build the C++ shared library ─────────────────────────────
       - name: Build shared library
