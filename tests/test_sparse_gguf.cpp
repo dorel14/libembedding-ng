@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -1392,6 +1393,93 @@ static void test_buffer_and_file_agree_on_every_fixture(void) {
 }
 #endif
 
+/* Autotune of the GGUF runtime through the public C API, on a fixture. Checks
+ * the plumbing and the cache, never timings: the second call must be answered
+ * from the tune cache (from_cache) with the very same configuration. The tune
+ * cache is redirected to a private directory so that no earlier run can turn the
+ * first call into a hit. */
+[[maybe_unused]] static void set_test_env(const char* name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
+[[maybe_unused]] static void test_autotune_gguf(void) {
+    const std::string path = fixture("autotune", VARIANT_PLAIN);
+    if (path.empty()) return;
+
+    const std::string cache_root = tmpdir() + "/lembed_sparse_gguf_autotune_cache";
+    const char* old_local = std::getenv("LOCALAPPDATA");
+    const char* old_home = std::getenv("HOME");
+    const std::string saved_local = old_local ? old_local : "";
+    const std::string saved_home = old_home ? old_home : "";
+    set_test_env("LOCALAPPDATA", cache_root + "_" + std::to_string((long long)std::time(nullptr)));
+    set_test_env("HOME", cache_root + "_" + std::to_string((long long)std::time(nullptr)));
+
+    lembed_sparse_tuning_result_v2_t first;
+    memset(&first, 0, sizeof(first));
+    if (expect_ok(lembed_sparse_autotune_v2(path.c_str(), LEMBED_AUTOTUNE_QUICK, &first),
+                  "autotune accepts a .gguf path")) {
+        CHECK(first.from_cache == 0, "the first call runs the grid");
+        CHECK(first.base.threads >= 1 && first.base.batch_size >= 1,
+              "threads and batch are set");
+        CHECK(first.workers >= 0, "workers is set (0 = automatic)");
+        CHECK(first.max_batch_tokens >= 1, "max_batch_tokens is set");
+        const lembed_sparse_options_t defaults = lembed_sparse_options_default();
+        CHECK(first.base.top_k == defaults.top_k &&
+                  first.base.storage_format == defaults.storage_format &&
+                  first.base.min_weight == defaults.min_weight,
+              "output-changing options are reported, never tuned");
+
+        lembed_sparse_tuning_result_v2_t second;
+        memset(&second, 0, sizeof(second));
+        if (expect_ok(lembed_sparse_autotune_v2(path.c_str(), LEMBED_AUTOTUNE_QUICK, &second),
+                      "second autotune call")) {
+            CHECK(second.from_cache == 1, "the second call is answered from the cache");
+            CHECK(second.base.threads == first.base.threads && second.workers == first.workers &&
+                      second.base.batch_size == first.base.batch_size &&
+                      second.max_batch_tokens == first.max_batch_tokens,
+                  "the cached configuration is the persisted one");
+        }
+
+        /* The v1 entry point keeps working and fills the v1 fields only. */
+        lembed_sparse_tuning_result_t v1;
+        memset(&v1, 0, sizeof(v1));
+        if (expect_ok(lembed_sparse_autotune(path.c_str(), LEMBED_AUTOTUNE_QUICK, &v1),
+                      "v1 autotune call")) {
+            CHECK(v1.threads == first.base.threads && v1.batch_size == first.base.batch_size,
+                  "v1 reports the same configuration");
+        }
+
+        /* The result is usable: build a context with it and embed. */
+        lembed_sparse_options_t opts = lembed_sparse_options_default();
+        opts.num_threads = first.base.threads;
+        opts.workers = first.workers;
+        lembed_sparse_embedding_ctx_t* ctx = nullptr;
+        if (expect_ok(lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx),
+                      "context from the tuned configuration") && ctx) {
+            CHECK(lembed_sparse_text_embedding_set_max_batch_tokens(ctx, first.max_batch_tokens) ==
+                      LEMBED_OK,
+                  "the tuned token budget is applicable");
+            CHECK(lembed_sparse_text_embedding_set_max_batch_tokens(ctx, -1) ==
+                      LEMBED_ERROR_INVALID_ARGUMENT,
+                  "a negative token budget is refused");
+            lembed_sparse_text_embedding_free(ctx);
+        }
+    }
+
+    lembed_sparse_tuning_result_t missing;
+    memset(&missing, 0, sizeof(missing));
+    CHECK(lembed_sparse_autotune((tmpdir() + "/lembed_no_such_model.gguf").c_str(),
+                                 LEMBED_AUTOTUNE_QUICK, &missing) != LEMBED_OK,
+          "a missing .gguf is refused");
+
+    if (!saved_local.empty()) set_test_env("LOCALAPPDATA", saved_local);
+    if (!saved_home.empty()) set_test_env("HOME", saved_home);
+}
+
 /* `test_sparse_gguf --write-fuzz-seeds <dir>` writes the fuzzer's seed corpus
  * instead of running the tests (see write_fuzz_seeds()). */
 int main(int argc, char** argv) {
@@ -1416,6 +1504,13 @@ int main(int argc, char** argv) {
     test_create_from_path_routes_gguf();
     test_quantised_weights();
     test_inspect_agrees_with_runtime();
+#ifdef _WIN32
+    /* lembed_sparse_autotune*() live in detail/autotune_bench_sparse.hpp, which
+     * only the shared library compiles; the header-only Linux/macOS build of
+     * this test cannot link them. python/tests/test_sparse_autotune_gguf.py
+     * covers the GGUF autotune on every OS. */
+    test_autotune_gguf();
+#endif
 #ifdef LIBEMBEDDING_IMPLEMENTATION
     test_buffer_load_matches_file();
     test_buffer_and_file_agree_on_every_fixture();

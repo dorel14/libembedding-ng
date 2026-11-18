@@ -226,6 +226,54 @@ et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
 
 ---
 
+## Matrice de compatibilité (validation par référence)
+
+Un modèle n'est *validé* que lorsque libembedding reproduit une référence. La référence
+est le **même fichier ONNX** exécuté avec `onnxruntime` Python, alimenté par les ids, le
+masque d'attention et les types de jetons de `tokenizers` (HuggingFace), puis poolé et
+normalisé comme l'indique l'entrée du registry. Poids et runtime sont communs : l'écart
+mesuré vient uniquement du tokenizer, de la mise en forme des entrées et du pooling de
+libembedding. Le test est `python/tests/test_model_reference.py` (marqueur `network`,
+ignoré si le modèle n'est pas en cache ou si `onnxruntime`/`tokenizers` manquent) ; le
+rapport se régénère avec `python python/tests/model_reference.py --json report.json`.
+
+Corpus : les 54 textes de `tests/data/tokenizer/corpus.json` (anglais, latin accentué,
+vietnamien, grec, cyrillique, arabe, hébreu, devanagari, CJK, coréen, thaï, emoji,
+ponctuation, accents combinants, pleine chasse) plus un texte de plus de 512 jetons.
+La troncature est fixée à 512 des deux côtés. Mesuré avec la correction de normalisation
+WordPiece de la PR #62 (0 écart d'ids avec HF sur le corpus).
+
+Statut selon le cosinus minimal : **validé** >= 0,999, **dégradé** 0,99 à 0,999,
+**cassé** < 0,99. Mesuré le 2026-11-17 ; les variantes quantifiées sont dans la même
+ligne.
+
+| Modèle | Famille de tokenizer | Cosinus min / moyen (tous) | Anglais min | Statut |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2, L12-v2 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| bge-small-en-v1.5, bge-base-en-v1.5 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| nomic-embed-text-v1.5 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| mxbai-embed-large-v1 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| gte-base-en-v1.5, gte-large-en-v1.5 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| Splade_PP_en_v1 (sparse, cosinus des vecteurs) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0,021 / 0,347 | 0,034 | cassé |
+| multilingual-e5-small | Unigram (SentencePiece) | 0,768 / 0,823 | 0,768 | cassé |
+| clip-vit-base-patch32 (texte) | BPE byte-level | 0,295 / 0,763 | 0,316 | cassé |
+| jina-reranker-v1-turbo-en (reranker, Pearson des scores) | BPE (non byte-level) | 0,42-0,46 | n/d | cassé |
+
+Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
+corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
+BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
+tokenizer (T38). Le reranker construit en outre sa paire comme le texte
+`query [SEP] document`, là où HF encode une vraie paire.
+
+Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de
+l'architecture, pas du `tokenizer.json`) : all-mpnet-base-v2, bge-large-en-v1.5,
+bge-small/large-zh-v1.5, nomic-embed-text-v1 et jina-embeddings-v2 (WordPiece), bge-m3,
+multilingual-e5-base/large, paraphrase-multilingual-mpnet-base-v2 et les rerankers XLM-R
+(Unigram), modernbert-embed-large (BPE byte-level), embeddinggemma-300m (SentencePiece),
+les modèles d'image et les modèles GGUF. Ils sont **non validés**.
+
 ## Obtention des informations de modèle
 
 ### Depuis Python

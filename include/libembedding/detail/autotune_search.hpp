@@ -135,6 +135,29 @@ autotune_search_result<Config> autotune_grid_search(const std::vector<Config>& g
     return res;
 }
 
+/* "Never worse than the default": the grid holds the default configuration at
+ * `baseline`. When it ran and meets the constraints, it is kept unless the
+ * selected point has a strictly lower cost under the objective. Returns true
+ * when the selection was changed to the baseline. The tie tolerance of the
+ * search already favours the earliest point, so this is a guard against a
+ * selection that is not an improvement, not the normal path. */
+template <class Config>
+bool autotune_keep_baseline(autotune_search_result<Config>& res, int baseline,
+                            lembed_objective_t objective, const autotune_constraints& c) {
+    if (baseline < 0 || baseline >= (int)res.measurements.size()) return false;
+    const autotune_measurement& base = res.measurements[(size_t)baseline];
+    if (!autotune_satisfies(base, c)) return false;
+    if (res.best == baseline) return false;
+    if (res.best >= 0) {
+        autotune_reference ref = autotune_make_reference(res.measurements, c);
+        double best_cost = autotune_cost(res.measurements[(size_t)res.best], ref, objective);
+        double base_cost = autotune_cost(base, ref, objective);
+        if (best_cost < base_cost) return false;
+    }
+    res.best = baseline;
+    return true;
+}
+
 }} /* namespace lembed::detail */
 
 #endif /* LIBEMBEDDING_DETAIL_AUTOTUNE_SEARCH_HPP */
