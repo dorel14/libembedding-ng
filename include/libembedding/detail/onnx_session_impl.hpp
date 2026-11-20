@@ -9,9 +9,6 @@
 #define LIBEMBEDDING_DETAIL_ONNX_SESSION_IMPL_HPP
 
 #include <onnxruntime_c_api.h>
-#if defined(__APPLE__)
-#include <coreml_provider_factory.h>
-#endif
 
 /* widen_path() below calls MultiByteToWideChar/CP_UTF8 under _WIN32. This
  * header used to rely on another one having pulled <windows.h> in first, which
@@ -651,8 +648,14 @@ private:
 #endif
 #if defined(__APPLE__)
             case 2: /* CoreML */
+                /* Generic, string-keyed entry point (CoreML since ORT 1.20):
+                 * unlike OrtSessionOptionsAppendExecutionProvider_CoreML it
+                 * needs no coreml_provider_factory.h, which only the GitHub
+                 * osx archive ships (the NuGet fallback package does not). */
                 append_or_throw(api,
-                    OrtSessionOptionsAppendExecutionProvider_CoreML(opts, 0), "CoreML");
+                    api->SessionOptionsAppendExecutionProvider(
+                        opts, "CoreML", nullptr, nullptr, 0),
+                    "CoreML");
                 return;
 #endif
 #if (defined(_WIN32) || defined(WIN32)) && defined(USE_DML)
