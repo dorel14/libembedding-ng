@@ -77,8 +77,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libcurl4-openssl-dev
-          curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-x64-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Configure and build C++ tests
         env:

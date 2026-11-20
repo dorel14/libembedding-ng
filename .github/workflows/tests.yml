@@ -60,8 +60,9 @@ jobs:
             echo "CC=gcc-14" >> "$GITHUB_ENV"
             echo "CXX=g++-14" >> "$GITHUB_ENV"
           fi
-          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-${ort_arch}-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-${ort_arch}-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh "linux-${ort_arch}" "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
@@ -69,18 +70,17 @@ jobs:
         run: |
           choco install cmake -y
           & "C:\vcpkg\vcpkg.exe" install curl:x64-windows
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-win-x64-${{ env.ONNXRUNTIME_VERSION }}.zip"
-          Invoke-WebRequest -Uri $url -OutFile "onnxruntime-win-x64.zip"
-          Expand-Archive -Path "onnxruntime-win-x64.zip" -DestinationPath "onnxruntime-win-x64"
-          $inner = Get-ChildItem -Path "onnxruntime-win-x64" -Directory | Where-Object { $_.Name -like "onnxruntime-win-x64*" } | Select-Object -First 1
-          if ($inner) {
-            Move-Item "$($inner.FullName)/*" "onnxruntime-win-x64/" -Force
-            Remove-Item $inner.FullName
-          }
-          echo "ONNXRUNTIME_ROOT=${{ github.workspace }}\onnxruntime-win-x64" >> $env:GITHUB_ENV
           echo "CMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
           echo "CURL_INCLUDE_DIR=C:\vcpkg\installed\x64-windows\include" >> $env:GITHUB_ENV
           echo "CURL_LIBRARY=C:\vcpkg\installed\x64-windows\lib\libcurl.lib" >> $env:GITHUB_ENV
+
+      - name: Fetch ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh win-x64 "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cygpath -w "$(cd "$ort_root" && pwd)")" >> "$GITHUB_ENV"
 
       - name: Configure CMake (Linux)
         if: runner.os == 'Linux'

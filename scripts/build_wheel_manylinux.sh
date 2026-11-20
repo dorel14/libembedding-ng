@@ -59,7 +59,8 @@ echo "== system dependencies"
 dnf install -y bzip2 xz
 
 echo "== ONNX Runtime ${ONNXRUNTIME_VERSION} (${ort_arch})"
-curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}.tgz" | tar xz
+# GitHub release asset, NuGet fallback (see fetch_onnxruntime.sh).
+bash scripts/fetch_onnxruntime.sh "linux-${ort_arch}" "${ONNXRUNTIME_VERSION}" > /dev/null
 ort_root="$PWD/onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}"
 
 echo "== static libcurl over mbedTLS"
