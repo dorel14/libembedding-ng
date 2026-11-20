@@ -128,6 +128,20 @@ inline void ort_check(OrtStatus* status) {
     }
 }
 
+/* Owns an OrtSessionOptions until the session has been created. ort_check()
+ * throws, so every failure between CreateSessionOptions and the release (a
+ * garbage model in CreateSession, a refused provider or option) used to leak
+ * the options. */
+struct OrtSessionOptionsGuard {
+    OrtSessionOptions* opts = nullptr;
+    OrtSessionOptionsGuard() = default;
+    OrtSessionOptionsGuard(const OrtSessionOptionsGuard&) = delete;
+    OrtSessionOptionsGuard& operator=(const OrtSessionOptionsGuard&) = delete;
+    ~OrtSessionOptionsGuard() {
+        if (opts) ort_api()->ReleaseSessionOptions(opts);
+    }
+};
+
 /* Wrapper around an ORT session */
 class OnnxSession {
 public:
@@ -151,9 +165,10 @@ public:
                         int provider = 0 /* CPU */,
                         int quantization = 0) {
         const OrtApi* api = ort_api();
-        OrtSessionOptions* opts = nullptr;
+        OrtSessionOptionsGuard guard;
 
-        ort_check(api->CreateSessionOptions(&opts));
+        ort_check(api->CreateSessionOptions(&guard.opts));
+        OrtSessionOptions* opts = guard.opts;
         ort_check(api->EnableMemPattern(opts));
         ort_check(api->EnableCpuMemArena(opts));
 
@@ -181,7 +196,6 @@ public:
         #else
             ort_check(api->CreateSession(ort_env(), model_path, opts, &session_));
         #endif
-        api->ReleaseSessionOptions(opts);
 
         ort_check(api->GetAllocatorWithDefaultOptions(&allocator_));
         query_io_names();
@@ -193,9 +207,10 @@ public:
                           int provider = 0,
                           int quantization = 0) {
         const OrtApi* api = ort_api();
-        OrtSessionOptions* opts = nullptr;
+        OrtSessionOptionsGuard guard;
 
-        ort_check(api->CreateSessionOptions(&opts));
+        ort_check(api->CreateSessionOptions(&guard.opts));
+        OrtSessionOptions* opts = guard.opts;
         ort_check(api->EnableMemPattern(opts));
         ort_check(api->EnableCpuMemArena(opts));
         ort_check(api->SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL));
@@ -209,7 +224,6 @@ public:
         apply_quantization_config(api, opts, quantization);
 
         ort_check(api->CreateSessionFromArray(ort_env(), data, size, opts, &session_));
-        api->ReleaseSessionOptions(opts);
 
         ort_check(api->GetAllocatorWithDefaultOptions(&allocator_));
         query_io_names();
