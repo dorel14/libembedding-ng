@@ -388,14 +388,23 @@ inline bool write_file_atomic(const std::string& path, const std::string& conten
     /* The temporary name is unique per call: with a fixed "<path>.tmp", two
      * threads (or processes) saving the same entry truncated each other's
      * file, and the loser's rename then failed or published a torn document.
-     * It still ends in ".json.tmp": the cache cleaners match on that. */
+     * It still ends in ".json.tmp": the cache cleaners match on that.
+     *
+     * The name is short and sits next to the target rather than being the
+     * target plus a suffix: entry names already embed the model path, and a
+     * ~45-character suffix pushed real entries past Windows' MAX_PATH, so the
+     * temporary file could not be created and nothing was ever cached. */
     static std::atomic<unsigned long long> sequence(0);
-    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto thread_id = std::hash<std::thread::id>()(std::this_thread::get_id());
-    std::string tmp = path + "." + std::to_string(tick) + "-" +
-                      std::to_string(thread_id) + "-" +
-                      std::to_string(sequence.fetch_add(1, std::memory_order_relaxed)) +
-                      ".json.tmp";
+    const unsigned long long tick =
+        (unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count();
+    const unsigned long long thread_id =
+        (unsigned long long)std::hash<std::thread::id>()(std::this_thread::get_id());
+    const unsigned long long seq = sequence.fetch_add(1, std::memory_order_relaxed);
+    char unique[64];
+    snprintf(unique, sizeof(unique), "~%llx-%llx.json.tmp",
+             (tick * 0x9E3779B97F4A7C15ull) ^ thread_id, seq);
+    const std::filesystem::path parent = std::filesystem::path(path).parent_path();
+    const std::string tmp = parent.empty() ? std::string(unique) : (parent / unique).string();
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f.is_open()) return false;
