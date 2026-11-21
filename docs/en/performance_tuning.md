@@ -264,7 +264,7 @@ Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
 whose result struct is unchanged; `lembed_sparse_autotune_v2()` also returns
 `workers`, `max_batch_tokens` and `from_cache`) also accept the sparse GGUF registry name (`"SPLADE-PP-En-v1-GGUF"`, already
 cached locally: the tuner never downloads) or a path ending in `.gguf`; the
-backend is chosen by the name, there is no `backend=` parameter. The grid is
+backend is chosen by the name (the `backend` option exists only for the reranker and dense text, not for sparse). The grid is
 threads × workers (graphs sharing the weights) × batch × `max_batch_tokens`
 (token budget per batch, 512 by default). `top_k` and `min_weight` are never
 tuned. The default configuration is point 0 of the grid and is returned when no
