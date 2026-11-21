@@ -71,6 +71,29 @@ int main(void) {
         ASSERT(model_path == NULL, "rejected GGUF path must not return a path");
     }
 
+    /* Test: a ".GGUF" path is routed to the GGUF backend like ".gguf".
+     * A garbage file is refused by the GGUF loader, never by the ONNX path. */
+    {
+        const char* names[2] = {"lembed_garbage_case.GGUF", "lembed_garbage_case.gguf"};
+        lembed_status_t st[2] = {LEMBED_OK, LEMBED_OK};
+        for (int i = 0; i < 2; i++) {
+            FILE* f = fopen(names[i], "wb");
+            ASSERT(f != NULL, "garbage gguf file created");
+            if (!f) continue;
+            fwrite("not a gguf model", 1, 16, f);
+            fclose(f);
+            lembed_text_options_t opts = lembed_text_options_default();
+            lembed_text_embedding_t* ctx = NULL;
+            st[i] = lembed_text_embedding_create_from_path(names[i], &opts, &ctx);
+            ASSERT(st[i] != LEMBED_OK, "garbage gguf is refused");
+            ASSERT(ctx == NULL, "context is NULL for garbage gguf");
+            remove(names[i]);
+        }
+        ASSERT(st[0] == st[1], ".GGUF routed like .gguf (same status)");
+        ASSERT(st[0] == LEMBED_ERROR_LLAMA || st[0] == LEMBED_ERROR_GGUF,
+               ".GGUF gets a GGUF-backend error");
+    }
+
     /* Test: create_from_path functions are declared */
     {
         /* Just verify the functions exist and are callable */

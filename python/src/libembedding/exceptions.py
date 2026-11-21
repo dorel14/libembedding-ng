@@ -53,3 +53,11 @@ class BatchSizeError(LembedError):
 
 class LlamaError(LembedError):
     pass
+
+
+class CacheMissError(LembedError):
+    pass
+
+
+class GgufError(LembedError):
+    pass

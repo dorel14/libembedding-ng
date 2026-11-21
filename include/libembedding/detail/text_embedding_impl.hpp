@@ -312,7 +312,16 @@ lembed_status_t lembed_text_embedding_create_from_path(
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
     std::string path_str(dir_path);
-    bool is_gguf = (path_str.size() > 5 && path_str.compare(path_str.size() - 5, 5, ".gguf") == 0);
+    /* ".gguf" suffix, case-insensitive (same rule as the sparse, reranker and
+     * Python paths). */
+    bool is_gguf = false;
+    if (path_str.size() > 5) {
+        std::string ext = path_str.substr(path_str.size() - 5);
+        for (char& ch : ext) {
+            if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        }
+        is_gguf = (ext == ".gguf");
+    }
 
     /* An explicit backend is honoured, never silently overridden by the path. */
     if (is_gguf && options->backend == LEMBED_BACKEND_ONNX) {
