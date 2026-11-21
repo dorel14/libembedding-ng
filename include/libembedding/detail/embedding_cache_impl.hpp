@@ -3,7 +3,7 @@
  * LRU cache implementation for embeddings
  *
  * Auteur: David Orel
- * Version: 1.15.0
+ * Version: 1.16.0
  *
  * SPDX-License-Identifier: MIT
  */
