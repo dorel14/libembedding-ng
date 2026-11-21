@@ -532,6 +532,15 @@ private:
                       "; this runtime supports f32, f16 and q8_0";
                 return false;
             }
+            /* Vectors (biases, layer-norm weights) are the second operand of
+             * ggml_add / ggml_mul, which the CPU backend only implements for
+             * an F32 src1 with an F32 activation: anything else aborts the
+             * process inside ggml. Converters always keep 1-D tensors F32. */
+            if (r.ne1 == 1 && t->type != GGML_TYPE_F32) {
+                err = "tensor '" + r.name + "' is a vector of type " +
+                      ggml_type_name(t->type) + "; vectors must be f32";
+                return false;
+            }
             const bool rows_ok = (r.ne1 == kAnyRows) ? t->ne[1] >= 1 : t->ne[1] == r.ne1;
             if (t->ne[0] != r.ne0 || !rows_ok || t->ne[2] != 1 || t->ne[3] != 1) {
                 char msg[256];
