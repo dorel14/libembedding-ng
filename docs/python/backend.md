@@ -7,6 +7,8 @@ nav_order: 7
 
 Le module `backend` fournit l'auto-détection du backend (ONNX ou llama.cpp) basée sur le nom du modèle ou le chemin du fichier.
 
+> `backend=` n'est une option de constructeur que pour `Reranker`. `TextEmbedding` et `SparseTextEmbedding` n'ont pas ce paramètre : le backend y suit l'extension du modèle. Voir [Routage des modèles](../model_routing.html).
+
 ## Référence
 
 | Fonction | Retour | Description |

@@ -31,6 +31,7 @@ libembedding is a C/C++ and Python library for generating dense, sparse, and ima
 - [Advanced Usage](advanced_usage.html) — Cache, modes, workers, autotune
 - [Quantization](quantization.html) — Modes, `auto` selection, sparse GGUF tensor types
 - [Model routing](model_routing.html) — Which backend serves which model, and how to check
+- [API conventions](api_conventions.html) — Naming, memory ownership, errors, ABI, threads
 - [Troubleshooting](troubleshooting.html) — Symptoms, causes, fixes
 - [Similarity](similarity.html) — Vector comparison
 - [Embedding Cache](python/cache.html) — Embedding cache

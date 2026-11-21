@@ -32,6 +32,7 @@ libembedding est une bibliothèque C/C++ et Python pour générer des embeddings
 - [Usage avancé](advanced_usage.html) — Cache, modes, workers, autotune
 - [Quantification](quantization.html) — Modes, sélection `auto`, types GGUF sparse
 - [Routage des modèles](model_routing.html) — Quel backend pour quel modèle, comment le vérifier
+- [Conventions de l'API](api_conventions.html) — Nommage, propriété mémoire, erreurs, ABI, threads
 - [Dépannage](troubleshooting.html) — Symptômes, causes, corrections
 - [Similarité](similarity.html) — Comparaison de vecteurs
 - [Cache LRU](python/cache.html) — Cache d'embeddings

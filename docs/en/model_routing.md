@@ -41,7 +41,7 @@ The reranker is the only one that exposes a selector: the `backend` field of `le
 - `AUTO`: ONNX Runtime first; **only if the model's ONNX files cannot be found** (`LEMBED_ERROR_MODEL_NOT_FOUND`) does the reranker switch to the GGUF counterpart. An unavailable provider (`LEMBED_ERROR_UNSUPPORTED`) or a broken ONNX model stays an error: it does not trigger a switch (`detail/reranker_impl.hpp`, `lembed_reranker_create`).
 - `lembed_reranker_create_from_path()` sends a path ending in `.gguf` (case-insensitive) to GGUF, and also accepts an ONNX directory (`reranker.h`).
 
-The `backend` field also exists in `lembed_text_options_t`; `lembed_text_embedding_create()` only checks that the value is valid (`detail/text_embedding_onnx_impl.hpp`). For dense text, choose the format through the entry point as above.
+`backend` is an official option of the reranker **only**. The field also exists in `lembed_text_options_t`, but `lembed_text_embedding_create()` only checks that the value is valid and then **ignores it** (`detail/text_embedding_onnx_impl.hpp`). For dense text, choose the format through the entry point as above. See [API conventions](api_conventions.html).
 
 ### `detect_backend()` (Python)
 

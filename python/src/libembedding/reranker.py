@@ -37,7 +37,9 @@ class Reranker:
         batch_size: Internal batch size (default 256).
         offline: If True, use cached models only (default False).
         show_download_progress: Show download progress bar.
-        backend: Backend to use ("auto", "onnx", or "llama").
+        backend: Backend to use ("auto", "onnx", or "llama"). "auto" tries
+            ONNX Runtime and falls back to the GGUF equivalent only when the
+            ONNX files are not found. This option exists on the reranker only.
         num_threads: Deprecated; use ``threads``.
         quantization: Override model quantization mode ("none", "static",
             "dynamic"). If None, uses the model's default.

@@ -24,7 +24,7 @@ Remove in 2.0 (each symbol verified in the repository):
 
 | Item | Where | Replacement |
 |---|---|---|
-| `backend` field and `lembed_backend_t` (`LEMBED_BACKEND_*`) in options; Python `Reranker(backend=...)` | `include/libembedding/types.h` | routing by extension (ADR-001) |
+| ~~`backend` field and `lembed_backend_t` (`LEMBED_BACKEND_*`) in options; Python `Reranker(backend=...)`~~ **Withdrawn 2026-11-21**: kept as a reranker-only option (ADR-001, amendment). Only the ignored `backend` field of `lembed_text_options_t` has no effect. | `include/libembedding/types.h` | none |
 | `lembed_cache_get()` (borrowed pointer, racy) | `include/libembedding/embedding_cache.h` | `lembed_cache_get_copy()` |
 | `lembed_sparse_best_config()` | `include/libembedding/sparse_text_embedding.h` | `lembed_sparse_autotune()` (`autotuner.h`) |
 | Registry entries under a non-MIT-compatible licence: `jinaai/jina-reranker-v2-base-multilingual` (CC-BY-NC-4.0), `onnx-community/embeddinggemma-300m-ONNX` (Gemma Terms), with their enum values | `include/libembedding/model_registry.h` | MIT/Apache-2.0 replacements, validated (fidelity, Recall@K) |
