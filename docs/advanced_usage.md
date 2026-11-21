@@ -241,7 +241,7 @@ ni de Python ni du paquet `tokenizers`.
 | WordPiece + BertNormalizer (uncased) | MiniLM, bge-*-en, snowflake, gte-en, nomic, mxbai, SPLADE | identique à HF, 0/54 textes différents |
 | WordPiece, vocabulaire chinois | bge-*-zh | identique à HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identique à HF, 0/54 |
-| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identique à HF, 0/54 (charsmap précompilé, WhitespaceSplit + Metaspace, Viterbi, fusion des inconnus, byte fallback) ; embeddings à cosinus 1,000 de la référence. Paires du reranker : pas encore couvertes |
 | BPE byte-level | CLIP texte, ModernBERT | non implémenté dans le tokenizer intégré : mesuré, non couvert |
 
 Couverture de la normalisation (strip accents + minuscules), vérifiée point de code par

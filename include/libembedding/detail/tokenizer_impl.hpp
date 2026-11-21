@@ -6,6 +6,7 @@
  * Supports the tokenizer types used by embedding models in the registry:
  * - WordPiece (BERT-style: bge, MiniLM, mpnet, etc.)
  * - BPE (GPT/Sentencepiece-style: nomic, jina, CLIP, etc.)
+ * - Unigram (XLM-R family: precompiled charsmap + Metaspace, see tokenizer_unigram.hpp)
  *
  * Auteur: David Orel
  * Version: 1.14.0
@@ -18,6 +19,7 @@
 
 #include "cJSON.h"
 #include "tokenizer_unicode.hpp"
+#include "tokenizer_unigram.hpp"
 
 #include <climits>
 
@@ -328,7 +330,7 @@ static inline std::vector<std::string> legacy_basic_tokenize(const std::string& 
 
 class TokenizerWrapper {
 public:
-    enum Type { WORDPIECE, BPE };
+    enum Type { WORDPIECE, BPE, UNIGRAM };
 
     TokenizerWrapper()
         : max_length_(512), pad_token_id_(0), cls_token_id_(101),
@@ -358,12 +360,23 @@ public:
             if (mtype && mtype->valuestring) {
                 std::string t = mtype->valuestring;
                 if (t == "BPE" || t == "bpe") type_ = BPE;
+                else if (t == "Unigram") type_ = UNIGRAM;
                 else type_ = WORDPIECE;
+            }
+
+            if (type_ == UNIGRAM) {
+                try {
+                    unigram_.load(model);
+                } catch (...) {
+                    cJSON_Delete(root);
+                    throw;
+                }
+                if (unigram_.unk_id() >= 0) unk_token_id_ = unigram_.unk_id();
             }
 
             /* Load vocabulary */
             cJSON* vocab = cJSON_GetObjectItem(model, "vocab");
-            if (vocab) {
+            if (vocab && type_ != UNIGRAM) {
                 cJSON* item = vocab->child;
                 while (item) {
                     if (item->string && cJSON_IsNumber(item)) {
@@ -444,6 +457,16 @@ public:
          * HF (do_lower_case_ above only drives the legacy BPE path). */
         parse_wordpiece_normalizer(normalizer);
 
+        if (type_ == UNIGRAM) {
+            try {
+                parse_unigram_normalizer(normalizer);
+                parse_metaspace(cJSON_GetObjectItem(root, "pre_tokenizer"));
+            } catch (...) {
+                cJSON_Delete(root);
+                throw;
+            }
+        }
+
         /* Post-processor: detect special tokens to add */
         cJSON* post = cJSON_GetObjectItem(root, "post_processor");
         if (post) {
@@ -452,6 +475,7 @@ public:
                 strcmp(ptype->valuestring, "TemplateProcessing") == 0) {
                 /* Check for [CLS] and [SEP] in template */
                 add_special_tokens_ = true;
+                if (type_ == UNIGRAM) parse_single_template(post);
             }
             pair_tmpl_.clear();
             parse_pair_processor(post);
@@ -836,8 +860,229 @@ private:
         }
     }
 
+    /* Unigram (SentencePiece) state. */
+    UnigramModel unigram_;
+    PrecompiledCharsmap charsmap_;
+    struct NormOp {
+        enum Kind { CHARSMAP, REPLACE_LITERAL, COLLAPSE_SPACES, PREPEND, STRIP } kind;
+        std::string a, b;           /* pattern/content or prepend text */
+        bool left = true, right = true;
+    };
+    std::vector<NormOp> unigram_norm_;
+    MetaspaceConfig metaspace_;
+    /* Single-sequence TemplateProcessing: ids before and after $A. The pair
+     * template is not interpreted here. */
+    std::vector<int> single_prefix_, single_suffix_;
+    bool single_template_ = false;
+
+    /* Normalizer (Sequence or single) -> ordered ops. Supported: Precompiled,
+     * Replace (literal String, or Regex " {2,}" / " +" collapsing spaces),
+     * Prepend, Strip. Other types are ignored. */
+    void parse_unigram_normalizer(const cJSON* normalizer) {
+        unigram_norm_.clear();
+        if (!normalizer) return;
+        auto one = [&](const cJSON* n) {
+            auto get = [&](const char* k) { return cJSON_GetObjectItem(const_cast<cJSON*>(n), k); };
+            const cJSON* t = get("type");
+            if (!t || !t->valuestring) return;
+            const std::string ty = t->valuestring;
+            if (ty == "Precompiled") {
+                const cJSON* c = get("precompiled_charsmap");
+                if (!c || !c->valuestring) throw std::runtime_error("Precompiled normalizer without charsmap");
+                charsmap_.load_base64(c->valuestring);
+                unigram_norm_.push_back({NormOp::CHARSMAP, "", "", true, true});
+            } else if (ty == "Replace") {
+                const cJSON* p = get("pattern");
+                const cJSON* c = get("content");
+                const std::string content = (c && c->valuestring) ? c->valuestring : "";
+                const cJSON* s = p ? cJSON_GetObjectItem(const_cast<cJSON*>(p), "String") : nullptr;
+                const cJSON* r = p ? cJSON_GetObjectItem(const_cast<cJSON*>(p), "Regex") : nullptr;
+                if (s && s->valuestring) {
+                    unigram_norm_.push_back({NormOp::REPLACE_LITERAL, s->valuestring, content, true, true});
+                } else if (r && r->valuestring) {
+                    const std::string re = r->valuestring;
+                    if (re == " {2,}" || re == " +" || re == " {1,}")
+                        unigram_norm_.push_back({NormOp::COLLAPSE_SPACES, re == " {2,}" ? "2" : "1", content, true, true});
+                }
+            } else if (ty == "Prepend") {
+                const cJSON* pr = get("prepend");
+                if (pr && pr->valuestring) unigram_norm_.push_back({NormOp::PREPEND, pr->valuestring, "", true, true});
+            } else if (ty == "Strip") {
+                const cJSON* l = get("strip_left");
+                const cJSON* r = get("strip_right");
+                unigram_norm_.push_back({NormOp::STRIP, "", "", !cJSON_IsFalse(l), !cJSON_IsFalse(r)});
+            }
+        };
+        const cJSON* ty = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "type");
+        if (ty && ty->valuestring && strcmp(ty->valuestring, "Sequence") == 0) {
+            const cJSON* list = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "normalizers");
+            for (const cJSON* sub = cJSON_IsArray(list) ? list->child : nullptr; sub; sub = sub->next) one(sub);
+        } else {
+            one(normalizer);
+        }
+    }
+
+    /* Metaspace: `replacement`, `prepend_scheme` ("always" default, "first",
+     * "never") or the older boolean `add_prefix_space`, `split` (default true).
+     * Looks inside a Sequence pre-tokenizer too. */
+    void parse_metaspace(const cJSON* pre) {
+        metaspace_ = MetaspaceConfig();
+        if (!pre) return;
+        const cJSON* ty = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "type");
+        if (!ty || !ty->valuestring) return;
+        if (strcmp(ty->valuestring, "Sequence") == 0) {
+            const cJSON* list = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "pretokenizers");
+            bool ws_split = false;
+            for (const cJSON* sub = cJSON_IsArray(list) ? list->child : nullptr; sub; sub = sub->next) {
+                const cJSON* st = cJSON_GetObjectItem(const_cast<cJSON*>(sub), "type");
+                if (!st || !st->valuestring) continue;
+                if (strcmp(st->valuestring, "WhitespaceSplit") == 0) ws_split = true;
+                if (strcmp(st->valuestring, "Metaspace") == 0) {
+                    parse_metaspace(sub);   /* resets metaspace_ */
+                    metaspace_.whitespace_split = ws_split;
+                    return;
+                }
+            }
+            return;
+        }
+        if (strcmp(ty->valuestring, "Metaspace") != 0) return;
+        metaspace_.enabled = true;
+        const cJSON* rep = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "replacement");
+        if (rep && rep->valuestring && rep->valuestring[0]) metaspace_.replacement = rep->valuestring;
+        const cJSON* scheme = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "prepend_scheme");
+        const cJSON* aps = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "add_prefix_space");
+        if (scheme && scheme->valuestring) metaspace_.prepend = strcmp(scheme->valuestring, "never") != 0;
+        else if (cJSON_IsFalse(aps)) metaspace_.prepend = false;
+        const cJSON* sp = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "split");
+        if (cJSON_IsFalse(sp)) metaspace_.split = false;
+    }
+
+    /* TemplateProcessing "single": SpecialToken ids around the Sequence A. */
+    void parse_single_template(const cJSON* post) {
+        const cJSON* single = cJSON_GetObjectItem(const_cast<cJSON*>(post), "single");
+        const cJSON* specials = cJSON_GetObjectItem(const_cast<cJSON*>(post), "special_tokens");
+        if (!cJSON_IsArray(single)) return;
+        bool seen_a = false;
+        std::vector<int> pre, suf;
+        for (const cJSON* it = single->child; it; it = it->next) {
+            if (cJSON_GetObjectItem(const_cast<cJSON*>(it), "Sequence")) { seen_a = true; continue; }
+            const cJSON* st = cJSON_GetObjectItem(const_cast<cJSON*>(it), "SpecialToken");
+            const cJSON* name = st ? cJSON_GetObjectItem(const_cast<cJSON*>(st), "id") : nullptr;
+            const cJSON* def = (name && name->valuestring && specials)
+                                   ? cJSON_GetObjectItem(const_cast<cJSON*>(specials), name->valuestring) : nullptr;
+            const cJSON* ids = def ? cJSON_GetObjectItem(const_cast<cJSON*>(def), "ids") : nullptr;
+            if (!cJSON_IsArray(ids)) return;
+            for (const cJSON* x = ids->child; x; x = x->next)
+                (seen_a ? suf : pre).push_back(x->valueint);
+        }
+        if (!seen_a) return;
+        single_prefix_ = pre;
+        single_suffix_ = suf;
+        single_template_ = true;
+    }
+
+    /* Normalizer ops, then Metaspace, then one Viterbi per pre-token. */
+    void unigram_encode(const std::string& text, std::vector<int>& ids) const {
+        std::string s = text;
+        for (const NormOp& op : unigram_norm_) {
+            switch (op.kind) {
+            case NormOp::CHARSMAP: s = charsmap_.normalize(s); break;
+            case NormOp::PREPEND: s = op.a + s; break;
+            case NormOp::STRIP: {
+                size_t b = 0, e = s.size();
+                if (op.left) while (b < e && (s[b] == ' ' || s[b] == '\t' || s[b] == '\n' || s[b] == '\r')) b++;
+                if (op.right) while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\n' || s[e - 1] == '\r')) e--;
+                s = s.substr(b, e - b);
+                break;
+            }
+            case NormOp::REPLACE_LITERAL: {
+                if (op.a.empty()) break;
+                std::string o;
+                size_t i = 0, f;
+                while ((f = s.find(op.a, i)) != std::string::npos) {
+                    o.append(s, i, f - i);
+                    o += op.b;
+                    i = f + op.a.size();
+                }
+                o.append(s, i, std::string::npos);
+                s.swap(o);
+                break;
+            }
+            case NormOp::COLLAPSE_SPACES: {
+                const size_t minrun = op.a == "2" ? 2 : 1;
+                std::string o;
+                o.reserve(s.size());
+                for (size_t i = 0; i < s.size();) {
+                    if (s[i] != ' ') { o.push_back(s[i++]); continue; }
+                    size_t j = i;
+                    while (j < s.size() && s[j] == ' ') j++;
+                    if (j - i >= minrun) o += op.b; else o.append(s, i, j - i);
+                    i = j;
+                }
+                s.swap(o);
+                break;
+            }
+            }
+        }
+        if (s.empty()) return;
+
+        if (!metaspace_.enabled) {
+            unigram_.encode_word(s, ids);
+            return;
+        }
+        if (!metaspace_.whitespace_split) {
+            metaspace_encode(s, ids);
+            return;
+        }
+        /* WhitespaceSplit, then Metaspace on each word: whitespace runs are
+         * dropped instead of becoming lone replacement pieces. */
+        std::string word;
+        for (size_t i = 0; i < s.size();) {
+            size_t len = 1;
+            if (utf8_is_whitespace(s, i, len)) {
+                if (!word.empty()) { metaspace_encode(word, ids); word.clear(); }
+            } else {
+                word.append(s, i, len);
+            }
+            i += len;
+        }
+        if (!word.empty()) metaspace_encode(word, ids);
+    }
+
+    void metaspace_encode(const std::string& s, std::vector<int>& ids) const {
+        const std::string& rep = metaspace_.replacement;
+        std::string m;
+        m.reserve(s.size() + rep.size() * 2);
+        for (char c : s) {
+            if (c == ' ') m += rep; else m.push_back(c);
+        }
+        if (metaspace_.prepend && m.compare(0, rep.size(), rep) != 0) m.insert(0, rep);
+        if (!metaspace_.split) {
+            unigram_.encode_word(m, ids);
+            return;
+        }
+        /* split, merged with next: each replacement starts a new word */
+        size_t start = 0;
+        std::string word;
+        for (size_t i = 1; i <= m.size();) {
+            if (i == m.size() || m.compare(i, rep.size(), rep) == 0) {
+                word.assign(m, start, i - start);
+                unigram_.encode_word(word, ids);
+                start = i;
+                i += rep.size();
+                if (i > m.size()) break;
+            } else {
+                i++;
+            }
+        }
+    }
+
     /* Normalise, pre-tokenize and sub-tokenize `text`; no special tokens. */
     void tokenize_body(const std::string& text, std::vector<int>& ids) const {
+        if (type_ == UNIGRAM) {
+            unigram_encode(text, ids);
+            return;
+        }
         /* Normalise and pre-tokenize into words. WordPiece follows HF's
          * BertNormalizer switches; byte-level BPE keeps its legacy path. */
         std::vector<std::string> words;
@@ -861,6 +1106,31 @@ private:
     /* Encode a single text to token IDs */
     std::vector<int> encode_single(const std::string& text) const {
         std::vector<int> ids;
+
+        if (type_ == UNIGRAM) {
+            /* <s> $A </s> (or whatever the single template says) */
+            if (add_special_tokens_) {
+                if (single_template_) ids = single_prefix_;
+                else ids.push_back(cls_token_id_);
+            }
+            tokenize_body(text, ids);
+            if (add_special_tokens_) {
+                if (single_template_) ids.insert(ids.end(), single_suffix_.begin(), single_suffix_.end());
+                else ids.push_back(sep_token_id_);
+            }
+            if ((int)ids.size() > max_length_) {
+                ids.resize(max_length_);
+                if (add_special_tokens_) {
+                    if (single_template_ && !single_suffix_.empty()) {
+                        const size_t k = std::min(single_suffix_.size(), ids.size());
+                        std::copy(single_suffix_.end() - k, single_suffix_.end(), ids.end() - k);
+                    } else if (!single_template_) {
+                        ids.back() = sep_token_id_;
+                    }
+                }
+            }
+            return ids;
+        }
 
         /* Add [CLS] for BERT-style models */
         if (add_special_tokens_) {
