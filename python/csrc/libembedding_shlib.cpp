@@ -137,6 +137,14 @@ void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_n
     lembed::detail::lembed_autotune_unified_clear_cache(task, model_name);
 }
 
+/* The implementation is an inline C++ function in lembed::detail. Without this
+ * wrapper the .def export only resolved through MSVC's match on the decorated
+ * name, which exists only while some call stays out of line: once the
+ * optimiser inlined the last one, the link failed with LNK2001. */
+void lembed_reranker_autotune_clear_cache(const char* model_name) {
+    lembed::detail::lembed_reranker_autotune_clear_cache(model_name);
+}
+
 lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task) {
     return lembed::detail::autotune_options_default(task);
 }
