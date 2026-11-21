@@ -42,7 +42,7 @@ Le reranker est le seul à exposer un sélecteur : champ `backend` de `lembed_re
 - `AUTO` : ONNX Runtime d'abord ; **seulement si les fichiers ONNX du modèle sont introuvables** (`LEMBED_ERROR_MODEL_NOT_FOUND`), le reranker bascule sur l'équivalent GGUF. Un fournisseur indisponible (`LEMBED_ERROR_UNSUPPORTED`) ou un modèle ONNX cassé reste une erreur : il ne provoque pas de bascule (`detail/reranker_impl.hpp`, `lembed_reranker_create`).
 - `lembed_reranker_create_from_path()` envoie un chemin finissant par `.gguf` (casse ignorée) vers GGUF, et accepte aussi un répertoire ONNX (`reranker.h`).
 
-Le champ `backend` existe aussi dans `lembed_text_options_t` ; `lembed_text_embedding_create()` n'y vérifie que la validité de la valeur (`detail/text_embedding_onnx_impl.hpp`). Pour le texte dense, choisir le format par le point d'entrée comme ci-dessus.
+`backend` est une option officielle du reranker **uniquement**. Le champ existe aussi dans `lembed_text_options_t`, mais `lembed_text_embedding_create()` n'en vérifie que la validité puis l'**ignore** (`detail/text_embedding_onnx_impl.hpp`). Pour le texte dense, choisir le format par le point d'entrée comme ci-dessus. Voir [Conventions de l'API](api_conventions.html).
 
 ### `detect_backend()` (Python)
 

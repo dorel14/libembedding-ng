@@ -6,7 +6,16 @@ nav_exclude: true
 
 # ADR-001: Backend routing by file extension
 
-Status: Accepted (2026-11-08)
+Status: Accepted (2026-11-08). Amended 2026-11-21: see "Amendment" below.
+
+## Amendment (2026-11-21)
+
+The `backend` field is kept as an official option of the **reranker only**
+(`lembed_reranker_options_t.backend`, Python `Reranker(backend=...)`): it forces a
+backend, and in `AUTO` falls back from ONNX to GGUF when the ONNX files are missing.
+In `lembed_text_options_t` it is validated then ignored. It is no longer slated for
+removal in 2.0. The bullets of the Decision section below that call it deprecated or
+removed are superseded by this paragraph; the routing by extension is unchanged.
 
 ## Context
 
