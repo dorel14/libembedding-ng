@@ -188,95 +188,22 @@ public:
                         int max_length, std::string& err) {
         std::unique_ptr<Weights> weights(new Weights());
         if (!weights->open(path, err)) return false;
-
-        /* Before anything is allocated: telling somebody their dense file has no
-         * sparse head is cheap, and doing it after a hundred megabytes of weights
-         * have been copied is not. */
-        if (!accept(weights->probe(), err)) return false;
-
-        if (!weights->load_tensors(err)) return false;
-
-        const SpladeHparams& hp = weights->hparams();
-
-        std::vector<std::string> tokens;
-        if (!weights->probe().get_arr_str("tokenizer.ggml.tokens", tokens)) {
-            err = "GGUF has no tokenizer.ggml.tokens vocabulary array";
-            return false;
-        }
-        {
-            std::string model;
-            if (weights->probe().get_str("tokenizer.ggml.model", model) &&
-                model != "bert" && model != "bert-wordpiece") {
-                err = "GGUF declares tokenizer model '" + model +
-                      "', which this runtime does not implement (expected bert)";
-                return false;
-            }
-        }
-        if ((int)tokens.size() != hp.n_vocab) {
-            char msg[192];
-            snprintf(msg, sizeof(msg),
-                     "GGUF vocabulary holds %d entries but %s.vocab_size is %d",
-                     (int)tokens.size(), hp.arch.c_str(), hp.n_vocab);
-            err = msg;
-            return false;
-        }
-
-        max_length_ = (max_length > 0) ? std::min(max_length, hp.n_pos) : hp.n_pos;
-
-        int pad_id = -1, unk_id = -1, cls_id = -1, sep_id = -1;
-        read_token_id(weights->probe(), "tokenizer.ggml.pad_token_id", pad_id);
-        read_token_id(weights->probe(), "tokenizer.ggml.unk_token_id", unk_id);
-        read_token_id(weights->probe(), "tokenizer.ggml.cls_token_id", cls_id);
-        read_token_id(weights->probe(), "tokenizer.ggml.separator_token_id", sep_id);
-        if (sep_id < 0) {
-            read_token_id(weights->probe(), "tokenizer.ggml.eos_token_id", sep_id);
-        }
-
-        /* [CLS] and [SEP] go on as a pair or not at all: encode_single() emits
-         * both, and half a delimiter pair is a different sequence, not an
-         * approximation of the right one. */
-        bool add_bos = true, add_eos = true;
-        weights->probe().get_bool("tokenizer.ggml.adding_bos_token", add_bos);
-        weights->probe().get_bool("tokenizer.ggml.adding_eos_token", add_eos);
-        const bool add_special = add_bos && add_eos;
-
-        if (!tok_.load_vocab(tokens, pad_id, unk_id, add_special ? cls_id : -1,
-                             add_special ? sep_id : -1, max_length_, add_special,
-                             err)) {
-            return false;
-        }
-        if (tok_.pad_token_id() < 0 || tok_.pad_token_id() >= hp.n_vocab) {
-            err = "GGUF pad token id is outside the vocabulary";
-            return false;
-        }
-
-        vocab_size_ = hp.n_vocab;
-        special_ids_ = weights->special_ids();
-        path_ = path ? path : "";
-
-        /* The vocabulary is the last thing read out of the header, so the file's
-         * blob -- as large as the file itself -- can go now. What stays is the
-         * weight buffer. */
-        weights->release_header();
-
-        resolve_parallelism(n_threads, workers, total_threads_);
-        std::vector<std::unique_ptr<Worker>> pool;
-        for (int i = 0; i < workers; i++) {
-            std::unique_ptr<Worker> w(new Worker());
-            w->backend = lembed::detail::ggml_cpu_backend_init();
-            if (!w->backend) {
-                err = lembed::detail::ggml_cpu_device()
-                          ? "cannot initialise the ggml CPU backend"
-                          : lembed::detail::ggml_cpu_backend_missing_message();
-                return false;
-            }
-            pool.push_back(std::move(w));
-        }
-
-        weights_ = std::move(weights);
-        workers_ = std::move(pool);
-        return true;
+        return finish_load(std::move(weights), path ? path : "", n_threads, workers,
+                           max_length, err);
     }
+
+    /* Same as load_from_file(), from a GGUF image in memory. Every check after
+     * the parse is shared with the file path, so the fuzzer that drives this
+     * entry point covers the loader the public API uses. `data` can be released
+     * once this returns. */
+    bool load_from_buffer(const void* data, size_t size, int n_threads, int workers,
+                          int max_length, std::string& err) {
+        std::unique_ptr<Weights> weights(new Weights());
+        if (!weights->open_buffer(data, size, err)) return false;
+        return finish_load(std::move(weights), std::string(), n_threads, workers,
+                           max_length, err);
+    }
+
 
     /* The thread budget and how it is split.
      *
@@ -425,6 +352,99 @@ public:
 #endif
 
 private:
+    /* Everything after the header parse: capability check, tensors, vocabulary,
+     * tokenizer, workers. `source` is the file path, empty for a buffer. */
+    bool finish_load(std::unique_ptr<Weights> weights, const std::string& source,
+                     int n_threads, int workers, int max_length, std::string& err) {
+        /* Before anything is allocated: telling somebody their dense file has no
+         * sparse head is cheap, and doing it after a hundred megabytes of weights
+         * have been copied is not. */
+        if (!accept(weights->probe(), err)) return false;
+
+        if (!weights->load_tensors(err)) return false;
+
+        const SpladeHparams& hp = weights->hparams();
+
+        std::vector<std::string> tokens;
+        if (!weights->probe().get_arr_str("tokenizer.ggml.tokens", tokens)) {
+            err = "GGUF has no tokenizer.ggml.tokens vocabulary array";
+            return false;
+        }
+        {
+            std::string model;
+            if (weights->probe().get_str("tokenizer.ggml.model", model) &&
+                model != "bert" && model != "bert-wordpiece") {
+                err = "GGUF declares tokenizer model '" + model +
+                      "', which this runtime does not implement (expected bert)";
+                return false;
+            }
+        }
+        if ((int)tokens.size() != hp.n_vocab) {
+            char msg[192];
+            snprintf(msg, sizeof(msg),
+                     "GGUF vocabulary holds %d entries but %s.vocab_size is %d",
+                     (int)tokens.size(), hp.arch.c_str(), hp.n_vocab);
+            err = msg;
+            return false;
+        }
+
+        max_length_ = (max_length > 0) ? std::min(max_length, hp.n_pos) : hp.n_pos;
+
+        int pad_id = -1, unk_id = -1, cls_id = -1, sep_id = -1;
+        read_token_id(weights->probe(), "tokenizer.ggml.pad_token_id", pad_id);
+        read_token_id(weights->probe(), "tokenizer.ggml.unk_token_id", unk_id);
+        read_token_id(weights->probe(), "tokenizer.ggml.cls_token_id", cls_id);
+        read_token_id(weights->probe(), "tokenizer.ggml.separator_token_id", sep_id);
+        if (sep_id < 0) {
+            read_token_id(weights->probe(), "tokenizer.ggml.eos_token_id", sep_id);
+        }
+
+        /* [CLS] and [SEP] go on as a pair or not at all: encode_single() emits
+         * both, and half a delimiter pair is a different sequence, not an
+         * approximation of the right one. */
+        bool add_bos = true, add_eos = true;
+        weights->probe().get_bool("tokenizer.ggml.adding_bos_token", add_bos);
+        weights->probe().get_bool("tokenizer.ggml.adding_eos_token", add_eos);
+        const bool add_special = add_bos && add_eos;
+
+        if (!tok_.load_vocab(tokens, pad_id, unk_id, add_special ? cls_id : -1,
+                             add_special ? sep_id : -1, max_length_, add_special,
+                             err)) {
+            return false;
+        }
+        if (tok_.pad_token_id() < 0 || tok_.pad_token_id() >= hp.n_vocab) {
+            err = "GGUF pad token id is outside the vocabulary";
+            return false;
+        }
+
+        vocab_size_ = hp.n_vocab;
+        special_ids_ = weights->special_ids();
+        path_ = source;
+
+        /* The vocabulary is the last thing read out of the header, so the file's
+         * blob -- as large as the file itself -- can go now. What stays is the
+         * weight buffer. */
+        weights->release_header();
+
+        resolve_parallelism(n_threads, workers, total_threads_);
+        std::vector<std::unique_ptr<Worker>> pool;
+        for (int i = 0; i < workers; i++) {
+            std::unique_ptr<Worker> w(new Worker());
+            w->backend = lembed::detail::ggml_cpu_backend_init();
+            if (!w->backend) {
+                err = lembed::detail::ggml_cpu_device()
+                          ? "cannot initialise the ggml CPU backend"
+                          : lembed::detail::ggml_cpu_backend_missing_message();
+                return false;
+            }
+            pool.push_back(std::move(w));
+        }
+
+        weights_ = std::move(weights);
+        workers_ = std::move(pool);
+        return true;
+    }
+
     /* Cached graph context, reused across batches of the same shape.
      * The graph structure depends only on (seq_len, batch); vocab_size, n_embd,
      * n_head and n_layers are fixed per session after load_from_file(). */

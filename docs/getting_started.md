@@ -100,7 +100,7 @@ similarity = np.dot(embeddings[0], embeddings[1])  # ≈ 0.82
 ```python
 from libembedding import TextEmbedding
 
-# FAST : MiniLM-L12-v2 quantifié (vitesse maximale)
+# FAST : all-MiniLM-L6-v2 (6 couches, 384 dim, ~90 Mo, vitesse maximale)
 model = TextEmbedding.from_mode("fast")
 
 # BALANCED : BGE-small (compromis vitesse/qualité)

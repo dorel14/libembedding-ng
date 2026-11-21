@@ -114,6 +114,10 @@ inline std::vector<cache_field> unified_cache_fields(lembed_unified_tuning_resul
             f.push_back(cache_int("top_k", r.top_k));
             f.push_back(cache_float("min_weight", r.min_weight));
             f.push_back(cache_int("storage_format", r.storage_format));
+            /* GGUF runtime knobs: workers, and the token budget in max_tokens.
+             * 0 for an ONNX sparse model. */
+            f.push_back(cache_int("workers", r.workers));
+            f.push_back(cache_int("max_tokens", r.max_tokens));
             break;
         case LEMBED_TASK_IMAGE:
         default:

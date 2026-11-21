@@ -110,6 +110,21 @@ static const lembed_gguf_model_info_t lembed__gguf_models[] = {
 
 static const int lembed__gguf_model_count = sizeof(lembed__gguf_models) / sizeof(lembed__gguf_models[0]);
 
+/* Sparse GGUF models (see lembed_list_sparse_gguf_models). Licence: Apache-2.0
+ * for both the GGUF conversion and its base model (checked on the HuggingFace
+ * cards, 2026-11-14). Q8_0: cosine against ONNX min 0.9998 on the test texts,
+ * min 0.9995 on SciFact (docs/gguf_sparse_runtime.md). */
+static const lembed_gguf_model_info_t lembed__sparse_gguf_models[] = {
+    { "SPLADE-PP-En-v1-GGUF",
+      "https://huggingface.co/cstr/splade-pp-en-v1-GGUF/resolve/main/splade-pp-en-v1-q8_0.gguf",
+      "prithivida/Splade_PP_en_v1",
+      "SPLADE++ v1 (English), Q8_0, run by libembedding's ggml runtime; ~112 MB",
+      30522, 110, 112, 0.0f, 1 },
+};
+
+static const int lembed__sparse_gguf_model_count =
+    sizeof(lembed__sparse_gguf_models) / sizeof(lembed__sparse_gguf_models[0]);
+
 #ifdef __cplusplus
 }
 #endif
@@ -130,10 +145,10 @@ const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name) {
     if (!name) return nullptr;
     std::string query(name);
     /* Case-insensitive partial match */
-    for (auto& c : query) c = (char)tolower(c);
+    for (auto& c : query) c = (char)tolower((unsigned char)c);
     for (int i = 0; i < lembed__gguf_model_count; i++) {
         std::string candidate(lembed__gguf_models[i].name);
-        for (auto& c : candidate) c = (char)tolower(c);
+        for (auto& c : candidate) c = (char)tolower((unsigned char)c);
         if (candidate.find(query) != std::string::npos)
             return &lembed__gguf_models[i];
     }
@@ -143,6 +158,25 @@ const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name) {
 const lembed_gguf_model_info_t* lembed_default_gguf_model(void) {
     /* Return the first model (best quality/throughput tradeoff) */
     return lembed__gguf_model_count > 0 ? &lembed__gguf_models[0] : nullptr;
+}
+
+lembed_status_t lembed_list_sparse_gguf_models(const lembed_gguf_model_info_t** out, int* count) {
+    if (!out || !count) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *out = lembed__sparse_gguf_models;
+    *count = lembed__sparse_gguf_model_count;
+    return LEMBED_OK;
+}
+
+const lembed_gguf_model_info_t* lembed_find_sparse_gguf_model(const char* name) {
+    if (!name) return nullptr;
+    std::string query(name);
+    for (auto& c : query) c = (char)tolower((unsigned char)c);
+    for (int i = 0; i < lembed__sparse_gguf_model_count; i++) {
+        std::string candidate(lembed__sparse_gguf_models[i].name);
+        for (auto& c : candidate) c = (char)tolower((unsigned char)c);
+        if (candidate == query) return &lembed__sparse_gguf_models[i];
+    }
+    return nullptr;
 }
 
 #endif /* LIBEMBEDDING_IMPLEMENTATION */

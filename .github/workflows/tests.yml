@@ -60,8 +60,9 @@ jobs:
             echo "CC=gcc-14" >> "$GITHUB_ENV"
             echo "CXX=g++-14" >> "$GITHUB_ENV"
           fi
-          curl -fL "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-linux-${ort_arch}-${{ env.ONNXRUNTIME_VERSION }}.tgz" | tar xz
-          echo "ONNXRUNTIME_ROOT=$PWD/onnxruntime-linux-${ort_arch}-${{ env.ONNXRUNTIME_VERSION }}" >> "$GITHUB_ENV"
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh "linux-${ort_arch}" "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
@@ -69,18 +70,17 @@ jobs:
         run: |
           choco install cmake -y
           & "C:\vcpkg\vcpkg.exe" install curl:x64-windows
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNXRUNTIME_VERSION }}/onnxruntime-win-x64-${{ env.ONNXRUNTIME_VERSION }}.zip"
-          Invoke-WebRequest -Uri $url -OutFile "onnxruntime-win-x64.zip"
-          Expand-Archive -Path "onnxruntime-win-x64.zip" -DestinationPath "onnxruntime-win-x64"
-          $inner = Get-ChildItem -Path "onnxruntime-win-x64" -Directory | Where-Object { $_.Name -like "onnxruntime-win-x64*" } | Select-Object -First 1
-          if ($inner) {
-            Move-Item "$($inner.FullName)/*" "onnxruntime-win-x64/" -Force
-            Remove-Item $inner.FullName
-          }
-          echo "ONNXRUNTIME_ROOT=${{ github.workspace }}\onnxruntime-win-x64" >> $env:GITHUB_ENV
           echo "CMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake" >> $env:GITHUB_ENV
           echo "CURL_INCLUDE_DIR=C:\vcpkg\installed\x64-windows\include" >> $env:GITHUB_ENV
           echo "CURL_LIBRARY=C:\vcpkg\installed\x64-windows\lib\libcurl.lib" >> $env:GITHUB_ENV
+
+      - name: Fetch ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
+          ort_root="$(bash scripts/fetch_onnxruntime.sh win-x64 "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cygpath -w "$(cd "$ort_root" && pwd)")" >> "$GITHUB_ENV"
 
       - name: Configure CMake (Linux)
         if: runner.os == 'Linux'
@@ -129,7 +129,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           cd build
-          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_gguf_inspect test_sparse_gguf
+          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection
 
       - name: Build tests (Windows)
         if: runner.os == 'Windows'
@@ -138,7 +138,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           Set-Location build
-          cmake --build . --parallel --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_gguf_inspect test_sparse_gguf --config Release
+          cmake --build . --parallel --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection --config Release
 
       - name: Run C++ unit tests (Linux)
         if: runner.os == 'Linux'
@@ -153,6 +153,26 @@ jobs:
         run: |
           Set-Location build
           ctest --output-on-failure -C Release
+
+      # On failure: which runtime DLLs sit next to the tests and which ones
+      # Windows ships, so a crash in the first ORT call can be told apart
+      # from a DLL version mismatch.
+      - name: Diagnose Windows runtime DLLs
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem build -Recurse -Filter test_matryoshka.exe | Select-Object -First 1 | ForEach-Object DirectoryName
+          Write-Host "test dir: $dir"
+          $dlls = @(Get-ChildItem $dir -Filter *.dll) + @(Get-Item C:\Windows\System32\onnxruntime.dll, C:\Windows\System32\msvcp140.dll, C:\Windows\System32\vcruntime140.dll -ErrorAction SilentlyContinue)
+          $dlls | ForEach-Object { "{0,-70} {1}" -f $_.FullName, $_.VersionInfo.FileVersion }
+          Get-ChildItem $dir -Filter test_*.exe | ForEach-Object {
+            & $_.FullName *> "$env:RUNNER_TEMP\$($_.BaseName).log"
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              Write-Host ("{0}: exit 0x{1:X8}" -f $_.Name, $code)
+              Get-Content "$env:RUNNER_TEMP\$($_.BaseName).log" -Tail 15
+            }
+          }
 
       # The shipped binaries must run on any x86-64 CPU (no AVX2 assumed in
       # libembedding's own code; ggml picks its CPU variant at run time).

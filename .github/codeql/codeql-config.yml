@@ -1,0 +1,11 @@
+name: libembedding CodeQL config
+
+# Vendored code and non-shipping code are not ours to triage. The C++ headers
+# under include/ are analysed through the files that include them (tests/,
+# python/csrc/), since the library is header-only.
+paths-ignore:
+  - third_party
+  - build
+  - docs
+  - benchmarks
+  - examples

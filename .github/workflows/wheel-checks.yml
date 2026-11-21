@@ -1,0 +1,78 @@
+name: Wheel checks (reusable)
+
+# Run after build-wheel.yml in the same workflow run, on the artifacts it
+# uploaded (`wheel-*`): nothing is rebuilt here.
+#
+# - twine-check: `twine check --strict` on every wheel (metadata, README
+#   rendering, PEP 639 licence files).
+# - python-matrix: the py3-none Linux x86_64 wheel is pure ABI-mode cffi, so
+#   one build must work on every supported interpreter. It is installed and
+#   tested under 3.9 to 3.13 (build-wheel.yml already tests 3.12 with the
+#   network tests).
+#
+# No sdist, on purpose: the package ships a prebuilt native library
+# (python/setup.py forces a platform wheel, and the libraries are copied into
+# python/src/libembedding by CI, never committed). An sdist would contain
+# none of them and `pip install` from it on an unsupported platform would
+# succeed and then fail at import. Without an sdist pip fails early with
+# "no matching distribution", which is the honest answer.
+
+on:
+  workflow_call:
+
+jobs:
+  twine-check:
+    name: twine check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist/
+
+      - name: twine check
+        run: |
+          ls -la dist/
+          # twine >= 6.1 and packaging >= 24.2 understand PEP 639 metadata.
+          python -m pip install --upgrade pip "twine>=6.1" "packaging>=24.2"
+          twine check --strict dist/*.whl
+
+  python-matrix:
+    name: Installed wheel, Python ${{ matrix.python }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Download Linux x86_64 wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-ubuntu-22.04
+          path: dist/
+
+      - name: Install wheel and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install dist/*manylinux*.whl
+          pip install pytest pytest-timeout
+
+      - name: Run Python tests against the installed wheel
+        working-directory: python
+        env:
+          LIBEMBEDDING_TEST_INSTALLED: "1"
+        run: |
+          (cd "$RUNNER_TEMP" && python -c "import libembedding, sys; print('Testing', libembedding.__file__); sys.exit('site-packages' not in libembedding.__file__)")
+          pytest tests/ -v --timeout=120 -m "not network"

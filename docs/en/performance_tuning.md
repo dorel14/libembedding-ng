@@ -258,7 +258,28 @@ exposes those three fields, filled with the model defaults, for information.
 (1×P, 2×P/2, P×1 in QUICK; + 1×logical and 4×P/4 in FULL) × batch (32 in QUICK;
 16/32/64/128 in FULL), on a synthetic corpus of 32 (QUICK) or 256 (FULL) texts.
 Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
-`max_tokens` × batch. Sparse and image: threads × batch.
+`max_tokens` × batch. Sparse (ONNX) and image: threads × batch.
+
+**Sparse GGUF runtime.** `sparse_autotune()` (and `lembed_sparse_autotune()`,
+whose result struct is unchanged; `lembed_sparse_autotune_v2()` also returns
+`workers`, `max_batch_tokens` and `from_cache`) also accept the sparse GGUF registry name (`"SPLADE-PP-En-v1-GGUF"`, already
+cached locally: the tuner never downloads) or a path ending in `.gguf`; the
+backend is chosen by the name, there is no `backend=` parameter. The grid is
+threads × workers (graphs sharing the weights) × batch × `max_batch_tokens`
+(token budget per batch, 512 by default). `top_k` and `min_weight` are never
+tuned. The default configuration is point 0 of the grid and is returned when no
+candidate beats it, so the result is never worse than the default on the same
+benchmark. Entries live in the same tune cache (`sparse/` sub-directory), keyed
+by the file path (or registry name) plus the file size and modification time; a
+second call returns the stored configuration without benchmarking
+(`from_cache=True`). Apply the result with `threads=`, `workers=` and
+`set_max_batch_tokens()`:
+
+```python
+r = sparse_autotune("model.gguf")
+m = SparseTextEmbedding("model.gguf", threads=r.threads, workers=r.workers)
+m.set_max_batch_tokens(r.max_batch_tokens)
+```
 
 ### Measurement methodology
 
@@ -374,6 +395,27 @@ embeddings = pool.embed(texts)
 | Semantic search, max quality | `"quality"` |
 | General production | `"balanced"` (default) |
 
+### Candidates and the model cache
+
+The selection runs a QUICK autotune on each candidate. It only measures
+candidates that are already in the model cache: it downloads nothing, and it
+leaves nothing behind (no model folder is created for a candidate that is
+missing, which is skipped). To let the selection consider a model, download it
+first.
+
+| Candidate | Cache directory | Download |
+|---|---|---|
+| `Qdrant/all-MiniLM-L6-v2-onnx` | `models--Qdrant-all-MiniLM-L6-v2-onnx` | 90 MB |
+| `Xenova/all-MiniLM-L6-v2` (INT8) | `models--Xenova-all-MiniLM-L6-v2` | 23 MB |
+| `Xenova/all-MiniLM-L12-v2` | `models--Xenova-all-MiniLM-L12-v2` | 133 MB |
+| `Xenova/bge-small-en-v1.5` | `models--Xenova-bge-small-en-v1.5` | 133 MB |
+| `Xenova/bge-base-en-v1.5` | `models--Xenova-bge-base-en-v1.5` | 436 MB |
+| `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | `models--Xenova-paraphrase-multilingual-MiniLM-L12-v2` | 470 MB |
+| `intfloat/multilingual-e5-small` | `models--intfloat-multilingual-e5-small` | 470 MB |
+
+The cache is the default directory: `LIBEMBEDDING_CACHE_DIR`, then
+`FASTEMBED_CACHE_DIR`, then `~/.cache/libembedding`.
+
 ---
 
 ## llama.cpp / GGUF Performance
@@ -404,7 +446,7 @@ model = TextEmbedding(
 ### Preset modes
 
 ```python
-# FAST : speed priority
+# FAST : speed priority (all-MiniLM-L6-v2, 384 dim, ~90 MB)
 model = TextEmbedding.from_mode("fast")
 
 # BALANCED : speed/quality compromise (default)

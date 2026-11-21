@@ -19,6 +19,7 @@ from .models import (
     _PROVIDER_MAP,
     _QUANTIZATION_ENUM,
     _QUANTIZATION_NAMES,
+    _c_string,
     _desc_from_c,
     _is_gguf_model,
     _is_local_path,
@@ -27,7 +28,7 @@ from .models import (
 from .types import ModelDesc, Stats
 
 _MODE_TO_MODEL = {
-    "fast": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "fast": "sentence-transformers/all-MiniLM-L6-v2",
     "balanced": "BAAI/bge-small-en-v1.5",
     "quality": "BAAI/bge-base-en-v1.5",
 }
@@ -69,6 +70,14 @@ class TextEmbedding:
             "dynamic"). If None, uses the model's default.
         preferred_quantization: Auto-select best quantization ("auto"),
             or one of "none", "static", "dynamic".
+        truncate_dim: Matryoshka truncation. Keep only the first
+            ``truncate_dim`` components of every vector and L2-renormalise
+            them, so cosine and dot product stay equivalent. Must lie in
+            ``[1, native dim]``; ``None`` keeps the full vector. Only
+            meaningful for Matryoshka-trained models (nomic-embed-text-v1.5,
+            mxbai-embed-large-v1, embeddinggemma-300m): on other models the
+            prefix of a vector carries no guarantee. ``dim`` then reports the
+            truncated size, ``native_dim`` the model's.
         num_threads: Deprecated; use ``threads``.
     """
 
@@ -89,8 +98,17 @@ class TextEmbedding:
         cache_size: int = 0,
         quantization: str | None = None,
         preferred_quantization: str | None = None,
+        truncate_dim: int | None = None,
         num_threads: int | None = None,
     ):
+        if truncate_dim is not None and (
+            isinstance(truncate_dim, bool) or not isinstance(truncate_dim, int)
+        ):
+            raise TypeError(
+                f"truncate_dim must be an int or None, got {type(truncate_dim).__name__}"
+            )
+        if truncate_dim is not None and truncate_dim <= 0:
+            raise ValueError(f"truncate_dim must be >= 1, got {truncate_dim}")
         provider = provider.lower()
         if provider not in _PROVIDER_MAP:
             raise ValueError(
@@ -129,6 +147,8 @@ class TextEmbedding:
 
         self._ctx = None
         self._dim = 0
+        self._native_dim = 0
+        self._truncate_dim: int | None = None
         self._batch_size = batch_size
         self._quantization = "none"
         self._quantization_reason = ""
@@ -270,7 +290,20 @@ class TextEmbedding:
                 check_status(lib.lembed_text_embedding_create_v2(opts, ctx_ptr))
             self._ctx = ctx_ptr[0]
 
-        self._dim = lib.lembed_text_embedding_dim(self._ctx)
+        self._native_dim = lib.lembed_text_embedding_dim(self._ctx)
+        self._dim = self._native_dim
+        if truncate_dim is not None:
+            # The upper bound is only known once the model is loaded. Fail at
+            # construction rather than on the first embed() call, and release
+            # the context: nothing else would, the object is never returned.
+            if truncate_dim > self._native_dim:
+                self.close()
+                raise ValueError(
+                    f"truncate_dim={truncate_dim} exceeds the model dimension "
+                    f"({self._native_dim})"
+                )
+            self._truncate_dim = truncate_dim
+            self._dim = truncate_dim
         self._model_name = model_name
 
     @staticmethod
@@ -334,8 +367,29 @@ class TextEmbedding:
 
     @property
     def dim(self) -> int:
-        """Embedding dimension."""
+        """Dimension of the returned vectors (``truncate_dim`` when set)."""
         return self._dim
+
+    @property
+    def native_dim(self) -> int:
+        """Dimension produced by the model itself, before any truncation."""
+        return self._native_dim
+
+    @property
+    def truncate_dim(self) -> int | None:
+        """Matryoshka truncation size, or ``None`` when vectors are kept whole."""
+        return self._truncate_dim
+
+    def _truncate_result(self, result) -> None:
+        """Apply the Matryoshka truncation to a C result, in place.
+
+        Goes through ``lembed_embeddings_truncate`` so Python and C callers get
+        the same numbers. A no-op when no truncation was requested or when the
+        size already matches.
+        """
+        if self._truncate_dim is None or self._truncate_dim >= result.dim:
+            return
+        check_status(lib.lembed_embeddings_truncate(result, self._truncate_dim, 1))
 
     @property
     def quantization(self) -> str:
@@ -374,14 +428,38 @@ class TextEmbedding:
     def info(self) -> ModelDesc:
         """Get runtime model descriptor."""
         desc_ptr = lib.lembed_text_embedding_desc_v2(self._ctx)
-        return _desc_from_c(desc_ptr.base, desc_ptr)
+        return _desc_from_c(
+            desc_ptr.base,
+            desc_ptr,
+            backend=self.backend,
+            effective_provider=self.provider,
+        )
+
+    @property
+    def backend(self) -> str:
+        """Runtime serving the model: ``"onnxruntime"`` or ``"llama.cpp"``."""
+        return _c_string(lib.lembed_text_embedding_backend_name(self._ctx))
+
+    @property
+    def provider(self) -> str:
+        """Execution provider in use, lowercase (``"cpu"``, ``"cuda"``...).
+
+        A provider other than ``"cpu"`` that cannot be attached raises
+        ``UnsupportedError`` at construction, so this never reports a provider
+        that is not running the model. llama.cpp reports ``"cpu"``, or
+        ``"gpu"`` when layers are offloaded to a ggml GPU device.
+        """
+        return _c_string(
+            lib.lembed_text_embedding_effective_provider(self._ctx)
+        ).lower()
 
     @classmethod
     def from_mode(cls, mode: str = "balanced", **kwargs):
         """Create TextEmbedding from a quality/speed mode.
 
         Args:
-            mode: One of "fast", "balanced", "quality".
+            mode: One of "fast" (all-MiniLM-L6-v2), "balanced"
+                (bge-small-en-v1.5), "quality" (bge-base-en-v1.5).
             **kwargs: Additional arguments passed to TextEmbedding.
 
         Returns:
@@ -423,6 +501,7 @@ class TextEmbedding:
         check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, bs, result))
 
         try:
+            self._truncate_result(result)
             dim = result.dim
             total = result.num_embeddings * dim
             arr = np.frombuffer(
@@ -467,6 +546,7 @@ class TextEmbedding:
         check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, 0, result))
 
         try:
+            self._truncate_result(result)
             dim = result.dim
             total = result.num_embeddings * dim
             arr = np.frombuffer(
@@ -509,8 +589,9 @@ class TextEmbedding:
         result = ffi.new("lembed_embeddings_t *")
         check_status(lib.lembed_text_embedding_embed(self._ctx, c_texts, n, 0, result))
 
-        dim = result.dim
         try:
+            self._truncate_result(result)
+            dim = result.dim
             for i in range(n):
                 # cffi pointer arithmetic: result.data is a float*, so the
                 # offset is expressed in floats (not bytes). Slicing a cdata
@@ -550,10 +631,20 @@ class TextEmbedding:
             c_texts[i] = c_strs[i]
 
         bs = self._batch_size if batch_size is None else batch_size
+        truncate = self._truncate_dim
 
         @ffi.callback("void(const float*, int, void*)")
         def cb(data, dim, userdata):
             arr = np.frombuffer(ffi.buffer(data, dim * 4), dtype=np.float32).copy()
+            if truncate is not None and truncate < dim:
+                # The streaming callback hands out one borrowed vector at a
+                # time, with no lembed_embeddings_t to pass to the C helper:
+                # same slice + L2 renormalisation, done on the copy.
+                arr = arr[:truncate]
+                norm = float(np.linalg.norm(arr))
+                if norm > 0.0:
+                    arr = arr / np.float32(norm)
+                dim = truncate
             callback(arr, dim, userdata)
 
         lib.lembed_text_embedding_embed_stream(self._ctx, c_texts, n, bs, cb, ffi.NULL)
@@ -598,6 +689,8 @@ class TextEmbedding:
         self.close()
 
     def __repr__(self) -> str:
+        if self._truncate_dim is not None:
+            return f"TextEmbedding(dim={self._dim}, native_dim={self._native_dim})"
         return f"TextEmbedding(dim={self._dim})"
 
 

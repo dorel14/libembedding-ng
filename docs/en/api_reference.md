@@ -27,6 +27,7 @@ TextEmbedding(
     auto_workers=False,
     cache_size=0,
     quantization=None,
+    truncate_dim=None,
     num_threads=None,  # deprecated
 )
 ```
@@ -49,6 +50,7 @@ TextEmbedding(
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
 | `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
 | `preferred_quantization` | `str \| None` | `None` | `"auto"` = **measured selection**: the variants the registry actually ships for this model are benchmarked once per (model, machine, library version), the winner is cached, and later loads read the cache. Rule: no measurable FP32 baseline → FP32; a variant must beat FP32 by **more than 5 %**; and **dynamic INT8 is preferred** — another variant must beat it by **more than 15 %**. Cost: ~3.5 s on the very first load of a model, then free. See [Quantization](#quantization--fp32-vs-int8) for the measurements. |
+| `truncate_dim` | `int \| None` | `None` | [Matryoshka](matryoshka.md) truncation: keeps the first `truncate_dim` components of every vector, then L2-renormalises them. Between `1` and the native dimension (otherwise `ValueError`). Meant for Matryoshka-trained models (`nomic-embed-text-v1.5`, `mxbai-embed-large-v1`, `embeddinggemma-300m`). |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -58,12 +60,16 @@ TextEmbedding(
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed texts. Returns array of shape `(n, dim)` with `float32` dtype. L2-normalized. |
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
-| `dim` | `int` (property) | Embedding dimension |
+| `dim` | `int` (property) | Dimension of the returned vectors (`truncate_dim` when set) |
+| `native_dim` | `int` (property) | Dimension produced by the model, before truncation |
+| `truncate_dim` | `int \| None` (property) | Matryoshka truncation size, `None` when vectors are kept whole |
 | `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
 | `quantization_reason` | `str` (property) | Why `preferred_quantization="auto"` picked that mode, e.g. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Empty when nothing was measured (explicit mode, or a model with no quantized sibling). |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name or local path |
 | `model_name` | `str` (property) | Registry name of the loaded model |
+| `backend` | `str` (property) | Runtime actually serving the model: `"onnxruntime"` or `"llama.cpp"` (see [Effective backend and provider](#effective-backend-and-provider)) |
+| `provider` | `str` (property) | Execution provider actually in use, lowercase: `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`; `"gpu"` for llama.cpp with offloaded layers |
 | `info()` | `ModelDesc` | Loaded model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -144,6 +150,8 @@ SparseTextEmbedding(
 | `embed(texts, batch_size=0)` | `list[SparseEmbedding]` | Returns a list of `SparseEmbedding` objects |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name |
+| `backend` | `str` (property) | `"onnxruntime"` or `"ggml-sparse"` (the library's own ggml runtime for GGUF SPLADE models, not llama.cpp) |
+| `provider` | `str` (property) | Execution provider actually in use (`"cpu"` for `"ggml-sparse"`) |
 | `info()` | `ModelDesc` | Model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -195,6 +203,8 @@ ImageEmbedding(
 | `dim` | `int` (property) | Embedding dimension |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name |
+| `backend` | `str` (property) | Always `"onnxruntime"` |
+| `provider` | `str` (property) | Execution provider actually in use |
 | `info()` | `ModelDesc` | Model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -215,6 +225,8 @@ print(embeddings.shape)  # (2, 512)
 ### Reranker
 
 Scores and sorts documents by relevance to a query (cross-encoder).
+
+On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared.
 
 #### Constructor
 
@@ -262,6 +274,8 @@ Reranker(
 | `rerank(query, documents, batch_size=0)` | `list[RerankResult]` | Returns results sorted by descending score |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name |
+| `backend` | `str` (property) | `"onnxruntime"` or `"llama.cpp"`: with `backend="auto"` a model without ONNX files may be served by its GGUF counterpart, and this is where that switch shows |
+| `provider` | `str` (property) | Execution provider actually in use (`"cpu"` for llama.cpp) |
 | `info()` | `ModelDesc` | Model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -597,11 +611,54 @@ class ModelDesc:
     pooling: str   # "cls" or "mean"
     num_threads: int
     batch_size: int
-    provider: str
-    device_id: int
+    provider: str = "cpu"          # requested provider ("llama" for every GGUF context)
+    device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    backend: str = ""              # "onnxruntime", "llama.cpp" or "ggml-sparse"
+    effective_provider: str = ""   # provider actually in use: "cpu", "cuda", ...
 ```
+
+`backend` and `effective_provider` are appended last with a default value, so
+code building a `ModelDesc` positionally keeps working. `info()` always fills
+them.
+
+### Effective backend and provider
+
+Every model reports which runtime serves it and which provider it really runs
+on (`backend` / `provider` properties, `info().backend` /
+`info().effective_provider` fields):
+
+| `backend` | Meaning | `provider` |
+|---|---|---|
+| `"onnxruntime"` | ONNX model | `"cpu"`, or the requested provider if it could be attached |
+| `"llama.cpp"` | Dense or reranker GGUF model | `"cpu"`; `"gpu"` when `llama_n_gpu_layers != 0` and ggml has a GPU device (none in the shipped builds) |
+| `"ggml-sparse"` | SPLADE GGUF model (in-house ggml runtime) | `"cpu"` |
+
+**Explicitly requested but unavailable provider: error.** `"cpu"` is the
+default and there is no "auto" provider, so any other value is an explicit
+request. When it cannot be attached (build without CUDA, DirectML or
+TensorRT, CoreML outside Apple, `"llama"` on an ONNX model, unknown value),
+construction raises `UnsupportedError` with the reason, instead of running on
+the CPU without saying so. The check happens before the model is parsed.
+
+```python
+from libembedding import TextEmbedding
+from libembedding.exceptions import UnsupportedError
+
+try:
+    model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda")
+except UnsupportedError as e:
+    print(e.detail)  # "Execution provider CUDA was requested but is not available: ..."
+
+model = TextEmbedding("BAAI/bge-small-en-v1.5")
+print(model.backend, model.provider)  # onnxruntime cpu
+```
+
+**`Reranker(backend="auto")` switch to GGUF: kept, but visible.** When the
+requested model has no ONNX files and a GGUF counterpart exists, the reranker
+is served by llama.cpp: `reranker.backend` is then `"llama.cpp"`, and
+`LIBEMBEDDING_VERBOSE=1` writes the switch to stderr.
 
 ---
 
@@ -735,6 +792,53 @@ if (lembed_cache_get(cache, "Hello world", &vec, &dim)) {
 
 lembed_cache_free(cache);
 ```
+
+### Effective backend and provider (C API)
+
+Two accessors per context type. They return static strings (never freed), or
+`NULL` when the context is `NULL`. No field is added to `lembed_model_desc_t`:
+its size (ABI) does not change.
+
+| Function | Values |
+|---|---|
+| `lembed_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_text_embedding_effective_provider(ctx)` | `"CPU"`, `"CUDA"`, `"CoreML"`, `"DirectML"`, `"TensorRT"`; llama.cpp: `"CPU"`, or `"GPU"` when layers are offloaded to a ggml GPU device |
+| `lembed_sparse_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"ggml-sparse"` |
+| `lembed_sparse_text_embedding_effective_provider(ctx)` | as for ONNX; `"CPU"` for `"ggml-sparse"` |
+| `lembed_reranker_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_reranker_effective_provider(ctx)` | as for ONNX; `"CPU"` for llama.cpp |
+| `lembed_image_embedding_backend_name(ctx)` | `"onnxruntime"` |
+| `lembed_image_embedding_effective_provider(ctx)` | as for ONNX |
+
+Provider names use the spelling of `lembed_execution_provider_name()`.
+
+```c
+lembed_text_options_t opts = lembed_text_options_default();
+opts.provider = LEMBED_PROVIDER_CUDA;
+lembed_text_embedding_t* ctx = NULL;
+lembed_status_t s = lembed_text_embedding_create(&opts, &ctx);
+if (s == LEMBED_ERROR_UNSUPPORTED) {
+    /* "Execution provider CUDA was requested but is not available: ..." */
+    fprintf(stderr, "%s\n", lembed_last_error());
+    opts.provider = LEMBED_PROVIDER_CPU;
+    s = lembed_text_embedding_create(&opts, &ctx);
+}
+printf("%s on %s\n", lembed_text_embedding_backend_name(ctx),
+       lembed_text_embedding_effective_provider(ctx));  /* onnxruntime on CPU */
+```
+
+**Behaviour change (decision D3).** A provider other than
+`LEMBED_PROVIDER_CPU` that cannot be attached to the ONNX Runtime session makes
+the create function fail with `LEMBED_ERROR_UNSUPPORTED` and a message in
+`lembed_last_error()`, instead of silently falling back to the CPU.
+`LEMBED_PROVIDER_CPU` is the default of every options struct and there is no
+"auto" provider, so any other value is an explicit request. This also applies
+to `LEMBED_PROVIDER_LLAMACPP` given to an ONNX model and to an out-of-range
+value. The GGUF paths (llama.cpp, `ggml-sparse`) ignore the provider as before.
+
+The reranker `LEMBED_BACKEND_AUTO` switch (ONNX model not found, matching GGUF
+entry) is kept: `lembed_reranker_backend_name()` then returns `"llama.cpp"`
+and `LIBEMBEDDING_VERBOSE=1` logs the switch.
 
 ### Similarity (C API)
 

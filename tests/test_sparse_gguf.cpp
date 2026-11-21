@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -365,6 +366,7 @@ enum ModelVariant {
     VARIANT_NO_HEAD,   /* dense encoder only: must be refused */
     VARIANT_NO_VOCAB,  /* head but no <arch>.vocab_size: must be refused */
     VARIANT_SPECIALS,  /* only the special tokens can score above zero */
+    VARIANT_F16_BIAS,  /* one bias stored F16: must be refused, not abort */
 };
 
 void build_model(std::vector<Kv>& kvs, std::vector<Tensor>& tensors,
@@ -455,7 +457,11 @@ void build_model(std::vector<Kv>& kvs, std::vector<Tensor>& tensors,
     Tensor mlm = rnd("mlm_transform.weight", {kHidden, kHidden}, rng);
     mlm.type = matrix_type;
     tensors.push_back(mlm);
-    tensors.push_back(filled("mlm_transform.bias", {kHidden}, 0.0f));
+    Tensor mlm_b = filled("mlm_transform.bias", {kHidden}, 0.0f);
+    /* ggml's CPU add has no F32 + F16 kernel and aborts the process (found
+     * by fuzz_gguf_loader); the loader must refuse the file instead. */
+    if (variant == VARIANT_F16_BIAS) mlm_b.type = kF16;
+    tensors.push_back(mlm_b);
     tensors.push_back(ones("mlm_ln.weight", {kHidden}));
     tensors.push_back(filled("mlm_ln.bias", {kHidden}, 0.0f));
 
@@ -551,6 +557,36 @@ std::string garbage_fixture() {
     fwrite("this is not a gguf file at all", 1, 30, f);
     fclose(f);
     return path;
+}
+
+/* Seed corpus for tests/fuzz/fuzz_gguf_loader.cpp: every model variant above,
+ * written by the same writer, so the fuzzer starts from files the loader
+ * accepts and from the refusals the unit tests check. Generated rather than
+ * committed: a fixture weighs tens of kilobytes. Returns the files written. */
+int write_fuzz_seeds(const std::string& dir) {
+    struct Seed { const char* name; ModelVariant variant; };
+    const Seed seeds[] = {
+        {"plain",    VARIANT_PLAIN},
+        {"f16",      VARIANT_F16},
+        {"q8_0",     VARIANT_Q8},
+        {"specials", VARIANT_SPECIALS},
+        {"nohead",   VARIANT_NO_HEAD},
+        {"novocab",  VARIANT_NO_VOCAB},
+        {"f16bias",  VARIANT_F16_BIAS},
+    };
+    int written = 0;
+    for (const Seed& s : seeds) {
+        std::vector<Kv> kvs;
+        std::vector<Tensor> tensors;
+        build_model(kvs, tensors, s.variant);
+        const std::string path = dir + "/" + s.name + ".gguf";
+        if (!write_gguf(path, kvs, tensors)) {
+            fprintf(stderr, "cannot write fuzz seed %s\n", path.c_str());
+            continue;
+        }
+        written++;
+    }
+    return written;
 }
 
 /* ---- assertions on a produced vector ------------------------------------- */
@@ -1059,6 +1095,23 @@ static void test_missing_vocab_size_is_refused(void) {
     if (ctx) lembed_sparse_text_embedding_free(ctx);
 }
 
+/* A vector (bias, layer-norm weight) that is not F32 is refused at load time:
+ * ggml_add would abort the whole process on it at the first embed. */
+static void test_non_f32_vector_is_refused(void) {
+    const std::string path = fixture("f16bias", VARIANT_F16_BIAS);
+    if (path.empty()) return;
+
+    lembed_sparse_options_t opts = lembed_sparse_options_default();
+    lembed_sparse_embedding_ctx_t* ctx = nullptr;
+    const lembed_status_t s =
+        lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx);
+    CHECK(s != LEMBED_OK && ctx == nullptr, "a file with an F16 bias is refused");
+    const char* err = lembed_last_error();
+    CHECK(err != nullptr && std::string(err).find("mlm_transform.bias") != std::string::npos,
+          "the refusal names the F16 bias");
+    if (ctx) lembed_sparse_text_embedding_free(ctx);
+}
+
 /* Loads `path`, expects a refusal whose message contains `needle`, and expects
  * it fast: every malformed header must be turned down before the runtime
  * allocates or loops on what the header claims. */
@@ -1267,7 +1320,198 @@ static void test_cpu_backend_is_loaded(void) {
     if (features) printf("ggml CPU features: %s\n", features);
 }
 
-int main(void) {
+#ifdef LIBEMBEDDING_IMPLEMENTATION
+/* The fuzzer loads from memory (SparseSession::load_from_buffer); the public
+ * API loads from a path. Both must be the same loader: same refusals, same
+ * vectors. Needs the implementation in this translation unit, so it is skipped
+ * where the tests link the prebuilt DLL (Windows). */
+static void test_buffer_load_matches_file(void) {
+    const std::string path = fixture("buffer", VARIANT_PLAIN);
+    if (path.empty()) return;
+
+    std::vector<char> bytes;
+    if (FILE* f = fopen(path.c_str(), "rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
+        fclose(f);
+    }
+    CHECK(!bytes.empty(), "the fixture reads back");
+    if (bytes.empty()) return;
+
+    std::string err;
+    lembed::gguf::SparseSession from_file;
+    CHECK(from_file.load_from_file(path.c_str(), 1, 1, 0, err), "the fixture loads from its path");
+    lembed::gguf::SparseSession from_buffer;
+    CHECK(from_buffer.load_from_buffer(bytes.data(), bytes.size(), 1, 1, 0, err),
+          "the same bytes load from memory");
+    if (!err.empty()) fprintf(stderr, "  reason: %s\n", err.c_str());
+
+    const std::vector<std::string> texts{"hello world", "the quick brown fox"};
+    const std::vector<lembed::detail::SparseResult> a = from_file.embed(texts, 2);
+    const std::vector<lembed::detail::SparseResult> b = from_buffer.embed(texts, 2);
+    bool same = a.size() == texts.size() && b.size() == texts.size();
+    for (size_t i = 0; same && i < a.size(); i++) {
+        same = a[i].indices == b[i].indices && a[i].values.size() == b[i].values.size();
+        for (size_t j = 0; same && j < a[i].values.size(); j++) {
+            same = std::fabs(a[i].values[j] - b[i].values[j]) <= 1e-6f;
+        }
+    }
+    CHECK(same, "memory and path loads give the same vectors");
+
+    /* The refusals are shared too: a cut file and an empty buffer are refused
+     * with a reason, never crash. */
+    lembed::gguf::SparseSession cut;
+    err.clear();
+    CHECK(!cut.load_from_buffer(bytes.data(), bytes.size() / 2, 1, 1, 0, err) && !err.empty(),
+          "a truncated buffer is refused with a reason");
+    lembed::gguf::SparseSession empty;
+    err.clear();
+    CHECK(!empty.load_from_buffer(nullptr, 0, 1, 1, 0, err) && !err.empty(),
+          "an empty buffer is refused with a reason");
+}
+
+/* Every fixture the fuzzer is seeded with goes through both loaders: they must
+ * agree on accept versus refuse, whatever the file holds. */
+static void test_buffer_and_file_agree_on_every_fixture(void) {
+    struct Case { const char* name; ModelVariant variant; };
+    const Case cases[] = {
+        {"agree_plain",    VARIANT_PLAIN},
+        {"agree_f16",      VARIANT_F16},
+        {"agree_q8_0",     VARIANT_Q8},
+        {"agree_specials", VARIANT_SPECIALS},
+        {"agree_nohead",   VARIANT_NO_HEAD},
+        {"agree_novocab",  VARIANT_NO_VOCAB},
+    };
+    for (const Case& c : cases) {
+        const std::string path = fixture(c.name, c.variant);
+        if (path.empty()) continue;
+
+        std::vector<char> bytes;
+        if (FILE* f = fopen(path.c_str(), "rb")) {
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
+            fclose(f);
+        }
+        CHECK(!bytes.empty(), "the fixture reads back");
+        if (bytes.empty()) continue;
+
+        std::string file_err, buffer_err;
+        lembed::gguf::SparseSession from_file;
+        const bool file_ok = from_file.load_from_file(path.c_str(), 1, 1, 0, file_err);
+        lembed::gguf::SparseSession from_buffer;
+        const bool buffer_ok =
+            from_buffer.load_from_buffer(bytes.data(), bytes.size(), 1, 1, 0, buffer_err);
+        if (file_ok != buffer_ok) {
+            fprintf(stderr, "  %s: file=%d (%s) buffer=%d (%s)\n", c.name, (int)file_ok,
+                    file_err.c_str(), (int)buffer_ok, buffer_err.c_str());
+        }
+        CHECK(file_ok == buffer_ok, "buffer and file loads agree on accept versus refuse");
+        if (!file_ok && !buffer_ok) {
+            CHECK(!file_err.empty() && !buffer_err.empty(),
+                  "both refusals carry a reason");
+        }
+    }
+}
+#endif
+
+/* Autotune of the GGUF runtime through the public C API, on a fixture. Checks
+ * the plumbing and the cache, never timings: the second call must be answered
+ * from the tune cache (from_cache) with the very same configuration. The tune
+ * cache is redirected to a private directory so that no earlier run can turn the
+ * first call into a hit. */
+[[maybe_unused]] static void set_test_env(const char* name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
+[[maybe_unused]] static void test_autotune_gguf(void) {
+    const std::string path = fixture("autotune", VARIANT_PLAIN);
+    if (path.empty()) return;
+
+    const std::string cache_root = tmpdir() + "/lembed_sparse_gguf_autotune_cache";
+    const char* old_local = std::getenv("LOCALAPPDATA");
+    const char* old_home = std::getenv("HOME");
+    const std::string saved_local = old_local ? old_local : "";
+    const std::string saved_home = old_home ? old_home : "";
+    set_test_env("LOCALAPPDATA", cache_root + "_" + std::to_string((long long)std::time(nullptr)));
+    set_test_env("HOME", cache_root + "_" + std::to_string((long long)std::time(nullptr)));
+
+    lembed_sparse_tuning_result_v2_t first;
+    memset(&first, 0, sizeof(first));
+    if (expect_ok(lembed_sparse_autotune_v2(path.c_str(), LEMBED_AUTOTUNE_QUICK, &first),
+                  "autotune accepts a .gguf path")) {
+        CHECK(first.from_cache == 0, "the first call runs the grid");
+        CHECK(first.base.threads >= 1 && first.base.batch_size >= 1,
+              "threads and batch are set");
+        CHECK(first.workers >= 0, "workers is set (0 = automatic)");
+        CHECK(first.max_batch_tokens >= 1, "max_batch_tokens is set");
+        const lembed_sparse_options_t defaults = lembed_sparse_options_default();
+        CHECK(first.base.top_k == defaults.top_k &&
+                  first.base.storage_format == defaults.storage_format &&
+                  first.base.min_weight == defaults.min_weight,
+              "output-changing options are reported, never tuned");
+
+        lembed_sparse_tuning_result_v2_t second;
+        memset(&second, 0, sizeof(second));
+        if (expect_ok(lembed_sparse_autotune_v2(path.c_str(), LEMBED_AUTOTUNE_QUICK, &second),
+                      "second autotune call")) {
+            CHECK(second.from_cache == 1, "the second call is answered from the cache");
+            CHECK(second.base.threads == first.base.threads && second.workers == first.workers &&
+                      second.base.batch_size == first.base.batch_size &&
+                      second.max_batch_tokens == first.max_batch_tokens,
+                  "the cached configuration is the persisted one");
+        }
+
+        /* The v1 entry point keeps working and fills the v1 fields only. */
+        lembed_sparse_tuning_result_t v1;
+        memset(&v1, 0, sizeof(v1));
+        if (expect_ok(lembed_sparse_autotune(path.c_str(), LEMBED_AUTOTUNE_QUICK, &v1),
+                      "v1 autotune call")) {
+            CHECK(v1.threads == first.base.threads && v1.batch_size == first.base.batch_size,
+                  "v1 reports the same configuration");
+        }
+
+        /* The result is usable: build a context with it and embed. */
+        lembed_sparse_options_t opts = lembed_sparse_options_default();
+        opts.num_threads = first.base.threads;
+        opts.workers = first.workers;
+        lembed_sparse_embedding_ctx_t* ctx = nullptr;
+        if (expect_ok(lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx),
+                      "context from the tuned configuration") && ctx) {
+            CHECK(lembed_sparse_text_embedding_set_max_batch_tokens(ctx, first.max_batch_tokens) ==
+                      LEMBED_OK,
+                  "the tuned token budget is applicable");
+            CHECK(lembed_sparse_text_embedding_set_max_batch_tokens(ctx, -1) ==
+                      LEMBED_ERROR_INVALID_ARGUMENT,
+                  "a negative token budget is refused");
+            lembed_sparse_text_embedding_free(ctx);
+        }
+    }
+
+    lembed_sparse_tuning_result_t missing;
+    memset(&missing, 0, sizeof(missing));
+    CHECK(lembed_sparse_autotune((tmpdir() + "/lembed_no_such_model.gguf").c_str(),
+                                 LEMBED_AUTOTUNE_QUICK, &missing) != LEMBED_OK,
+          "a missing .gguf is refused");
+
+    if (!saved_local.empty()) set_test_env("LOCALAPPDATA", saved_local);
+    if (!saved_home.empty()) set_test_env("HOME", saved_home);
+}
+
+/* `test_sparse_gguf --write-fuzz-seeds <dir>` writes the fuzzer's seed corpus
+ * instead of running the tests (see write_fuzz_seeds()). */
+int main(int argc, char** argv) {
+    if (argc == 3 && strcmp(argv[1], "--write-fuzz-seeds") == 0) {
+        const int n = write_fuzz_seeds(argv[2]);
+        printf("wrote %d fuzz seeds to %s\n", n, argv[2]);
+        return n > 0 ? 0 : 1;
+    }
+
     test_cpu_backend_is_loaded();
     test_output_shape();
     test_top_k_and_min_weight();
@@ -1278,11 +1522,23 @@ int main(void) {
     test_special_tokens_are_removed();
     test_headless_file_is_refused();
     test_missing_vocab_size_is_refused();
+    test_non_f32_vector_is_refused();
     test_malformed_files_are_refused();
     test_bad_input();
     test_create_from_path_routes_gguf();
     test_quantised_weights();
     test_inspect_agrees_with_runtime();
+#ifdef _WIN32
+    /* lembed_sparse_autotune*() live in detail/autotune_bench_sparse.hpp, which
+     * only the shared library compiles; the header-only Linux/macOS build of
+     * this test cannot link them. python/tests/test_sparse_autotune_gguf.py
+     * covers the GGUF autotune on every OS. */
+    test_autotune_gguf();
+#endif
+#ifdef LIBEMBEDDING_IMPLEMENTATION
+    test_buffer_load_matches_file();
+    test_buffer_and_file_agree_on_every_fixture();
+#endif
 
     printf("PASS: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

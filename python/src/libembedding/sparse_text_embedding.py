@@ -15,6 +15,7 @@ from ._status import check_status
 from .exceptions import ModelNotFoundError
 from .models import (
     _PROVIDER_MAP,
+    _c_string,
     _desc_from_c,
     _is_local_path,
     list_sparse_models,
@@ -76,15 +77,28 @@ def _build_options(
     return opts, cache_buf
 
 
+def _split_hf_resolve_url(url: str) -> tuple[str, str]:
+    """``https://huggingface.co/<repo>/resolve/main/<file>`` -> (repo, file)."""
+    marker = "/resolve/main/"
+    head, sep, filename = url.partition(marker)
+    prefix = "https://huggingface.co/"
+    if not sep or not head.startswith(prefix) or not filename:
+        raise ValueError(f"Not a HuggingFace resolve URL: {url}")
+    return head[len(prefix):], filename
+
+
 class SparseTextEmbedding:
     """Generate sparse vector embeddings (term weights) from text.
 
     Two backends behind one API: ONNX Runtime from the model registry, and this
     library's own ggml runtime from a GGUF file. See :meth:`from_gguf` for the
-    latter -- a local path ending in ``.gguf`` is routed to it automatically.
+    latter -- a local path ending in ``.gguf`` is routed to it automatically,
+    and so is a sparse GGUF registry name such as ``"SPLADE-PP-En-v1-GGUF"``
+    (downloaded from HuggingFace, Q8_0).
 
     Args:
-        model_name: HuggingFace model name or local directory path.
+        model_name: HuggingFace model name, sparse GGUF registry name
+            (``"SPLADE-PP-En-v1-GGUF"``) or local directory / ``.gguf`` path.
         provider: Execution provider.
         cache_dir: Model cache directory.
         max_length: Max token length (0 = model default).
@@ -144,6 +158,23 @@ class SparseTextEmbedding:
         )
 
         ctx_ptr = ffi.new("lembed_sparse_embedding_ctx_t **")
+
+        # A sparse GGUF registry name ("SPLADE-PP-En-v1-GGUF") is matched
+        # exactly, before the ONNX registry, whose partial matching would
+        # otherwise take it for the ONNX model of the same family.
+        gguf = lib.lembed_find_sparse_gguf_model(model_name.encode("utf-8"))
+        if gguf != ffi.NULL:
+            repo, filename = _split_hf_resolve_url(ffi.string(gguf.gguf_url).decode("utf-8"))
+            check_status(
+                lib.lembed_sparse_text_embedding_create_from_gguf_model(
+                    repo.encode("utf-8"),
+                    filename.encode("utf-8"),
+                    ffi.addressof(opts),
+                    ctx_ptr,
+                )
+            )
+            self._finish(ctx_ptr, opts)
+            return
 
         try:
             model_idx = resolve_sparse_model(model_name)
@@ -387,7 +418,29 @@ class SparseTextEmbedding:
     def info(self) -> ModelDesc:
         """Return runtime model descriptor."""
         desc_ptr = lib.lembed_sparse_text_embedding_desc(self._ctx)
-        return _desc_from_c(desc_ptr)
+        return _desc_from_c(
+            desc_ptr, backend=self.backend, effective_provider=self.provider
+        )
+
+    @property
+    def backend(self) -> str:
+        """Runtime serving the model: ``"onnxruntime"`` or ``"ggml-sparse"``.
+
+        ``"ggml-sparse"`` is the library's own ggml runtime for GGUF SPLADE
+        models, not llama.cpp.
+        """
+        return _c_string(lib.lembed_sparse_text_embedding_backend_name(self._ctx))
+
+    @property
+    def provider(self) -> str:
+        """Execution provider in use, lowercase (``"cpu"``, ``"cuda"``...).
+
+        A provider other than ``"cpu"`` that cannot be attached raises
+        ``UnsupportedError`` at construction. ``"ggml-sparse"`` reports ``"cpu"``.
+        """
+        return _c_string(
+            lib.lembed_sparse_text_embedding_effective_provider(self._ctx)
+        ).lower()
 
     @property
     def name(self) -> str:
@@ -407,6 +460,18 @@ class SparseTextEmbedding:
             avg_latency_ms=s.base.avg_latency_ms,
             cache_hits=s.cache_hits,
             cache_misses=s.cache_misses,
+        )
+
+    def set_max_batch_tokens(self, max_batch_tokens: int) -> None:
+        """Set the token budget per batch of the GGUF runtime (0 = no cap).
+
+        Apply the ``max_batch_tokens`` of :func:`sparse_autotune` with it.
+        Raises for a model that is not run by the GGUF runtime.
+        """
+        check_status(
+            lib.lembed_sparse_text_embedding_set_max_batch_tokens(
+                self._ctx, max_batch_tokens
+            )
         )
 
     def close(self) -> None:
@@ -429,20 +494,26 @@ def sparse_autotune(
     """Run auto-tuning to find optimal sparse embedding configuration.
 
     Args:
-        model_name: Model name (e.g. "prithivida/Splade_PP_en_v1")
+        model_name: Model name (e.g. "prithivida/Splade_PP_en_v1"), the sparse
+            GGUF registry name ("SPLADE-PP-En-v1-GGUF", must be cached
+            locally) or a local ``.gguf`` path. The backend follows the name,
+            as in :class:`SparseTextEmbedding`.
         full: If True, run the FULL grid, else the QUICK one
 
     Returns:
-        SparseTuningResult with the optimal threads and batch_size. top_k,
+        SparseTuningResult with the optimal threads and batch_size. For a GGUF
+        model it also carries ``workers`` and ``max_batch_tokens``, and never
+        describes a configuration slower than the default one. top_k,
         min_weight and storage_format change the output vectors, so they are
-        not tuned: they report the model defaults.
+        not tuned: they report the model defaults. ``from_cache`` is True when
+        the result came from the tune cache without running a benchmark.
 
     Example:
         >>> result = sparse_autotune("prithivida/Splade_PP_en_v1")
         >>> print(f"Optimal: threads={result.threads}, batch={result.batch_size}")
     """
     mode = lib.LEMBED_AUTOTUNE_FULL if full else lib.LEMBED_AUTOTUNE_QUICK
-    result = ffi.new("lembed_sparse_tuning_result_t *")
+    result = ffi.new("lembed_sparse_tuning_result_v2_t *")
 
     # Resolve model code
     code = model_name
@@ -452,17 +523,21 @@ def sparse_autotune(
             code = m.model_code
             break
 
-    check_status(lib.lembed_sparse_autotune(code.encode("utf-8"), mode, result))
+    check_status(lib.lembed_sparse_autotune_v2(code.encode("utf-8"), mode, result))
 
+    base = result.base
     return SparseTuningResult(
-        top_k=result.top_k,
-        min_weight=result.min_weight,
-        storage_format=result.storage_format,
-        threads=result.threads,
-        batch_size=result.batch_size,
-        throughput_docs_sec=result.throughput_docs_sec,
-        latency_ms=result.latency_ms,
-        memory_mb=result.memory_mb,
+        top_k=base.top_k,
+        min_weight=base.min_weight,
+        storage_format=base.storage_format,
+        threads=base.threads,
+        batch_size=base.batch_size,
+        throughput_docs_sec=base.throughput_docs_sec,
+        latency_ms=base.latency_ms,
+        memory_mb=base.memory_mb,
+        workers=result.workers,
+        max_batch_tokens=result.max_batch_tokens,
+        from_cache=bool(result.from_cache),
     )
 
 

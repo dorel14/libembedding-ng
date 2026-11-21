@@ -43,6 +43,19 @@ const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name);
 /* Get the default recommended GGUF model (best quality/throughput tradeoff) */
 const lembed_gguf_model_info_t* lembed_default_gguf_model(void);
 
+/* Sparse (SPLADE) GGUF models, run by libembedding's own ggml runtime
+ * (lembed_sparse_text_embedding_create_from_gguf_model). Kept apart from the
+ * dense list above so that a dense lookup never returns a sparse model. `dim`
+ * is the vocabulary size, the width of the sparse vectors. Each entry is
+ * validated against its ONNX counterpart (cosine >= 0.995,
+ * tests/test_sparse_gguf_vs_onnx.cpp). Static data, do not free. */
+lembed_status_t lembed_list_sparse_gguf_models(const lembed_gguf_model_info_t** out, int* count);
+
+/* Find a sparse GGUF model by exact name, ignoring case (e.g.
+ * "SPLADE-PP-En-v1-GGUF"). Exact on purpose: a partial match would capture
+ * names that designate the ONNX model of the same family. NULL if none. */
+const lembed_gguf_model_info_t* lembed_find_sparse_gguf_model(const char* name);
+
 #ifdef __cplusplus
 }
 #endif

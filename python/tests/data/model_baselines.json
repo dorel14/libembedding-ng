@@ -1,0 +1,187 @@
+{
+ "_comment": "Measured baseline of libembedding vs ONNX+HF tokenizers (python/tests/model_reference.py). Regenerate with --json then --baselines. SPDX-License-Identifier: MIT. Auteur: David Orel.",
+ "models": {
+  "text|sentence-transformers/all-MiniLM-L6-v2|model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|sentence-transformers/all-MiniLM-L6-v2|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|sentence-transformers/all-MiniLM-L12-v2|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|sentence-transformers/all-MiniLM-L12-v2|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|BAAI/bge-base-en-v1.5|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|BAAI/bge-base-en-v1.5|model_optimized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|BAAI/bge-small-en-v1.5|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|BAAI/bge-small-en-v1.5|model_optimized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|nomic-ai/nomic-embed-text-v1.5|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|nomic-ai/nomic-embed-text-v1.5|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2|onnx/model.onnx": {
+   "family": "unigram",
+   "min": 0.9999,
+   "mean": 0.9999,
+   "en_core_min": 0.9999
+  },
+  "text|sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2|model_optimized.onnx": {
+   "family": "unigram",
+   "min": 0.9999,
+   "mean": 0.9999,
+   "en_core_min": 0.9999
+  },
+  "text|intfloat/multilingual-e5-small|onnx/model.onnx": {
+   "family": "unigram",
+   "min": 0.9999,
+   "mean": 0.9999,
+   "en_core_min": 0.9999
+  },
+  "text|mixedbread-ai/mxbai-embed-large-v1|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|Alibaba-NLP/gte-base-en-v1.5|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|Alibaba-NLP/gte-base-en-v1.5|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|Alibaba-NLP/gte-large-en-v1.5|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|openai/clip-vit-base-patch32|model.onnx": {
+   "family": "bpe-bytelevel",
+   "min": 0.2945,
+   "mean": 0.763,
+   "en_core_min": 0.3162
+  },
+  "text|snowflake/snowflake-arctic-embed-xs|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-xs|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-s|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-s|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-m|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-m|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-m-long|onnx/model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-m-long|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|snowflake/snowflake-arctic-embed-l|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "text|BAAI/bge-small-en-v1.5|onnx/model_quantized.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "sparse|prithivida/Splade_PP_en_v1|model.onnx": {
+   "family": "wordpiece",
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
+  },
+  "reranker|jinaai/jina-reranker-v1-turbo-en|onnx/model.onnx": {
+   "family": "bpe-other",
+   "pearson": 0.422
+  },
+  "reranker|jinaai/jina-reranker-v1-turbo-en-quantized|onnx/model_quantized.onnx": {
+   "family": "bpe-other",
+   "pearson": 0.46
+  }
+ }
+}

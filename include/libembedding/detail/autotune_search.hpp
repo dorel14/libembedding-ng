@@ -25,6 +25,7 @@
 
 #include "autotune_measure.hpp"
 #include "autotune_objective.hpp"
+#include "log.hpp"
 
 #include <cstdio>
 #include <string>
@@ -49,7 +50,8 @@ struct autotune_search_result {
 };
 
 /* Search options. `label` prefixes every progress line ("reranker_autotune",
- * ...) so logs stay attributable; `verbose` = false silences them (tests).
+ * ...) so logs stay attributable. `verbose` defaults to LIBEMBEDDING_VERBOSE
+ * (detail/log.hpp): silent unless the user asks; tests force it to false.
  *
  * `relax_if_infeasible`: when configurations ran but none met the
  * constraints, choose among all of them as if unconstrained, and report it
@@ -64,7 +66,7 @@ struct autotune_search_options {
     double prune_factor = 2.5;           /* racing threshold, x best P50; 0 = off */
     double tie_tolerance = 0.05;         /* costs within 5% are a tie -> earliest point */
     const char* label = "autotune";
-    bool verbose = true;
+    bool verbose = verbose_enabled();
 };
 
 /* `bench(cfg, protocol)` measures one configuration with the given protocol.
@@ -131,6 +133,29 @@ autotune_search_result<Config> autotune_grid_search(const std::vector<Config>& g
                          (int)grid.size());
     }
     return res;
+}
+
+/* "Never worse than the default": the grid holds the default configuration at
+ * `baseline`. When it ran and meets the constraints, it is kept unless the
+ * selected point has a strictly lower cost under the objective. Returns true
+ * when the selection was changed to the baseline. The tie tolerance of the
+ * search already favours the earliest point, so this is a guard against a
+ * selection that is not an improvement, not the normal path. */
+template <class Config>
+bool autotune_keep_baseline(autotune_search_result<Config>& res, int baseline,
+                            lembed_objective_t objective, const autotune_constraints& c) {
+    if (baseline < 0 || baseline >= (int)res.measurements.size()) return false;
+    const autotune_measurement& base = res.measurements[(size_t)baseline];
+    if (!autotune_satisfies(base, c)) return false;
+    if (res.best == baseline) return false;
+    if (res.best >= 0) {
+        autotune_reference ref = autotune_make_reference(res.measurements, c);
+        double best_cost = autotune_cost(res.measurements[(size_t)res.best], ref, objective);
+        double base_cost = autotune_cost(base, ref, objective);
+        if (best_cost < base_cost) return false;
+    }
+    res.best = baseline;
+    return true;
 }
 
 }} /* namespace lembed::detail */

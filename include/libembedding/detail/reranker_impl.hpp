@@ -24,6 +24,7 @@
 #include "batch.hpp"
 #include "sparse_batching.hpp"
 #include "embedding_cache_impl.hpp"
+#include "log.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -32,6 +33,7 @@
 #include <vector>
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 
 /**
  * @brief Reranker context struct (ONNX + llama.cpp backends).
@@ -81,6 +83,14 @@ struct lembed_reranker {
 
     /* Embedding cache (for re-ranked query results) */
     lembed::detail::LRUCache* cache = nullptr;
+
+    /* Thread safety (docs/en/advanced_usage.md, "Thread safety"). The ONNX
+     * tokenizer writes per-instance scratch strings and the GGUF backend
+     * shares one llama_context, so calls on one context are serialised;
+     * stats_mutex guards the counters so the stats getters never wait for an
+     * inference. Lock order: call_mutex, then stats_mutex. */
+    std::mutex call_mutex;
+    mutable std::mutex stats_mutex;
 };
 
 #include "reranker_llama_impl.hpp"
@@ -104,7 +114,10 @@ static bool lembed__path_ends_with_gguf(const char* path) {
     if (!path) return false;
     std::string p = path;
     std::transform(p.begin(), p.end(), p.begin(), ::tolower);
-    return p.size() > 4 && p.substr(p.size() - 4) == ".gguf";
+    /* 5 characters: comparing a 4-character suffix with ".gguf" never matched,
+     * so lembed_reranker_create_from_path() sent every .gguf file down the
+     * ONNX directory path ("Cannot open file: <file>.gguf/model.onnx"). */
+    return p.size() > 5 && p.substr(p.size() - 5) == ".gguf";
 }
 
 static lembed_status_t lembed__reranker_create_onnx_impl(
@@ -116,6 +129,9 @@ static lembed_status_t lembed__reranker_create_onnx_impl(
     char* model_dir_cstr = nullptr;
     lembed_status_t s = LEMBED_OK;
     std::string model_dir;
+
+    s = lembed::detail::onnx_provider_precheck((int)options->provider);
+    if (s != LEMBED_OK) return s;
 
     try {
         lembed_model_info_t info;
@@ -179,8 +195,46 @@ static lembed_status_t lembed__reranker_create_onnx_impl(
             delete ctx;
         }
         if (model_dir_cstr) lembed_free_string(model_dir_cstr);
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the reranker");
+        if (ctx) {
+            delete ctx->cache;
+            delete ctx;
+        }
+        if (model_dir_cstr) lembed_free_string(model_dir_cstr);
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
+}
+
+/* llama.cpp path for a registry reranker: the GGUF registry entry matching the
+ * model's name or code. `auto_fallback` is true when the caller asked for
+ * LEMBED_BACKEND_AUTO and the ONNX model was not found: that switch of backend
+ * is kept (decision D3) but made visible, through a log line here
+ * (LIBEMBEDDING_VERBOSE=1) and through lembed_reranker_backend_name(). */
+static lembed_status_t lembed__reranker_create_gguf_impl(
+        const lembed_reranker_options_t* options,
+        bool auto_fallback,
+        lembed_reranker_t** out) {
+    lembed_model_info_t info;
+    if (lembed_get_reranker_model_info(options->model, &info) == LEMBED_OK) {
+        /* Try to find a matching GGUF model by name or code */
+        const lembed_gguf_model_info_t* gguf_info = lembed_find_gguf_model(info.model_name);
+        if (!gguf_info) gguf_info = lembed_find_gguf_model(info.model_code);
+        if (gguf_info && gguf_info->gguf_url && gguf_info->gguf_url[0]) {
+            if (auto_fallback) {
+                lembed::detail::log_info(
+                    "libembedding: reranker '%s': ONNX model not found, "
+                    "backend AUTO falls back to llama.cpp with GGUF '%s'\n",
+                    info.model_name, gguf_info->name);
+            }
+            return lembed_reranker_create_from_gguf_path(gguf_info->gguf_url, options, out);
+        }
+    }
+    if (!auto_fallback) {
+        lembed::detail::set_error("No GGUF model found for reranker and llama.cpp backend requested");
+    }
+    return LEMBED_ERROR_MODEL_NOT_FOUND;
 }
 
 lembed_status_t lembed_reranker_create(
@@ -196,48 +250,43 @@ lembed_status_t lembed_reranker_create(
         return LEMBED_ERROR_INVALID_ARGUMENT;
     }
 
-    /* If backend is explicitly ONNX, or AUTO and model is an ONNX enum, use ONNX path */
-    if (backend == LEMBED_BACKEND_ONNX || backend == LEMBED_BACKEND_AUTO) {
-        lembed_status_t s = lembed__reranker_create_onnx_impl(
-            options, LEMBED_QUANTIZATION_NONE, 0, out);
-        if (s == LEMBED_OK || backend == LEMBED_BACKEND_ONNX) return s;
-        /* If AUTO and ONNX failed with MODEL_NOT_FOUND, fall through to GGUF */
-        if (s != LEMBED_ERROR_MODEL_NOT_FOUND) return s;
+    if (backend == LEMBED_BACKEND_LLAMACPP) {
+        return lembed__reranker_create_gguf_impl(options, false, out);
     }
 
-    /* llama.cpp backend (explicit or AUTO fallback) */
-    if (backend == LEMBED_BACKEND_LLAMACPP || backend == LEMBED_BACKEND_AUTO) {
-        lembed_model_info_t info;
-        lembed_status_t s = lembed_get_reranker_model_info(options->model, &info);
-        if (s == LEMBED_OK) {
-            /* Try to find a matching GGUF model by name or code */
-            const lembed_gguf_model_info_t* gguf_info = lembed_find_gguf_model(info.model_name);
-            if (!gguf_info) gguf_info = lembed_find_gguf_model(info.model_code);
-            if (gguf_info && gguf_info->gguf_url && gguf_info->gguf_url[0]) {
-                return lembed_reranker_create_from_gguf_path(gguf_info->gguf_url, options, out);
-            }
-        }
-        if (backend == LEMBED_BACKEND_LLAMACPP) {
-            lembed::detail::set_error("No GGUF model found for reranker and llama.cpp backend requested");
-            return LEMBED_ERROR_MODEL_NOT_FOUND;
-        }
+    /* ONNX, explicit or AUTO */
+    lembed_status_t s = lembed__reranker_create_onnx_impl(
+        options, LEMBED_QUANTIZATION_NONE, 0, out);
+    /* Only AUTO falls back, and only when the ONNX model is missing: an
+     * unavailable provider (LEMBED_ERROR_UNSUPPORTED) or a broken model is an
+     * error the caller must see, not a reason to switch runtime. */
+    if (s == LEMBED_OK || backend == LEMBED_BACKEND_ONNX ||
+        s != LEMBED_ERROR_MODEL_NOT_FOUND) {
+        return s;
     }
-
-    return LEMBED_ERROR_MODEL_NOT_FOUND;
+    return lembed__reranker_create_gguf_impl(options, true, out);
 }
 
 lembed_status_t lembed_reranker_create_v2(
         const lembed_reranker_options_v2_t* options,
         lembed_reranker_t** out) {
-    if (!options) return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
     lembed_reranker_options_t base = options->base;
     if (base.backend == LEMBED_BACKEND_LLAMACPP) {
         return lembed_reranker_create(&base, out);
     }
     lembed_status_t s = lembed__reranker_create_onnx_impl(
         &base, (lembed_quantization_t)options->quantization, 1, out);
-    if (s != LEMBED_OK || base.backend != LEMBED_BACKEND_AUTO) return s;
-    return lembed_reranker_create(&base, out);
+    /* Same fallback rule as lembed_reranker_create(). This used to call
+     * lembed_reranker_create() again after a *successful* AUTO load, which
+     * loaded the model a second time, leaked the first context and dropped the
+     * requested quantization; and it never fell back when the ONNX model was
+     * missing. */
+    if (s == LEMBED_OK || base.backend != LEMBED_BACKEND_AUTO ||
+        s != LEMBED_ERROR_MODEL_NOT_FOUND) {
+        return s;
+    }
+    return lembed__reranker_create_gguf_impl(&base, true, out);
 }
 
 lembed_status_t lembed_reranker_create_from_path(
@@ -248,6 +297,11 @@ lembed_status_t lembed_reranker_create_from_path(
 
     if (lembed__path_ends_with_gguf(path)) {
         return lembed_reranker_create_from_gguf_path(path, options, out);
+    }
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
     }
 
     lembed_reranker_t* ctx = nullptr;
@@ -312,6 +366,13 @@ lembed_status_t lembed_reranker_create_from_path(
             delete ctx->cache;
             delete ctx;
         }
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the reranker model");
+        if (ctx) {
+            delete ctx->cache;
+            delete ctx;
+        }
         return LEMBED_ERROR_IO;
     }
 }
@@ -328,6 +389,9 @@ lembed_status_t lembed_reranker_rerank(
 
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
+    /* One call at a time per context: see call_mutex. */
+    std::lock_guard<std::mutex> call_lock(ctx->call_mutex);
+
     try {
         auto t_start = std::chrono::high_resolution_clock::now();
 
@@ -336,22 +400,26 @@ lembed_status_t lembed_reranker_rerank(
         miss_indices.reserve(num_documents);
 
         if (ctx->cache) {
+            uint64_t hits = 0;
             for (int i = 0; i < num_documents; i++) {
                 std::string key = std::string(query) + "\n" + documents[i];
                 std::vector<float> cached;
                 if (ctx->cache->get_copy(key, cached) && cached.size() == 1) {
                     all_scores[i] = cached[0];
-                    ctx->cache_hits++;
+                    hits++;
                 } else {
                     miss_indices.push_back(i);
-                    ctx->cache_misses++;
                 }
             }
+            std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
+            ctx->cache_hits += hits;
+            ctx->cache_misses += (uint64_t)miss_indices.size();
         } else {
             miss_indices.reserve(num_documents);
             for (int i = 0; i < num_documents; i++) {
                 miss_indices.push_back(i);
             }
+            std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
             ctx->cache_misses += num_documents;
         }
 
@@ -377,13 +445,15 @@ lembed_status_t lembed_reranker_rerank(
                  * of 256 a whole request used to be one batch padded to its
                  * longest pair (same defect, same fix as the dense path). */
                 const int n_miss = (int)miss_indices.size();
-                std::vector<std::string> pairs((size_t)n_miss);
+                /* Real sequence pair (post_processor template, segment ids). */
+                std::vector<std::vector<int>> pair_ids((size_t)n_miss);
+                std::vector<std::vector<int>> pair_types((size_t)n_miss);
                 std::vector<int> pair_tokens((size_t)n_miss, 0);
                 for (int i = 0; i < n_miss; i++) {
-                    pairs[(size_t)i] = std::string(query) + " [SEP] " + documents[miss_indices[i]];
-                    pair_tokens[(size_t)i] = std::min(
-                        ctx->max_length,
-                        (int)ctx->onnx.tokenizer.encode(pairs[(size_t)i]).size());
+                    ctx->onnx.tokenizer.encode_pair(query, documents[miss_indices[i]],
+                                                    pair_ids[(size_t)i], pair_types[(size_t)i]);
+                    pair_tokens[(size_t)i] = std::min(ctx->max_length,
+                                                      (int)pair_ids[(size_t)i].size());
                 }
                 std::vector<int> order((size_t)n_miss);
                 for (int i = 0; i < n_miss; i++) order[(size_t)i] = i;
@@ -410,13 +480,15 @@ lembed_status_t lembed_reranker_rerank(
                     onnx_batches++;
                     int bsz = range.end - range.start;
 
-                    std::vector<std::string> pair_texts;
-                    pair_texts.reserve(bsz);
+                    std::vector<std::vector<int>> b_ids, b_types;
+                    b_ids.reserve(bsz);
+                    b_types.reserve(bsz);
                     for (int i = range.start; i < range.end; i++) {
-                        pair_texts.push_back(pairs[(size_t)order[(size_t)i]]);
+                        b_ids.push_back(pair_ids[(size_t)order[(size_t)i]]);
+                        b_types.push_back(pair_types[(size_t)order[(size_t)i]]);
                     }
 
-                    auto enc = ctx->onnx.tokenizer.encode_batch(pair_texts);
+                    auto enc = ctx->onnx.tokenizer.encode_batch(b_ids, &b_types);
                     int seq_len = enc.seq_length;
 
                     std::vector<int64_t> ids_flat(bsz * seq_len);
@@ -427,6 +499,7 @@ lembed_status_t lembed_reranker_rerank(
                         for (int j = 0; j < seq_len; j++) {
                             ids_flat[i * seq_len + j] = enc.input_ids[i][j];
                             mask_flat[i * seq_len + j] = enc.attention_mask[i][j];
+                            type_flat[i * seq_len + j] = enc.token_type_ids[i][j];
                         }
                     }
 
@@ -464,6 +537,7 @@ lembed_status_t lembed_reranker_rerank(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += num_documents;
         ctx->batches_run += (ctx->backend_type == LEMBED_BACKEND_LLAMACPP)
                                 ? (uint64_t)lembed::detail::batch_count((int)miss_indices.size(),
@@ -495,9 +569,25 @@ int lembed_reranker_max_length(const lembed_reranker_t* ctx) {
     return ctx ? ctx->max_length : 0;
 }
 
+const char* lembed_reranker_backend_name(const lembed_reranker_t* ctx) {
+    if (!ctx) return nullptr;
+    return ctx->backend_type == LEMBED_BACKEND_LLAMACPP ? "llama.cpp" : "onnxruntime";
+}
+
+const char* lembed_reranker_effective_provider(const lembed_reranker_t* ctx) {
+    if (!ctx) return nullptr;
+    /* The llama.cpp reranker is always loaded with n_gpu_layers = 0
+     * (reranker_llama_impl.hpp), so it runs on the ggml CPU backend. An ONNX
+     * context exists only if its provider could be attached: an unavailable
+     * one fails the create with LEMBED_ERROR_UNSUPPORTED. */
+    if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) return "CPU";
+    return lembed_execution_provider_name((int)ctx->provider);
+}
+
 void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out) {
     if (!out) return;
     if (!ctx) { memset(out, 0, sizeof(*out)); return; }
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->texts_embedded = ctx->texts_embedded;
     out->batches_run = ctx->batches_run;
     out->avg_latency_ms = ctx->stats_calls > 0
@@ -509,6 +599,7 @@ void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* o
     if (!out) return;
     memset(out, 0, sizeof(*out));
     if (!ctx) return;
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->base.texts_embedded = ctx->texts_embedded;
     out->base.batches_run = ctx->batches_run;
     out->base.avg_latency_ms = ctx->stats_calls > 0

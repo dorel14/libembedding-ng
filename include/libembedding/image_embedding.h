@@ -54,6 +54,28 @@ const lembed_model_desc_t* lembed_image_embedding_desc(const lembed_image_embedd
 const char* lembed_image_embedding_model_name(const lembed_image_embedding_t* ctx);
 int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx);
 
+/**
+ * @brief Runtime that actually serves this context: always "onnxruntime".
+ *
+ * Provided for parity with the text, sparse and reranker contexts.
+ *
+ * @param ctx Image embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_image_embedding_backend_name(const lembed_image_embedding_t* ctx);
+
+/**
+ * @brief Execution provider actually running the model.
+ *
+ * "CPU", "CUDA", "CoreML", "DirectML" or "TensorRT" (spelling of
+ * lembed_execution_provider_name()). A provider other than CPU that cannot be
+ * attached makes the create function fail with LEMBED_ERROR_UNSUPPORTED.
+ *
+ * @param ctx Image embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_image_embedding_effective_provider(const lembed_image_embedding_t* ctx);
+
 /* Runtime statistics */
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out);
 /* Versioned stats (cache fields present for API parity with the dense/rerank
@@ -85,6 +107,7 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -107,6 +130,12 @@ struct lembed_image_embedding {
     uint64_t batches_run = 0;
     double   total_latency_ms = 0.0;
     int      stats_calls = 0;
+
+    /* Thread safety (docs/en/advanced_usage.md, "Thread safety"). Image
+     * inference keeps no per-context scratch state (buffers are per call and
+     * OrtApi::Run is thread-safe), so concurrent calls on one context run in
+     * parallel. Only the counters are shared: stats_mutex guards them. */
+    mutable std::mutex stats_mutex;
 };
 
 #ifdef __cplusplus
@@ -117,6 +146,11 @@ lembed_status_t lembed_image_embedding_create(
         const lembed_image_options_t* options,
         lembed_image_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
 
     try {
         lembed_model_info_t info;
@@ -160,6 +194,9 @@ lembed_status_t lembed_image_embedding_create(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the image embedding");
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
@@ -169,6 +206,11 @@ lembed_status_t lembed_image_embedding_create_from_path(
         const lembed_image_options_t* options,
         lembed_image_embedding_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
 
     try {
         /* Read model.onnx */
@@ -219,6 +261,9 @@ lembed_status_t lembed_image_embedding_create_from_path(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the image model");
         return LEMBED_ERROR_IO;
     }
 }
@@ -291,6 +336,7 @@ lembed_status_t lembed_image_embedding_embed_files(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += (uint64_t)num_images;
         ctx->batches_run += (uint64_t)num_batches;
         ctx->total_latency_ms += elapsed_ms;
@@ -367,6 +413,7 @@ lembed_status_t lembed_image_embedding_embed_bytes(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += num_images;
         ctx->batches_run += num_batches;
         ctx->total_latency_ms += elapsed_ms;
@@ -396,9 +443,18 @@ int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx) {
     return 0; /* N/A for image models */
 }
 
+const char* lembed_image_embedding_backend_name(const lembed_image_embedding_t* ctx) {
+    return ctx ? "onnxruntime" : nullptr;
+}
+
+const char* lembed_image_embedding_effective_provider(const lembed_image_embedding_t* ctx) {
+    return ctx ? lembed_execution_provider_name((int)ctx->provider) : nullptr;
+}
+
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out) {
     if (!out) return;
     if (!ctx) { memset(out, 0, sizeof(*out)); return; }
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->texts_embedded = ctx->texts_embedded;
     out->batches_run = ctx->batches_run;
     out->avg_latency_ms = ctx->stats_calls > 0
@@ -414,6 +470,7 @@ void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed
     if (!out) return;
     memset(out, 0, sizeof(*out));
     if (!ctx) return;
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->base.texts_embedded = ctx->texts_embedded;
     out->base.batches_run = ctx->batches_run;
     out->base.avg_latency_ms = ctx->stats_calls > 0

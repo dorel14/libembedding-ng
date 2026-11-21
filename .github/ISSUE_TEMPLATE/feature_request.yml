@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose an addition or a change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Out of scope: vector search (HNSW, IVF, PQ, top-K nearest neighbours), a `backend=`
+        parameter, GPU backends before 2.x. See CONTRIBUTING.md.
+  - type: input
+    id: version
+    attributes:
+      label: libembedding-ng version
+      placeholder: "1.14.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and architecture
+      placeholder: "Windows 11 x86_64"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend concerned
+      options:
+        - ".onnx (ONNX Runtime)"
+        - ".gguf (llama.cpp or sparse ggml runtime)"
+        - "Both"
+        - "Not backend specific"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model (if relevant)
+      description: Hugging Face identifier and its licence. Registry models must be MIT-compatible.
+  - type: textarea
+    id: repro
+    attributes:
+      label: Problem and current workaround
+      description: What you try to do, what happens today (code or command), and why it falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Desired API or behaviour. If it is about performance, say how you would measure it.

@@ -179,8 +179,24 @@ def list_reranker_models() -> list[ModelInfo]:
     return _list_models(lib.lembed_list_reranker_models)
 
 
-def _desc_from_c(desc_ptr, desc_v2_ptr=None) -> ModelDesc:
-    """Convert a C descriptor pointer to ModelDesc."""
+def _c_string(ptr) -> str:
+    """Decode a C string owned by the library ("" for NULL)."""
+    return ffi.string(ptr).decode("utf-8", errors="replace") if ptr else ""
+
+
+def _desc_from_c(
+    desc_ptr,
+    desc_v2_ptr=None,
+    *,
+    backend: str = "",
+    effective_provider: str = "",
+) -> ModelDesc:
+    """Convert a C descriptor pointer to ModelDesc.
+
+    ``backend`` and ``effective_provider`` come from the
+    ``lembed_*_backend_name`` / ``lembed_*_effective_provider`` accessors:
+    the C descriptor struct has no room for them without an ABI change.
+    """
     quantization = _QUANTIZATION_NAMES.get(0, "none")
     cache_size = 0
     if desc_v2_ptr is not None:
@@ -203,6 +219,8 @@ def _desc_from_c(desc_ptr, desc_v2_ptr=None) -> ModelDesc:
         device_id=desc_ptr.device_id,
         quantization=quantization,
         cache_size=cache_size,
+        backend=backend,
+        effective_provider=effective_provider.lower(),
     )
 
 

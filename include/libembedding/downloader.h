@@ -105,6 +105,7 @@ lembed_status_t lembed_cleanup_model_cache_except(
 /* ---- Implementation ---- */
 #ifdef LIBEMBEDDING_IMPLEMENTATION
 
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -113,6 +114,7 @@ lembed_status_t lembed_cleanup_model_cache_except(
 #include <vector>
 #include "detail/downloader_impl.hpp"
 #include "detail/download_manager.hpp"
+#include "detail/log.hpp"
 #include "gguf_registry.h"
 #include "model_registry.h"
 
@@ -141,7 +143,7 @@ lembed_status_t lembed_ensure_text_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -160,7 +162,7 @@ lembed_status_t lembed_ensure_sparse_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -180,7 +182,7 @@ lembed_status_t lembed_ensure_image_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -201,7 +203,7 @@ lembed_status_t lembed_ensure_reranker_model(
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;
-    } catch (const lembed::detail::model_too_large_error& e) {
+    } catch (const lembed::detail::model_refused_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
@@ -239,10 +241,13 @@ lembed_status_t lembed_ensure_gguf_model(
          * the ONNX models are in ensure_model_by_kind(). A repo/file outside
          * the registry has no known size and is not checked. */
         const int limit = lembed_mobile_model_limit_mb();
-        if (limit > 0) {
+        /* Both GGUF registries, dense then sparse; light models are proposed
+         * from the same registry as the refused one. */
+        for (int registry = 0; limit > 0 && registry < 2; registry++) {
             const lembed_gguf_model_info_t* models = nullptr;
             int count = 0;
-            lembed_list_gguf_models(&models, &count);
+            if (registry == 0) lembed_list_gguf_models(&models, &count);
+            else lembed_list_sparse_gguf_models(&models, &count);
             const std::string suffix = std::string(repo) + "/resolve/main/" + file;
             for (int i = 0; i < count; i++) {
                 const std::string url(models[i].gguf_url ? models[i].gguf_url : "");
@@ -329,7 +334,7 @@ lembed_status_t lembed_resolve_gguf_path(
         /* Case 1: local .gguf file path */
         if (input.size() > 5) {
             std::string lower = input;
-            for (auto& c : lower) c = (char)tolower(c);
+            for (auto& c : lower) c = (char)tolower((unsigned char)c);
             if (lower.substr(lower.size() - 5) == ".gguf" && lembed::detail::file_exists(input)) {
                 *model_path_out = strdup(input.c_str());
                 return LEMBED_OK;
@@ -428,11 +433,59 @@ lembed_status_t lembed_cleanup_model_cache(
             return LEMBED_OK;
         }
 
-        /* Build set of model directories to keep */
+        /* Build set of model directories to keep. A model is cached under the
+         * repository actually downloaded (registry model_code, e.g.
+         * Qdrant/bge-small-en-v1.5-onnx-Q), while callers name it by its usual
+         * name (model_name, e.g. BAAI/bge-small-en-v1.5): keeping only the
+         * literal name deleted the very model the caller meant to keep. Every
+         * registry entry matching a kept name, by either field and ignoring
+         * case, keeps its download directory too; GGUF entries likewise. */
+        auto same = [](const char* a, const char* b) {
+            if (!a || !b) return false;
+            for (; *a && *b; ++a, ++b) {
+                if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b)) return false;
+            }
+            return *a == *b;
+        };
         std::unordered_set<std::string> keep_dirs;
+        auto keep_repo = [&keep_dirs](const std::string& repo) {
+            keep_dirs.insert("models--" + lembed::detail::repo_to_dirname(repo));
+        };
+        using list_fn = lembed_status_t (*)(const lembed_model_info_t**, int*);
+        const list_fn registries[] = {
+            lembed_list_text_models, lembed_list_sparse_models,
+#ifndef LIBEMBEDDING_NO_IMAGE
+            lembed_list_image_models,
+#endif
+            lembed_list_reranker_models,
+        };
+        const lembed_gguf_model_info_t* gguf = nullptr;
+        int gguf_count = 0;
+        lembed_list_gguf_models(&gguf, &gguf_count);
         for (int i = 0; keep_models[i]; i++) {
-            std::string repo_dir = lembed::detail::repo_to_dirname(keep_models[i]);
-            keep_dirs.insert("models--" + repo_dir);
+            const char* wanted = keep_models[i];
+            keep_repo(wanted);
+            for (list_fn list : registries) {
+                const lembed_model_info_t* models = nullptr;
+                int count = 0;
+                if (list(&models, &count) != LEMBED_OK) continue;
+                for (int m = 0; m < count; m++) {
+                    if (same(wanted, models[m].model_name) || same(wanted, models[m].model_code)) {
+                        keep_repo(models[m].model_code);
+                    }
+                }
+            }
+            for (int g = 0; g < gguf_count; g++) {
+                if (!same(wanted, gguf[g].name) && !same(wanted, gguf[g].model_code)) continue;
+                /* https://huggingface.co/<repo>/resolve/main/<file> */
+                const std::string url(gguf[g].gguf_url ? gguf[g].gguf_url : "");
+                const std::string host = "huggingface.co/";
+                const size_t start = url.find(host);
+                const size_t end = url.find("/resolve/");
+                if (start != std::string::npos && end != std::string::npos && end > start) {
+                    keep_repo(url.substr(start + host.size(), end - start - host.size()));
+                }
+            }
         }
 
         /* Also always keep tune_cache.json and any non-model directories */
@@ -457,12 +510,13 @@ lembed_status_t lembed_cleanup_model_cache(
         }
 
         if (dry_run) {
-            /* Report what would be deleted */
+            /* The counts are returned through deleted_count / freed_bytes;
+             * the per-directory list only with LIBEMBEDDING_VERBOSE. */
             for (const auto& path : to_delete) {
-                fprintf(stderr, "[cleanup] Would delete: %s\n", path.c_str());
+                lembed::detail::log_info("[cleanup] Would delete: %s\n", path.c_str());
             }
-            fprintf(stderr, "[cleanup] Total: %zu directories, %llu bytes\n",
-                    to_delete.size(), (unsigned long long)local_freed);
+            lembed::detail::log_info("[cleanup] Total: %zu directories, %llu bytes\n",
+                                     to_delete.size(), (unsigned long long)local_freed);
             if (deleted_count) *deleted_count = to_delete.size();
             if (freed_bytes) *freed_bytes = local_freed;
             return LEMBED_OK;

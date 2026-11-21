@@ -28,6 +28,7 @@ TextEmbedding(
     auto_workers=False,
     cache_size=0,
     quantization=None,
+    truncate_dim=None,
     num_threads=None,  # déprécié
 )
 ```
@@ -50,6 +51,7 @@ TextEmbedding(
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
 | `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. ⚠️ `"fp16"` n'est pas de l'INT8 : ce sont des poids `FLOAT16` servis par un graphe optimisé ORT. Sur un CPU sans arithmétique FP16 native, ils sont plus lents que FP32 tout en occupant moins de disque — utile pour la taille, pas pour le débit. Les quatre entrées `Qdrant/*-onnx-Q` (dont `bge-small-en-v1.5`) sont dans ce cas ; leur suffixe `_Q` et leur description historique « Quantized » ne Changeaient pas. |
 | `preferred_quantization` | `str \| None` | `None` | `"auto"` = **sélection mesurée** : les variantes réellement livrées par le registre pour ce modèle sont benchmarkées une fois par (modèle, machine, version de la lib), le gagnant est mis en cache, et les chargements suivants lisent le cache. Règle : sans baseline FP32 mesurable → FP32 ; une variante doit battre FP32 de **plus de 5 %** ; et **l'INT8 dynamique est préféré** — une autre variante doit le battre de **plus de 15 %**. Coût : ~3,5 s au tout premier chargement d'un modèle, puis gratuit. Voir [Quantification](#quantification--fp32-vs-int8) pour les mesures. |
+| `truncate_dim` | `int \| None` | `None` | Troncature [Matryoshka](matryoshka.md) : garde les `truncate_dim` premières composantes de chaque vecteur puis les renormalise en L2. Entre `1` et la dimension native (sinon `ValueError`). Réservé aux modèles entraînés en Matryoshka (`nomic-embed-text-v1.5`, `mxbai-embed-large-v1`, `embeddinggemma-300m`). |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -59,12 +61,16 @@ TextEmbedding(
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed les textes. Retourne un tableau de forme `(n, dim)` en `float32`. L2-normalisé. |
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
-| `dim` | `int` (property) | Dimension de l'embedding |
+| `dim` | `int` (property) | Dimension des vecteurs renvoyés (`truncate_dim` s'il est défini) |
+| `native_dim` | `int` (property) | Dimension produite par le modèle, avant troncature |
+| `truncate_dim` | `int \| None` (property) | Taille de troncature Matryoshka, `None` si les vecteurs sont complets |
 | `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
 | `quantization_reason` | `str` (property) | Justification du choix quand `preferred_quantization="auto"` a tourné, ex. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Vide si aucun mode n'a été mesuré (mode explicite, ou modèle sans variante quantifiée). |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `model_name` | `str` (property) | Nom de registre du modèle chargé |
+| `backend` | `str` (property) | Runtime qui sert réellement le modèle : `"onnxruntime"` ou `"llama.cpp"` (voir [Backend et provider effectifs](#backend-et-provider-effectifs)) |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé, en minuscules : `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"` ; `"gpu"` pour llama.cpp avec des couches déportées |
 | `info()` | `ModelDesc` | Descripteur du modèle chargé |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources C sous-jacentes |
@@ -145,6 +151,8 @@ SparseTextEmbedding(
 | `embed(texts, batch_size=0)` | `list[SparseEmbedding]` | Retourne une liste d'objets `SparseEmbedding` |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | `"onnxruntime"` ou `"ggml-sparse"` (runtime ggml maison des GGUF SPLADE, pas llama.cpp) |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé (`"cpu"` pour `"ggml-sparse"`) |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
@@ -196,6 +204,8 @@ ImageEmbedding(
 | `dim` | `int` (property) | Dimension de l'embedding |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | Toujours `"onnxruntime"` |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `close()` | `None` | Libère les ressources |
 | `list_supported_models()` | `list[ModelInfo]` | (static) Liste les modèles image |
@@ -215,6 +225,8 @@ print(embeddings.shape)  # (2, 512)
 ### Reranker
 
 Score et trie des documents par pertinence par rapport à une requête (cross-encoder).
+
+Sur ONNX, requête et document sont encodés comme une vraie paire de séquences, selon le `post_processor` du `tokenizer.json` (gabarit de paire, tokens spéciaux, `token_type_ids`), avec troncature `longest_first` ; à défaut, style BERT `[CLS] q [SEP] d [SEP]`.
 
 #### Constructeur
 
@@ -262,6 +274,8 @@ Reranker(
 | `rerank(query, documents, batch_size=0)` | `list[RerankResult]` | Retourne les résultats triés par score décroissant |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | `"onnxruntime"` ou `"llama.cpp"` : avec `backend="auto"`, un modèle sans fichiers ONNX peut être servi par son équivalent GGUF, et c'est ici que la bascule se voit |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé (`"cpu"` pour llama.cpp) |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
@@ -525,11 +539,54 @@ class ModelDesc:
     pooling: str   # "cls" ou "mean"
     num_threads: int
     batch_size: int
-    provider: str
-    device_id: int
+    provider: str = "cpu"          # provider demandé ("llama" pour tout contexte GGUF)
+    device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    backend: str = ""              # "onnxruntime", "llama.cpp" ou "ggml-sparse"
+    effective_provider: str = ""   # provider réellement utilisé : "cpu", "cuda", ...
 ```
+
+`backend` et `effective_provider` sont ajoutés en fin de classe avec une valeur
+par défaut : le code qui construit un `ModelDesc` par position continue de
+fonctionner. `info()` les remplit toujours.
+
+### Backend et provider effectifs
+
+Chaque modèle indique quel runtime le sert et sur quel provider il tourne
+réellement (propriétés `backend` / `provider`, champs `info().backend` /
+`info().effective_provider`) :
+
+| `backend` | Signification | `provider` |
+|---|---|---|
+| `"onnxruntime"` | Modèle ONNX | `"cpu"`, ou le provider demandé s'il a pu être attaché |
+| `"llama.cpp"` | Modèle GGUF dense ou reranker | `"cpu"` ; `"gpu"` si `llama_n_gpu_layers != 0` et que ggml dispose d'un périphérique GPU (aucun dans les builds livrés) |
+| `"ggml-sparse"` | Modèle GGUF SPLADE (runtime ggml maison) | `"cpu"` |
+
+**Provider demandé explicitement mais indisponible : erreur.** `"cpu"` est la
+valeur par défaut et il n'existe pas de provider « auto » : toute autre valeur
+est une demande explicite. Si elle ne peut pas être attachée (build sans CUDA,
+DirectML ou TensorRT, CoreML hors Apple, `"llama"` sur un modèle ONNX, valeur
+inconnue), la construction lève `UnsupportedError` avec la raison, au lieu de
+tourner sur CPU sans le dire. La vérification a lieu avant l'analyse du modèle.
+
+```python
+from libembedding import TextEmbedding
+from libembedding.exceptions import UnsupportedError
+
+try:
+    model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda")
+except UnsupportedError as e:
+    print(e.detail)  # "Execution provider CUDA was requested but is not available: ..."
+
+model = TextEmbedding("BAAI/bge-small-en-v1.5")
+print(model.backend, model.provider)  # onnxruntime cpu
+```
+
+**Bascule `Reranker(backend="auto")` vers GGUF : conservée mais visible.** Quand
+le modèle demandé n'a pas de fichiers ONNX et qu'un équivalent GGUF existe, le
+reranker est servi par llama.cpp : `reranker.backend` vaut alors `"llama.cpp"`,
+et `LIBEMBEDDING_VERBOSE=1` écrit la bascule sur stderr.
 
 ---
 
@@ -754,3 +811,51 @@ if (lembed_cache_get(cache, "Hello world", &vec, &dim)) {
 
 lembed_cache_free(cache);
 ```
+
+### Backend et provider effectifs (C API)
+
+Deux accesseurs par type de contexte. Ils renvoient des chaînes statiques (à ne
+pas libérer), `NULL` si le contexte est `NULL`. Aucun champ n'est ajouté à
+`lembed_model_desc_t` : sa taille (ABI) ne change pas.
+
+| Fonction | Valeurs |
+|---|---|
+| `lembed_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_text_embedding_effective_provider(ctx)` | `"CPU"`, `"CUDA"`, `"CoreML"`, `"DirectML"`, `"TensorRT"` ; llama.cpp : `"CPU"`, ou `"GPU"` si des couches sont déportées sur un périphérique GPU ggml |
+| `lembed_sparse_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"ggml-sparse"` |
+| `lembed_sparse_text_embedding_effective_provider(ctx)` | idem ONNX ; `"CPU"` pour `"ggml-sparse"` |
+| `lembed_reranker_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_reranker_effective_provider(ctx)` | idem ONNX ; `"CPU"` pour llama.cpp |
+| `lembed_image_embedding_backend_name(ctx)` | `"onnxruntime"` |
+| `lembed_image_embedding_effective_provider(ctx)` | idem ONNX |
+
+Les noms de provider suivent l'orthographe de `lembed_execution_provider_name()`.
+
+```c
+lembed_text_options_t opts = lembed_text_options_default();
+opts.provider = LEMBED_PROVIDER_CUDA;
+lembed_text_embedding_t* ctx = NULL;
+lembed_status_t s = lembed_text_embedding_create(&opts, &ctx);
+if (s == LEMBED_ERROR_UNSUPPORTED) {
+    /* "Execution provider CUDA was requested but is not available: ..." */
+    fprintf(stderr, "%s\n", lembed_last_error());
+    opts.provider = LEMBED_PROVIDER_CPU;
+    s = lembed_text_embedding_create(&opts, &ctx);
+}
+printf("%s on %s\n", lembed_text_embedding_backend_name(ctx),
+       lembed_text_embedding_effective_provider(ctx));  /* onnxruntime on CPU */
+```
+
+**Changement de comportement (décision D3).** Un provider autre que
+`LEMBED_PROVIDER_CPU` qui ne peut pas être attaché à la session ONNX Runtime fait
+échouer la création avec `LEMBED_ERROR_UNSUPPORTED` et un message dans
+`lembed_last_error()`, au lieu de basculer silencieusement sur CPU.
+`LEMBED_PROVIDER_CPU` est la valeur par défaut des structures d'options et il
+n'existe pas de provider « auto » : toute autre valeur est une demande explicite.
+Cela vaut aussi pour `LEMBED_PROVIDER_LLAMACPP` passé à un modèle ONNX et pour
+une valeur hors énumération. Les chemins GGUF (llama.cpp, `ggml-sparse`)
+ignorent le provider comme avant.
+
+La bascule `LEMBED_BACKEND_AUTO` du reranker (modèle ONNX introuvable, entrée
+GGUF correspondante) est conservée : `lembed_reranker_backend_name()` renvoie
+alors `"llama.cpp"` et `LIBEMBEDDING_VERBOSE=1` journalise la bascule.

@@ -29,6 +29,8 @@ EXPECTED_SIZES_64 = {
     "lembed_text_options_v2_t": 96,
     "lembed_tuning_result_t": 40,
     "lembed_sparse_tuning_result_t": 48,
+    # v1 (48) + 3 ints = 60, padded to 8.
+    "lembed_sparse_tuning_result_v2_t": 64,
     "lembed_reranker_tuning_result_t": 48,
     "lembed_unified_tuning_result_t": 64,
     "lembed_autotune_options_t": 48,
@@ -41,17 +43,46 @@ EXPECTED_SIZES_64 = {
     "lembed_quantization_choice_t": 336,
 }
 
-IS_64_BIT = struct.calcsize("P") == 8
+# 32-bit ABI with 8-byte aligned double/uint64 (ARM EABI armv7l, MSVC x86).
+# Only structs holding a pointer or size_t (4 bytes here) differ from 64-bit.
+EXPECTED_SIZES_32 = {
+    **EXPECTED_SIZES_64,
+    "lembed_model_desc_t": 32,  # ptr 4 + 7 ints
+    "lembed_model_desc_v2_t": 40,  # 32 + 2 ints
+    "lembed_embeddings_t": 12,  # ptr + 2 ints
+    "lembed_sparse_embedding_t": 12,  # 2 ptrs + int
+    "lembed_cache_config_t": 12,  # 2 size_t + int
+    "lembed_text_options_t": 76,  # 12 + ptr 4 + 15 ints (60)
+    "lembed_text_options_v2_t": 80,
+    # 3 enums, ptr @12, int @16 -> 24, double @24, int @32 -> 40.
+    "lembed_autotune_options_t": 40,
+    # No pointer: same as 64-bit.
+    "lembed_sparse_tuning_result_t": 48,
+    "lembed_sparse_tuning_result_v2_t": 64,
+}
 
-requires_64_bit = pytest.mark.skipif(
-    not IS_64_BIT, reason="frozen sizes only cover the 64-bit ABI"
+IS_64_BIT = struct.calcsize("P") == 8
+# i386 System V aligns double/uint64 to 4 in structs: not frozen.
+IS_32_BIT_8ALIGN = (
+    struct.calcsize("P") == 4
+    and ffi.alignof("double") == 8
+    and ffi.alignof("uint64_t") == 8
+)
+
+EXPECTED_SIZES = (
+    EXPECTED_SIZES_64 if IS_64_BIT else EXPECTED_SIZES_32 if IS_32_BIT_8ALIGN else {}
+)
+
+requires_known_abi = pytest.mark.skipif(
+    not EXPECTED_SIZES,
+    reason="frozen sizes cover 64-bit and 32-bit with 8-byte aligned double",
 )
 
 
-@requires_64_bit
+@requires_known_abi
 @pytest.mark.parametrize("type_name", sorted(EXPECTED_SIZES_64))
 def test_struct_sizes_match_c(type_name):
-    expected = EXPECTED_SIZES_64[type_name]
+    expected = EXPECTED_SIZES[type_name]
     actual = ffi.sizeof(type_name)
     assert actual == expected, (
         f"sizeof({type_name}) = {actual} in _cdefs.h, expected {expected} "

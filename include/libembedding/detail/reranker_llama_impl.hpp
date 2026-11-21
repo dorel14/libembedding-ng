@@ -83,6 +83,12 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
         ctx->desc.batch_size = ctx->batch_size;
         ctx->desc.provider = ctx->provider;
         ctx->desc.device_id = ctx->device_id;
+        /* desc_v2 too: lembed_reranker_desc_v2() (what the Python info() reads)
+         * returned an all-zero descriptor, empty name included, for a GGUF
+         * reranker. */
+        ctx->desc_v2.base = ctx->desc;
+        ctx->desc_v2.quantization = (int)LEMBED_QUANTIZATION_NONE;
+        ctx->desc_v2.cache_size = 0;
 
         *out = ctx;
         return LEMBED_OK;

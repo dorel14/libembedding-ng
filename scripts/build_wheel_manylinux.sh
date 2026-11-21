@@ -4,11 +4,13 @@
 # Build the shared library and the Python wheel inside a manylinux container,
 # then repair the wheel with auditwheel. Called by .github/workflows/build-wheel.yml.
 #
-# Why a container: ggml's armv9.2 CPU variants need -march=armv9.2-a+sme, which
-# only GCC 14 accepts. A GCC 14 installed on the Ubuntu runner links against its
-# own libstdc++ and drags the wheel up to manylinux_2_39, which the runner's
-# glibc 2.35 itself refuses. manylinux_2_28's gcc-toolset-14 keeps every
-# GLIBCXX symbol within the glibc 2.28 baseline.
+# Why a container: the wheel's manylinux tag follows the toolchain it was built
+# with. On the Ubuntu 22.04 runner x86_64 came out as manylinux_2_34. For
+# aarch64, ggml's armv9.2 CPU variants need -march=armv9.2-a+sme, which only
+# GCC 14 accepts; a GCC 14 installed on the Ubuntu runner links against its own
+# libstdc++ and drags the wheel up to manylinux_2_39, which the runner's glibc
+# 2.35 itself refuses. manylinux_2_28's gcc-toolset-14 keeps every GLIBCXX
+# symbol within the glibc 2.28 baseline. Used for x86_64 and aarch64.
 #
 # Downloads go through a static libcurl over mbedTLS (build_curl_mbedtls.sh),
 # linked into libembedding.so: the system libcurl would make auditwheel graft
@@ -57,7 +59,8 @@ echo "== system dependencies"
 dnf install -y bzip2 xz
 
 echo "== ONNX Runtime ${ONNXRUNTIME_VERSION} (${ort_arch})"
-curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}.tgz" | tar xz
+# GitHub release asset, NuGet fallback (see fetch_onnxruntime.sh).
+bash scripts/fetch_onnxruntime.sh "linux-${ort_arch}" "${ONNXRUNTIME_VERSION}" > /dev/null
 ort_root="$PWD/onnxruntime-linux-${ort_arch}-${ONNXRUNTIME_VERSION}"
 
 echo "== static libcurl over mbedTLS"
@@ -92,8 +95,11 @@ bash scripts/collect_wheel_licenses.sh "$ONNXRUNTIME_VERSION" \
 echo "== package contents"
 pkg=python/src/libembedding
 cp build/libembedding.so "$pkg/"
-cp "$ort_root/lib/libonnxruntime.so" "$pkg/"
-cp "$ort_root/lib/libonnxruntime_providers_shared.so" "$pkg/" 2>/dev/null || true
+# ONNX Runtime is not copied: libembedding.so needs it by SONAME
+# (libonnxruntime.so.1) and auditwheel grafts it into libembedding_ng.libs/
+# from the build RUNPATH. A copy here was a second, never loaded ONNX Runtime
+# (~25 MB). libonnxruntime_providers_shared.so only serves the CUDA/TensorRT
+# style execution providers, which the wheel does not ship.
 # ggml CPU variants are dlopen()ed, never linked: auditwheel cannot find them
 # through libembedding's dependencies, so they must already be in the package.
 shopt -s nullglob

@@ -55,6 +55,14 @@ class ModelDesc:
     device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    # Runtime actually serving the model: "onnxruntime", "llama.cpp" or
+    # "ggml-sparse" (the in-house SPLADE runtime). "" when not reported.
+    backend: str = ""
+    # Execution provider actually in use, lowercase: "cpu", "cuda", "coreml",
+    # "directml", "tensorrt", or "gpu" for llama.cpp offload. Unlike
+    # `provider` (the requested value, "llama" for every GGUF context), this
+    # names the device. "" when not reported.
+    effective_provider: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +113,12 @@ class SparseTuningResult:
     throughput_docs_sec: float
     latency_ms: float
     memory_mb: float
+    # GGUF runtime only (0 for ONNX models). workers: pass as ``workers=``
+    # (0 = automatic); max_batch_tokens: apply with ``set_max_batch_tokens()``.
+    workers: int = 0
+    max_batch_tokens: int = 0
+    # True when the result was read from the tune cache (no benchmark ran).
+    from_cache: bool = False
 
 
 @dataclass(frozen=True)

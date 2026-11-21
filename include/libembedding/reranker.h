@@ -70,6 +70,31 @@ const lembed_model_desc_v2_t* lembed_reranker_desc_v2(const lembed_reranker_t* c
 const char* lembed_reranker_model_name(const lembed_reranker_t* ctx);
 int lembed_reranker_max_length(const lembed_reranker_t* ctx);
 
+/**
+ * @brief Runtime that actually serves this context.
+ *
+ * "onnxruntime" or "llama.cpp". With LEMBED_BACKEND_AUTO, a registry model
+ * whose ONNX files cannot be found may be served by its GGUF counterpart: this
+ * is how a caller sees that switch (LIBEMBEDDING_VERBOSE=1 also logs it).
+ *
+ * @param ctx Reranker context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_reranker_backend_name(const lembed_reranker_t* ctx);
+
+/**
+ * @brief Execution provider actually running the model.
+ *
+ * Same spelling as lembed_execution_provider_name(): "CPU", "CUDA", "CoreML",
+ * "DirectML" or "TensorRT" for ONNX Runtime; "CPU" for llama.cpp. A provider
+ * other than CPU that cannot be attached makes the create function fail with
+ * LEMBED_ERROR_UNSUPPORTED, so this never reports a provider that is not in use.
+ *
+ * @param ctx Reranker context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_reranker_effective_provider(const lembed_reranker_t* ctx);
+
 /* Runtime statistics */
 void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out);
 void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* out);

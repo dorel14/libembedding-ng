@@ -19,6 +19,12 @@ This module manages the list of recommended GGUF models and their configuration.
 | `lembed_list_gguf_models(out, count)` | `lembed_status_t` | List GGUF models |
 | `lembed_find_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Look up a GGUF model (NULL if unknown) |
 | `lembed_default_gguf_model()` | `const lembed_gguf_model_info_t*` | Recommended default GGUF model |
+| `lembed_list_sparse_gguf_models(out, count)` | `lembed_status_t` | Sparse GGUF models (libembedding's ggml runtime); `dim` is the vocabulary size |
+| `lembed_find_sparse_gguf_model(name)` | `const lembed_gguf_model_info_t*` | Sparse GGUF model by exact name, ignoring case (NULL if unknown) |
+
+> Sparse GGUF models (e.g. `SPLADE-PP-En-v1-GGUF`) are a separate list: a dense
+> lookup never returns a sparse model. The match is exact so that it does not
+> capture the names of the ONNX model of the same family.
 
 > Both lookup functions return a **pointer into static data** — do not free it.
 > There is no `lembed_get_gguf_model_info()`: iterate directly over the array

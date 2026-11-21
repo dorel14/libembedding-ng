@@ -387,6 +387,8 @@ if TextEmbedding.supports_llamacpp():
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: set to `1` by libembedding when unset (no data sent to Microsoft); `0` keeps ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
+| `LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES` | `1` loads the registry models whose licence is not MIT-compatible (`jina-reranker-v2-base-multilingual`, CC-BY-NC-4.0; `embeddinggemma-300m`, Gemma), refused by default |
 
 ## Building & Publishing
 

@@ -9,6 +9,8 @@
   url: en/api_reference.html
 - title: Similarity Functions
   url: en/similarity.html
+- title: Matryoshka truncation
+  url: en/matryoshka.html
 - title: Embedding Cache
   url: en/python/cache.html
 - title: Unified Benchmark
@@ -55,3 +57,5 @@
   url: en/c_api/gguf_registry.html
 - title: Documentation française
   url: index.html
+- title: Benchmark methodology
+  url: en/benchmark_methodology.html

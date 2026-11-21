@@ -348,6 +348,9 @@ int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx);
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out);
 void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
+lembed_status_t lembed_embeddings_truncate(lembed_embeddings_t* emb, int new_dim, int renormalize);
+const char* lembed_text_embedding_backend_name(const lembed_text_embedding_t* ctx);
+const char* lembed_text_embedding_effective_provider(const lembed_text_embedding_t* ctx);
 
 /* ═══ Functions: Sparse text embedding ═════════════════════════════ */
 
@@ -358,10 +361,13 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(const char* 
 lembed_status_t lembed_sparse_text_embedding_embed(lembed_sparse_embedding_ctx_t* ctx, const char* const* texts, int num_texts, int batch_size, const lembed_sparse_options_t* sparse_opts, lembed_sparse_embeddings_t* result);
 const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);
+lembed_status_t lembed_sparse_text_embedding_set_max_batch_tokens(lembed_sparse_embedding_ctx_t* ctx, int max_batch_tokens);
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx);
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
 void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
+const char* lembed_sparse_text_embedding_backend_name(const lembed_sparse_embedding_ctx_t* ctx);
+const char* lembed_sparse_text_embedding_effective_provider(const lembed_sparse_embedding_ctx_t* ctx);
 
 /* ═══ Functions: Image embedding ════════════════════════════════════ */
 
@@ -376,6 +382,8 @@ int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx);
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out);
 void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
+const char* lembed_image_embedding_backend_name(const lembed_image_embedding_t* ctx);
+const char* lembed_image_embedding_effective_provider(const lembed_image_embedding_t* ctx);
 
 /* ═══ Functions: Reranker ══════════════════════════════════════════ */
 
@@ -392,6 +400,8 @@ int lembed_reranker_max_length(const lembed_reranker_t* ctx);
 void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out);
 void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* out);
 void lembed_reranker_free(lembed_reranker_t* ctx);
+const char* lembed_reranker_backend_name(const lembed_reranker_t* ctx);
+const char* lembed_reranker_effective_provider(const lembed_reranker_t* ctx);
 
 /* ═══ Functions: Model registry ════════════════════════════════════ */
 
@@ -673,6 +683,13 @@ typedef struct {
     double memory_mb;
 } lembed_sparse_tuning_result_t;
 
+typedef struct {
+    lembed_sparse_tuning_result_t base;
+    int workers;
+    int max_batch_tokens;
+    int from_cache;
+} lembed_sparse_tuning_result_v2_t;
+
 lembed_status_t lembed_sparse_best_config(
     const char* model_name,
     const char* const* texts,
@@ -683,6 +700,11 @@ lembed_status_t lembed_sparse_autotune(
     const char* model_name,
     lembed_autotune_mode_t mode,
     lembed_sparse_tuning_result_t* result);
+
+lembed_status_t lembed_sparse_autotune_v2(
+    const char* model_name,
+    lembed_autotune_mode_t mode,
+    lembed_sparse_tuning_result_v2_t* result);
 
 /* ═══ Image Auto-Tuner ═════════════════════════════════════════════ */
 
@@ -733,6 +755,8 @@ typedef struct {
 lembed_status_t lembed_list_gguf_models(const lembed_gguf_model_info_t** out, int* count);
 const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name);
 const lembed_gguf_model_info_t* lembed_default_gguf_model(void);
+lembed_status_t lembed_list_sparse_gguf_models(const lembed_gguf_model_info_t** out, int* count);
+const lembed_gguf_model_info_t* lembed_find_sparse_gguf_model(const char* name);
 
 /* ═══ GGUF capability inspection (read-only) ═══════════════════════════ */
 

@@ -17,7 +17,7 @@ comme tel.
 | Plateforme | Livrable | Testé en CI | Jamais exécuté sur matériel physique ? |
 |---|---|---|---|
 | Windows x64 | wheel PyPI | oui (`windows-2022`) | — |
-| Linux x86_64 | wheel PyPI | oui (`ubuntu-22.04`) | — |
+| Linux x86_64 | wheel PyPI `manylinux_2_31_x86_64` | oui (`ubuntu-22.04`) | — |
 | Linux aarch64 | wheel PyPI `manylinux_2_31_aarch64` | oui (runner ARM `ubuntu-22.04-arm`) | oui (Raspberry Pi) |
 | Linux armv7l (32 bits) | wheel PyPI `manylinux_2_35_armv7l` | oui (conteneur Debian 12 armhf sous QEMU) | oui (Raspberry Pi) |
 | macOS arm64 (Apple Silicon, macOS 14+) | wheel PyPI | oui (`macos-15`) | — |
@@ -33,6 +33,18 @@ Sources : `.github/workflows/ci.yml` (matrice `python-tests`),
 Sur macOS et iOS, ggml est compilé sans Metal (`-DGGML_METAL=OFF` dans
 `.github/workflows/build-wheel.yml` et `scripts/build_ios.sh`) : le GPU est
 hors périmètre avant la 1.x.
+
+## Linux x86_64 : plancher glibc
+
+La wheel `manylinux_2_31_x86_64` s'installe sur tout Linux x86_64 avec glibc
+2.31 ou plus (Debian 11+, Ubuntu 20.04+, RHEL/Rocky/Alma 9+). Elle est
+construite dans le conteneur `quay.io/pypa/manylinux_2_28_x86_64` par
+`scripts/build_wheel_manylinux.sh`, le même script que la wheel aarch64 ;
+auparavant, construite directement sur le runner `ubuntu-22.04`, elle portait
+le tag `manylinux_2_34` et excluait Debian 11 et Ubuntu 20.04.
+Le tag `manylinux_2_28` n'est pas atteint : `libllama` (llama.cpp) référence
+`GLIBCXX_3.4.25`, que la politique `manylinux_2_28` d'auditwheel n'admet pas.
+La CI teste la wheel installée sur le runner `ubuntu-22.04` (glibc 2.35).
 
 ## Linux aarch64 et Raspberry Pi
 
@@ -316,6 +328,22 @@ les contient (`build-wheel.yml`, étape « Check licence texts »).
 
 Le xcframework iOS porte les siennes dans chaque `libembedding.framework`
 (voir [xcframework](#xcframework)).
+
+## Contrôles qualité en CI
+
+- **Versions de Python** : `wheel-checks.yml` (appelé par `ci.yml` une fois les
+  wheels construites) installe la wheel `py3-none` Linux x86_64 sous Python 3.9
+  à 3.13 et lance les tests sur le paquet installé
+  (`LIBEMBEDDING_TEST_INSTALLED=1`, sans les tests `network`). La construction
+  de la wheel teste elle-même 3.12 avec tous les tests.
+- **`twine check --strict`** passe sur chaque wheel construite par la CI.
+- **Pas de sdist** : le paquet embarque une bibliothèque native précompilée,
+  une distribution source s'installerait puis échouerait à l'import.
+- **CodeQL** (`codeql.yml`) analyse Python et C/C++ (mode sans build,
+  `third_party/` exclu) sur les pull requests, `main`/`dev` et chaque semaine.
+  Ce n'est pas un check obligatoire pour l'instant.
+- **Dependabot** (`.github/dependabot.yml`) propose chaque semaine des mises à
+  jour groupées des GitHub Actions et des dépendances de `python/`, sur `dev`.
 
 ## Voir aussi
 

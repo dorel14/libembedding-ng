@@ -6,6 +6,7 @@
  * Supports the tokenizer types used by embedding models in the registry:
  * - WordPiece (BERT-style: bge, MiniLM, mpnet, etc.)
  * - BPE (GPT/Sentencepiece-style: nomic, jina, CLIP, etc.)
+ * - Unigram (XLM-R family: precompiled charsmap + Metaspace, see tokenizer_unigram.hpp)
  *
  * Auteur: David Orel
  * Version: 1.14.0
@@ -17,6 +18,8 @@
 #define LIBEMBEDDING_DETAIL_TOKENIZER_IMPL_HPP
 
 #include "cJSON.h"
+#include "tokenizer_unicode.hpp"
+#include "tokenizer_unigram.hpp"
 
 #include <climits>
 
@@ -79,117 +82,66 @@ static inline std::string to_lower_ascii(const std::string& s) {
  *    Only "ss"-style output for sharp-s is real, and it comes from the
  *    decomposition U+00DF -> U+0073 U+0303, not from a ligature rule.
  *
- * Scope, stated plainly: this covers Latin-1 Supplement (U+00C0-U+00FF) and
- * Latin Extended-A (U+0100-U+017F), which is where French, Spanish, Portuguese,
- * German, Italian, Polish, Czech and Turkish live. Codepoints outside those
- * ranges pass through unchanged, as they did before, so Greek and Cyrillic are
- * still not lowercased here. That is a documented gap rather than a silent one:
- * closing it means adding tables, not changing the shape.
+ * Scope: the per-codepoint tables live in tokenizer_unicode.hpp and were
+ * checked codepoint by codepoint against HF `tokenizers` (see the fidelity
+ * test). They cover Latin (all of Latin-1, Extended-A/B, Additional), Greek,
+ * Cyrillic, Armenian, Arabic, Devanagari, kana, fullwidth Latin and Hangul;
+ * every other codepoint passes through unchanged, and the fidelity test
+ * reports the remaining mismatch rate per block.
+ *
+ * Two facts the first draft of this code got wrong, both visible in HF's
+ * output: letters without a canonical decomposition (AE, OE, Thorn, Eth) are
+ * still LOWERCASED (they just keep their shape), and sharp-s / dotless i are
+ * left alone because they are already lowercase.
  * ========================================================================= */
 
-/* Base ASCII letter of a Latin-1 Supplement codepoint, or -1 when the codepoint
- * has no canonical decomposition (AE, OE, Eth, Thorn, D-stroke, O-stroke,
- * sharp-s). The sentinel has to be negative: 0 would be indistinguishable from a
- * successful fold to NUL, and the first draft of this code had exactly that
- * bug -- it silently turned non-decomposable letters into NUL bytes. */
-static inline int latin1_base(uint32_t cp) {
-    /* Rows are the uppercase half U+00C0-U+00DE and the lowercase half
-     * U+00E0-U+00FF; both fold to the same base. -1 means "leave it alone",
-     * which is what HF does for a letter with no decomposition. */
-    static const int kBases[64] = {
-        /* C0 A-grave   */ 'a', /* C1 A-acute   */ 'a',
-        /* C2 A-circum  */ 'a', /* C3 A-tilde   */ 'a',
-        /* C4 A-diaer   */ 'a', /* C5 A-ring    */ 'a',
-        /* C6 AE        */  -1, /* C7 C-cedilla */ 'c',
-        /* C8 E-grave   */ 'e', /* C9 E-acute   */ 'e',
-        /* CA E-circum  */ 'e', /* CB E-diaer   */ 'e',
-        /* CC I-grave   */ 'i', /* CD I-acute   */ 'i',
-        /* CE I-circum  */ 'i', /* CF I-diaer   */ 'i',
-        /* D0 Eth       */  -1, /* D1 N-tilde   */ 'n',
-        /* D2 O-grave   */ 'o', /* D3 O-acute   */ 'o',
-        /* D4 O-circum  */ 'o', /* D5 O-tilde   */ 'o',
-        /* D6 O-diaer   */ 'o', /* D7 mult sign */  -1,
-        /* D8 O-stroke  */  -1, /* D9 U-grave   */ 'u',
-        /* DA U-acute   */ 'u', /* DB U-circum  */ 'u',
-        /* DC U-diaer   */ 'u', /* DD Y-acute   */ 'y',
-        /* DE Thorn     */  -1, /* DF sharp-s   */  -1,
-        /* E0 a-grave   */ 'a', /* E1 a-acute   */ 'a',
-        /* E2 a-circum  */ 'a', /* E3 a-tilde   */ 'a',
-        /* E4 a-diaer   */ 'a', /* E5 a-ring    */ 'a',
-        /* E6 ae        */  -1, /* E7 c-cedilla */ 'c',
-        /* E8 e-grave   */ 'e', /* E9 e-acute   */ 'e',
-        /* EA e-circum  */ 'e', /* EB e-diaer   */ 'e',
-        /* EC i-grave   */ 'i', /* ED i-acute   */ 'i',
-        /* EE i-circum  */ 'i', /* EF i-diaer   */ 'i',
-        /* F0 eth       */  -1, /* F1 n-tilde   */ 'n',
-        /* F2 o-grave   */ 'o', /* F3 o-acute   */ 'o',
-        /* F4 o-circum  */ 'o', /* F5 o-tilde   */ 'o',
-        /* F6 o-diaer   */ 'o', /* F7 division  */  -1,
-        /* F8 o-stroke  */  -1, /* F9 u-grave   */ 'u',
-        /* FA u-acute   */ 'u', /* FB u-circum  */ 'u',
-        /* FC u-diaer   */ 'u', /* FD y-acute   */ 'y',
-        /* FE thorn     */  -1, /* FF y-diaer   */ 'y',
-    };
-    if (cp >= 0x00C0 && cp <= 0x00FF) return kBases[cp - 0x00C0];
-    return -1;
-}
+/* Sentinel codepoint for a byte that is not part of well-formed UTF-8. It is
+ * outside every table, so callers keep the byte verbatim instead of
+ * reinterpreting it as a Latin-1 letter. */
+static constexpr uint32_t kInvalidCp = 0xFFFFFFFFu;
 
-/* Latin Extended-A is a regular block: even codepoint is the uppercase base,
- * odd is that base plus a diacritic. Reducing to the base and reusing the
- * Latin-1 table is therefore equivalent to NFD for the folded subset. The
- * exceptions are the letters with no canonical decomposition, which HF leaves
- * untouched. */
-static inline int extended_a_base(uint32_t cp) {
-    switch (cp) {
-        /* No canonical decomposition: HF keeps these verbatim. */
-        case 0x0110: case 0x0111:   /* D with stroke   */
-        case 0x0126: case 0x0127:   /* H with stroke   */
-        case 0x0132: case 0x0133:   /* IJ ligature     */
-        case 0x013F: case 0x0140:   /* L with middle dot */
-        case 0x014A: case 0x014B:   /* ENG             */
-        case 0x0152: case 0x0153:   /* OE ligature     */
-        case 0x0166: case 0x0167:   /* T with stroke   */
-            return -1;
-        default:
-            break;
-    }
-    /* Turkish dotted/dotless I and long-s are not part of the even/odd
-     * pattern but do decompose, and both fold to plain "i"/"s". */
-    if (cp == 0x0130 || cp == 0x0131) return 'i';
-    if (cp == 0x017F) return 's';   /* long s -> s with stroke above -> s */
-    const uint32_t base = (cp % 2 == 0) ? cp : (cp - 1);
-    if (base >= 0x00C0 && base <= 0x00FF) return latin1_base(base);
-    return -1;
-}
-
-/* Decode one UTF-8 codepoint. Returns bytes consumed and stores the codepoint;
- * malformed bytes are passed through so nothing is silently dropped. */
+/* Decode one UTF-8 codepoint. Returns bytes consumed and stores the codepoint.
+ * Strict: continuation bytes, overlong forms, surrogates and values above
+ * U+10FFFF are rejected; a malformed byte is consumed alone and reported as
+ * kInvalidCp. */
 static inline size_t utf8_next(const std::string& s, size_t i, uint32_t& cp) {
-    unsigned char c = (unsigned char)s[i];
+    const size_t size = s.size();
+    const unsigned char c = (unsigned char)s[i];
     if (c < 0x80) { cp = c; return 1; }
-    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+    auto cont = [&](size_t k) { return k < size && ((unsigned char)s[k] & 0xC0) == 0x80; };
+    if (c >= 0xC2 && c <= 0xDF && cont(i + 1)) {
         cp = ((uint32_t)(c & 0x1F) << 6) | ((unsigned char)s[i + 1] & 0x3F);
         return 2;
     }
-    if ((c & 0xF0) == 0xE0 && i + 2 < s.size()) {
-        cp = ((uint32_t)(c & 0x0F) << 12) |
-             (((unsigned char)s[i + 1] & 0x3F) << 6) |
+    if (c >= 0xE0 && c <= 0xEF && cont(i + 1) && cont(i + 2)) {
+        const unsigned char b1 = (unsigned char)s[i + 1];
+        if ((c == 0xE0 && b1 < 0xA0) || (c == 0xED && b1 > 0x9F)) { cp = kInvalidCp; return 1; }
+        cp = ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)(b1 & 0x3F) << 6) |
              ((unsigned char)s[i + 2] & 0x3F);
         return 3;
     }
-    if ((c & 0xF8) == 0xF0 && i + 3 < s.size()) {
-        cp = ((uint32_t)(c & 0x07) << 18) |
-             (((unsigned char)s[i + 1] & 0x3F) << 12) |
-             (((unsigned char)s[i + 2] & 0x3F) << 6) |
+    if (c >= 0xF0 && c <= 0xF4 && cont(i + 1) && cont(i + 2) && cont(i + 3)) {
+        const unsigned char b1 = (unsigned char)s[i + 1];
+        if ((c == 0xF0 && b1 < 0x90) || (c == 0xF4 && b1 > 0x8F)) { cp = kInvalidCp; return 1; }
+        cp = ((uint32_t)(c & 0x07) << 18) | ((uint32_t)(b1 & 0x3F) << 12) |
+             ((uint32_t)((unsigned char)s[i + 2] & 0x3F) << 6) |
              ((unsigned char)s[i + 3] & 0x3F);
         return 4;
     }
-    cp = c;
+    cp = kInvalidCp;
     return 1;
 }
 
-/* BertNormalizer-equivalent, in HF's order: lowercase, then strip accents. */
-static inline std::string bert_normalize(const std::string& s) {
+/* BertNormalizer's case and accent steps, without clean_text and without CJK
+ * padding (those live in basic_tokenize), per codepoint. The two switches are
+ * independent, as in HF:
+ *   strip  NFD, then drop the nonspacing marks (Mn)
+ *   lower  lowercase
+ * Both: the default uncased BERT. Only strip: the base letter keeps its case.
+ * Only lower: accented letters stay composed. See tokenizer_unicode.hpp. */
+static inline std::string bert_normalize(const std::string& s, bool lower = true,
+                                         bool strip = true) {
+    if (!lower && !strip) return s;
     std::string out;
     out.reserve(s.size());
     for (size_t i = 0; i < s.size();) {
@@ -197,53 +149,167 @@ static inline std::string bert_normalize(const std::string& s) {
         const size_t n = utf8_next(s, i, cp);
         i += n;
 
-        /* Step 1: lowercase. ASCII plus the Latin ranges we fold below; other
-         * scripts keep their case, which is the documented limit. */
-        if (cp >= 'A' && cp <= 'Z') {
-            out += (char)(cp - 'A' + 'a');
+        if (cp < 0x80) {
+            out += (lower && cp >= 'A' && cp <= 'Z') ? (char)(cp - 'A' + 'a') : (char)cp;
             continue;
         }
+        uint32_t f = cp;
+        if (strip) {
+            if (unicode::bert_is_stripped(cp)) continue;
+            if (unicode::append_hangul_nfd(out, cp)) continue;
+            const uint32_t both = unicode::bert_fold(cp);   /* strip, then lowercase */
+            if (lower) {
+                f = both;
+            } else {
+                /* Strip alone: a letter that merely lowercases is unchanged; a
+                 * decomposed one yields its base letter, upper-cased again when
+                 * the source was upper case. */
+                const uint32_t lc = unicode::bert_lower(cp);
+                if (cp == 0x0130) f = 'I';          /* I-dot -> I + dot above */
+                else if (cp == 0x212A) f = 'K';     /* Kelvin sign -> K */
+                else if (cp == 0x2126) f = 0x03A9;  /* Ohm sign -> capital omega */
+                else if (both != lc) f = (lc != cp) ? unicode::bert_upper(both) : both;
+            }
+        } else if (cp == 0x0130) {
+            out += "i\xCC\x87";   /* HF lowercases I-dot to i + combining dot */
+            continue;
+        } else {
+            f = unicode::bert_lower(cp);
+        }
+        if (f == cp) out.append(s, i - n, n);   /* keeps malformed bytes verbatim */
+        else unicode::append_utf8(out, f);
+    }
+    return out;
+}
+
+/* BertNormalizer(clean_text, handle_chinese_chars) + BertPreTokenizer: drop
+ * control/format characters (clean_text), split on whitespace, make every CJK
+ * ideograph its own word (handle_chinese_chars), and split on punctuation (each
+ * mark is a word). Everything else, including accented letters, kana, Hangul
+ * and emoji, stays glued into words. */
+static inline std::vector<std::string> basic_tokenize(const std::string& text,
+                                                      bool clean_text = true,
+                                                      bool handle_chinese = true) {
+    std::vector<std::string> tokens;
+    tokens.reserve(text.size() / 4 + 1);
+    std::string current;
+    auto flush = [&]() {
+        if (!current.empty()) { tokens.push_back(current); current.clear(); }
+    };
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char c = (unsigned char)text[i];
+        if (c < 0x80) {
+            /* ASCII fast path, no table lookup. */
+            i++;
+            if (c == ' ' || (c >= 0x09 && c <= 0x0D)) {
+                /* \v and \f are deleted by clean_text, whitespace otherwise */
+                if (clean_text && (c == 0x0B || c == 0x0C)) continue;
+                flush();
+            } else if (c < 0x20 || c == 0x7F) {
+                if (!clean_text) current += (char)c;
+            } else if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+                       (c >= '[' && c <= '`') || (c >= '{' && c <= '~')) {
+                flush();
+                tokens.emplace_back(1, (char)c);
+            } else {
+                current += (char)c;
+            }
+            continue;
+        }
+        uint32_t cp = 0;
+        const size_t n = utf8_next(text, i, cp);
+        i += n;
+        if (clean_text && unicode::bert_is_removed(cp)) continue;
+        if (unicode::bert_is_whitespace(cp)) { flush(); continue; }
+        if ((handle_chinese && unicode::bert_is_chinese(cp)) || unicode::bert_is_punct(cp)) {
+            flush();
+            tokens.push_back(text.substr(i - n, n));
+            continue;
+        }
+        current.append(text, i - n, n);
+    }
+    flush();
+    return tokens;
+}
+
+/* =========================================================================
+ * Legacy pre-tokenisation, kept ONLY for byte-level BPE models.
+ *
+ * Byte-level BPE (CLIP, ModernBERT) is not implemented faithfully here and is
+ * due a dedicated rewrite; until then its behaviour is deliberately left as it
+ * was before the WordPiece fidelity work (T26): Latin-1 / Extended-A accent
+ * folding and lowercasing, and every non-ASCII character as its own word.
+ * Pinned by test_tokenizer so that the later change is explicit.
+ * ========================================================================= */
+
+/* Base ASCII letter of a Latin-1 Supplement codepoint, or -1 when the codepoint
+ * has no canonical decomposition. */
+static inline int legacy_latin1_base(uint32_t cp) {
+    static const int kBases[64] = {
+        'a', 'a', 'a', 'a', 'a', 'a', -1, 'c', 'e', 'e', 'e', 'e', 'i', 'i', 'i', 'i',
+        -1, 'n', 'o', 'o', 'o', 'o', 'o', -1, -1, 'u', 'u', 'u', 'u', 'y', -1, -1,
+        'a', 'a', 'a', 'a', 'a', 'a', -1, 'c', 'e', 'e', 'e', 'e', 'i', 'i', 'i', 'i',
+        -1, 'n', 'o', 'o', 'o', 'o', 'o', -1, -1, 'u', 'u', 'u', 'u', 'y', -1, 'y',
+    };
+    if (cp >= 0x00C0 && cp <= 0x00FF) return kBases[cp - 0x00C0];
+    return -1;
+}
+
+static inline int legacy_extended_a_base(uint32_t cp) {
+    switch (cp) {
+        case 0x0110: case 0x0111: case 0x0126: case 0x0127: case 0x0132: case 0x0133:
+        case 0x013F: case 0x0140: case 0x014A: case 0x014B: case 0x0152: case 0x0153:
+        case 0x0166: case 0x0167:
+            return -1;
+        default:
+            break;
+    }
+    if (cp == 0x0130 || cp == 0x0131) return 'i';
+    if (cp == 0x017F) return 's';
+    const uint32_t base = (cp % 2 == 0) ? cp : (cp - 1);
+    if (base >= 0x00C0 && base <= 0x00FF) return legacy_latin1_base(base);
+    return -1;
+}
+
+static inline std::string legacy_bert_normalize(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        uint32_t cp = 0;
+        const size_t n = utf8_next(s, i, cp);
+        i += n;
+        if (cp >= 'A' && cp <= 'Z') { out += (char)(cp - 'A' + 'a'); continue; }
         if (cp >= 0x00C0 && cp <= 0x00DE && cp != 0x00D7) {
-            const int b = latin1_base(cp);
+            const int b = legacy_latin1_base(cp);
             if (b >= 0) { out += (char)b; continue; }
             out.append(s, i - n, n);
             continue;
         }
-
-        /* Step 2: strip accents, i.e. decompose and drop the Mn category. */
         int folded = -1;
-        if (cp >= 0x00C0 && cp <= 0x00FF) folded = latin1_base(cp);
-        else if (cp >= 0x0100 && cp <= 0x017F) folded = extended_a_base(cp);
-        if (folded >= 0) {
-            out += (char)folded;
-            continue;
-        }
-
+        if (cp >= 0x00C0 && cp <= 0x00FF) folded = legacy_latin1_base(cp);
+        else if (cp >= 0x0100 && cp <= 0x017F) folded = legacy_extended_a_base(cp);
+        if (folded >= 0) { out += (char)folded; continue; }
         out.append(s, i - n, n);
     }
     return out;
 }
 
-/* Basic whitespace + punctuation pre-tokenization (BERT-style) */
-static inline std::vector<std::string> basic_tokenize(const std::string& text) {
+static inline std::vector<std::string> legacy_basic_tokenize(const std::string& text) {
     std::vector<std::string> tokens;
     std::string current;
     for (size_t i = 0; i < text.size(); ) {
         unsigned char c = (unsigned char)text[i];
         if (c <= 0x20) {
-            /* whitespace */
             if (!current.empty()) { tokens.push_back(current); current.clear(); }
             i++;
         } else if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
                    (c >= '[' && c <= '`') || (c >= '{' && c <= '~')) {
-            /* punctuation — separate token */
             if (!current.empty()) { tokens.push_back(current); current.clear(); }
             current += (char)c;
             tokens.push_back(current);
             current.clear();
             i++;
         } else if (c >= 0x80) {
-            /* multi-byte UTF-8 — keep as single token */
             if (!current.empty()) { tokens.push_back(current); current.clear(); }
             int bytes = 1;
             if ((c & 0xE0) == 0xC0) bytes = 2;
@@ -264,7 +330,7 @@ static inline std::vector<std::string> basic_tokenize(const std::string& text) {
 
 class TokenizerWrapper {
 public:
-    enum Type { WORDPIECE, BPE };
+    enum Type { WORDPIECE, BPE, UNIGRAM };
 
     TokenizerWrapper()
         : max_length_(512), pad_token_id_(0), cls_token_id_(101),
@@ -294,12 +360,23 @@ public:
             if (mtype && mtype->valuestring) {
                 std::string t = mtype->valuestring;
                 if (t == "BPE" || t == "bpe") type_ = BPE;
+                else if (t == "Unigram") type_ = UNIGRAM;
                 else type_ = WORDPIECE;
+            }
+
+            if (type_ == UNIGRAM) {
+                try {
+                    unigram_.load(model);
+                } catch (...) {
+                    cJSON_Delete(root);
+                    throw;
+                }
+                if (unigram_.unk_id() >= 0) unk_token_id_ = unigram_.unk_id();
             }
 
             /* Load vocabulary */
             cJSON* vocab = cJSON_GetObjectItem(model, "vocab");
-            if (vocab) {
+            if (vocab && type_ != UNIGRAM) {
                 cJSON* item = vocab->child;
                 while (item) {
                     if (item->string && cJSON_IsNumber(item)) {
@@ -333,6 +410,12 @@ public:
                 wp_prefix_ = prefix->valuestring;
             else
                 wp_prefix_ = "##"; /* BERT default */
+
+            /* Words longer than this many characters become a single [UNK]
+             * (HF default 100). */
+            cJSON* maxc = cJSON_GetObjectItem(model, "max_input_chars_per_word");
+            if (maxc && cJSON_IsNumber(maxc) && maxc->valueint > 0)
+                wp_max_chars_ = (size_t)std::min(maxc->valueint, 10000);
 
             /* unk_token */
             cJSON* unk = cJSON_GetObjectItem(model, "unk_token");
@@ -370,6 +453,20 @@ public:
             do_lower_case_ = false;
         }
 
+        /* WordPiece normalisation switches, independent of one another as in
+         * HF (do_lower_case_ above only drives the legacy BPE path). */
+        parse_wordpiece_normalizer(normalizer);
+
+        if (type_ == UNIGRAM) {
+            try {
+                parse_unigram_normalizer(normalizer);
+                parse_metaspace(cJSON_GetObjectItem(root, "pre_tokenizer"));
+            } catch (...) {
+                cJSON_Delete(root);
+                throw;
+            }
+        }
+
         /* Post-processor: detect special tokens to add */
         cJSON* post = cJSON_GetObjectItem(root, "post_processor");
         if (post) {
@@ -378,6 +475,20 @@ public:
                 strcmp(ptype->valuestring, "TemplateProcessing") == 0) {
                 /* Check for [CLS] and [SEP] in template */
                 add_special_tokens_ = true;
+                if (type_ == UNIGRAM) parse_single_template(post);
+            }
+            pair_tmpl_.clear();
+            parse_pair_processor(post);
+        }
+
+        /* Truncation strategy used when a pair does not fit */
+        cJSON* trunc = cJSON_GetObjectItem(root, "truncation");
+        if (trunc && cJSON_IsObject(trunc)) {
+            cJSON* st = cJSON_GetObjectItem(trunc, "strategy");
+            if (st && st->valuestring) {
+                if (strcmp(st->valuestring, "OnlyFirst") == 0) trunc_strategy_ = 1;
+                else if (strcmp(st->valuestring, "OnlySecond") == 0) trunc_strategy_ = 2;
+                else trunc_strategy_ = 0;
             }
         }
 
@@ -424,8 +535,67 @@ public:
         return encode_batch(all_ids);
     }
 
+    /* Encodes (a, b) as a real sequence pair, the way HF tokenizers does with the
+     * tokenizer.json post_processor: special tokens and segment (type) ids come
+     * from the pair template (TemplateProcessing / BertProcessing /
+     * RobertaProcessing), BERT style `[CLS] a [SEP] b [SEP]` when none is
+     * declared. When the pair exceeds max_length it is truncated with the
+     * tokenizer's strategy (default longest_first: trim the longer segment). */
+    void encode_pair(const std::string& a, const std::string& b,
+                     std::vector<int>& ids, std::vector<int>& types) const {
+        std::vector<int> ta, tb;
+        tokenize_body(a, ta);
+        tokenize_body(b, tb);
+
+        std::vector<PairItem> tmpl;
+        if (!pair_tmpl_.empty()) {
+            tmpl = pair_tmpl_;
+        } else {
+            tmpl = {{0, cls_token_id_, 0}, {1, 0, 0}, {0, sep_token_id_, 0},
+                    {2, 0, 1}, {0, sep_token_id_, 1}};
+        }
+        int nspecial = 0;
+        for (const auto& it : tmpl) if (it.kind == 0) nspecial++;
+        const int budget = std::max(0, max_length_ - nspecial);
+
+        size_t na = ta.size(), nb = tb.size();
+        while ((int)(na + nb) > budget) {
+            if (trunc_strategy_ == 1) {
+                if (na == 0) break;
+                na--;
+            } else if (trunc_strategy_ == 2) {
+                if (nb == 0) break;
+                nb--;
+            } else if (na > nb) {
+                na--;
+            } else if (nb > 0) {
+                nb--;
+            } else {
+                break;
+            }
+        }
+        ta.resize(na);
+        tb.resize(nb);
+
+        ids.clear();
+        types.clear();
+        for (const auto& it : tmpl) {
+            if (it.kind == 0) {
+                ids.push_back(it.id);
+                types.push_back(it.type);
+            } else {
+                const std::vector<int>& seg = (it.kind == 1) ? ta : tb;
+                for (int t : seg) {
+                    ids.push_back(t);
+                    types.push_back(it.type);
+                }
+            }
+        }
+    }
+
     EncodingBatch encode_batch(
-        const std::vector<std::vector<int>>& all_ids) const {
+        const std::vector<std::vector<int>>& all_ids,
+        const std::vector<std::vector<int>>* all_types = nullptr) const {
         EncodingBatch result;
         result.seq_length = 0;
         for (const auto& ids : all_ids) {
@@ -451,6 +621,8 @@ public:
             for (int j = 0; j < len; j++) {
                 result.input_ids[i][j] = (int64_t)all_ids[i][j];
                 result.attention_mask[i][j] = 1;
+                if (all_types && j < (int)(*all_types)[i].size())
+                    result.token_type_ids[i][j] = (*all_types)[i][j];
             }
         }
 
@@ -501,6 +673,7 @@ public:
         type_ = WORDPIECE;
         wp_prefix_ = "##";
         do_lower_case_ = true;   /* every SPLADE export is uncased */
+        lower_ = strip_ = clean_text_ = handle_chinese_ = true;
         add_special_tokens_ = add_special_tokens;
         max_length_ = max_length > 0 ? max_length : 512;
 
@@ -548,6 +721,7 @@ private:
     std::vector<std::string> bpe_merges_;
     std::unordered_map<std::string, int> bpe_ranks_;
     std::string wp_prefix_;
+    size_t wp_max_chars_ = 100;
     int max_length_;
     int pad_token_id_;
     int cls_token_id_;
@@ -555,28 +729,370 @@ private:
     int unk_token_id_;
     Type type_;
     bool do_lower_case_;
+    /* WordPiece normalisation, as BertNormalizer's four switches. */
+    bool lower_ = true;
+    bool strip_ = true;
+    bool clean_text_ = true;
+    bool handle_chinese_ = true;
     bool add_special_tokens_;
+
+    /* Read the normalizer section of tokenizer.json into the four switches.
+     * BertNormalizer: `lowercase` (default true), `strip_accents` (null or
+     * absent follows `lowercase`), `clean_text` and `handle_chinese_chars`
+     * (default true). Lowercase alone lowercases only. Sequence: Lowercase,
+     * StripAccents and NFD/NFKD are honoured, accents being stripped only when
+     * both StripAccents and a decomposition are present, as in HF. Anything
+     * else (or no normalizer) leaves all four off. */
+    void parse_wordpiece_normalizer(const cJSON* normalizer) {
+        lower_ = strip_ = clean_text_ = handle_chinese_ = false;
+        if (!normalizer) return;
+        auto flag = [](const cJSON* n, const char* key, bool dflt) {
+            const cJSON* v = cJSON_GetObjectItem(const_cast<cJSON*>(n), key);
+            if (cJSON_IsTrue(v)) return true;
+            if (cJSON_IsFalse(v)) return false;
+            return dflt;
+        };
+        auto bert = [&](const cJSON* n) {
+            lower_ = flag(n, "lowercase", true);
+            const cJSON* sa = cJSON_GetObjectItem(const_cast<cJSON*>(n), "strip_accents");
+            strip_ = (cJSON_IsTrue(sa) || cJSON_IsFalse(sa)) ? cJSON_IsTrue(sa) : lower_;
+            clean_text_ = flag(n, "clean_text", true);
+            handle_chinese_ = flag(n, "handle_chinese_chars", true);
+        };
+        const cJSON* type = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "type");
+        if (!type || !type->valuestring) return;
+        const std::string t = type->valuestring;
+        if (t == "BertNormalizer") {
+            bert(normalizer);
+        } else if (t == "Lowercase") {
+            lower_ = true;
+        } else if (t == "Sequence") {
+            bool strip_accents = false, decomposed = false;
+            const cJSON* list = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "normalizers");
+            for (const cJSON* sub = cJSON_IsArray(list) ? list->child : nullptr; sub; sub = sub->next) {
+                const cJSON* st = cJSON_GetObjectItem(const_cast<cJSON*>(sub), "type");
+                if (!st || !st->valuestring) continue;
+                const std::string s = st->valuestring;
+                if (s == "Lowercase") lower_ = true;
+                else if (s == "StripAccents") strip_accents = true;
+                else if (s == "NFD" || s == "NFKD") decomposed = true;
+                else if (s == "BertNormalizer") bert(sub);
+            }
+            if (strip_accents && decomposed) strip_ = true;
+        }
+    }
     mutable std::string wp_scratch_;
     mutable std::string bpe_scratch_;
 
-    /* Encode a single text to token IDs */
-    std::vector<int> encode_single(const std::string& text) const {
-        /* HuggingFace's basic_tokenizer does strip_accents *then* lowercase when
-         * lowercase is on, and BertTokenizer leaves strip_accents following
-         * do_lower_case. Gating the whole thing on do_lower_case_ therefore
-         * reproduces both settings rather than only the lowercase one. */
-        std::string processed =
-            do_lower_case_ ? bert_normalize(text) : text;
+    /* One element of a pair template: kind 0 = special token `id`,
+     * 1 = first sequence, 2 = second sequence; `type` is the segment id. */
+    struct PairItem { int kind; int id; int type; };
+    std::vector<PairItem> pair_tmpl_;
+    int trunc_strategy_ = 0; /* 0 longest_first, 1 only_first, 2 only_second */
 
-        std::vector<int> ids;
-
-        /* Add [CLS] for BERT-style models */
-        if (add_special_tokens_) {
-            ids.push_back(cls_token_id_);
+    /* Reads the pair layout of a post_processor node (recursing into
+     * `Sequence`). Leaves pair_tmpl_ empty when nothing usable is found. */
+    void parse_pair_processor(cJSON* post) {
+        cJSON* ptype = cJSON_GetObjectItem(post, "type");
+        if (!ptype || !ptype->valuestring) return;
+        const std::string t = ptype->valuestring;
+        if (t == "Sequence") {
+            cJSON* procs = cJSON_GetObjectItem(post, "processors");
+            if (procs && cJSON_IsArray(procs)) {
+                int n = cJSON_GetArraySize(procs);
+                for (int i = 0; i < n && pair_tmpl_.empty(); i++)
+                    parse_pair_processor(cJSON_GetArrayItem(procs, i));
+            }
+        } else if (t == "BertProcessing" || t == "RobertaProcessing") {
+            cJSON* sep = cJSON_GetObjectItem(post, "sep");
+            cJSON* cls = cJSON_GetObjectItem(post, "cls");
+            if (!sep || !cls || !cJSON_IsArray(sep) || !cJSON_IsArray(cls)) return;
+            cJSON* sid = cJSON_GetArrayItem(sep, 1);
+            cJSON* cid = cJSON_GetArrayItem(cls, 1);
+            if (!sid || !cid || !cJSON_IsNumber(sid) || !cJSON_IsNumber(cid)) return;
+            const int s = sid->valueint, c = cid->valueint;
+            if (t == "BertProcessing") {
+                pair_tmpl_ = {{0, c, 0}, {1, 0, 0}, {0, s, 0}, {2, 0, 1}, {0, s, 1}};
+            } else {
+                pair_tmpl_ = {{0, c, 0}, {1, 0, 0}, {0, s, 0}, {0, s, 0},
+                              {2, 0, 0}, {0, s, 0}};
+            }
+        } else if (t == "TemplateProcessing") {
+            cJSON* pair = cJSON_GetObjectItem(post, "pair");
+            cJSON* specials = cJSON_GetObjectItem(post, "special_tokens");
+            if (!pair || !cJSON_IsArray(pair)) return;
+            std::vector<PairItem> out;
+            int n = cJSON_GetArraySize(pair);
+            for (int i = 0; i < n; i++) {
+                cJSON* el = cJSON_GetArrayItem(pair, i);
+                cJSON* seq = cJSON_GetObjectItem(el, "Sequence");
+                cJSON* sp = cJSON_GetObjectItem(el, "SpecialToken");
+                if (seq) {
+                    cJSON* id = cJSON_GetObjectItem(seq, "id");
+                    cJSON* ty = cJSON_GetObjectItem(seq, "type_id");
+                    if (!id || !id->valuestring) return;
+                    out.push_back({strcmp(id->valuestring, "B") == 0 ? 2 : 1, 0,
+                                   ty && cJSON_IsNumber(ty) ? ty->valueint : 0});
+                } else if (sp) {
+                    cJSON* id = cJSON_GetObjectItem(sp, "id");
+                    cJSON* ty = cJSON_GetObjectItem(sp, "type_id");
+                    if (!id || !id->valuestring) return;
+                    const int type = ty && cJSON_IsNumber(ty) ? ty->valueint : 0;
+                    cJSON* def = specials ? cJSON_GetObjectItem(specials, id->valuestring) : nullptr;
+                    cJSON* ids = def ? cJSON_GetObjectItem(def, "ids") : nullptr;
+                    if (ids && cJSON_IsArray(ids) && cJSON_GetArraySize(ids) > 0) {
+                        int m = cJSON_GetArraySize(ids);
+                        for (int k = 0; k < m; k++) {
+                            cJSON* v = cJSON_GetArrayItem(ids, k);
+                            if (!v || !cJSON_IsNumber(v)) return;
+                            out.push_back({0, v->valueint, type});
+                        }
+                    } else {
+                        auto vit = vocab_.find(id->valuestring);
+                        if (vit == vocab_.end()) return;
+                        out.push_back({0, vit->second, type});
+                    }
+                } else {
+                    return;
+                }
+            }
+            pair_tmpl_ = out;
         }
+    }
 
-        /* Pre-tokenize into words */
-        auto words = basic_tokenize(processed);
+    /* Unigram (SentencePiece) state. */
+    UnigramModel unigram_;
+    PrecompiledCharsmap charsmap_;
+    struct NormOp {
+        enum Kind { CHARSMAP, REPLACE_LITERAL, COLLAPSE_SPACES, PREPEND, STRIP } kind;
+        std::string a, b;           /* pattern/content or prepend text */
+        bool left = true, right = true;
+    };
+    std::vector<NormOp> unigram_norm_;
+    MetaspaceConfig metaspace_;
+    /* Single-sequence TemplateProcessing: ids before and after $A. The pair
+     * template is not interpreted here. */
+    std::vector<int> single_prefix_, single_suffix_;
+    bool single_template_ = false;
+
+    /* Normalizer (Sequence or single) -> ordered ops. Supported: Precompiled,
+     * Replace (literal String, or Regex " {2,}" / " +" collapsing spaces),
+     * Prepend, Strip. Other types are ignored. */
+    void parse_unigram_normalizer(const cJSON* normalizer) {
+        unigram_norm_.clear();
+        if (!normalizer) return;
+        auto one = [&](const cJSON* n) {
+            auto get = [&](const char* k) { return cJSON_GetObjectItem(const_cast<cJSON*>(n), k); };
+            const cJSON* t = get("type");
+            if (!t || !t->valuestring) return;
+            const std::string ty = t->valuestring;
+            if (ty == "Precompiled") {
+                const cJSON* c = get("precompiled_charsmap");
+                if (!c || !c->valuestring) throw std::runtime_error("Precompiled normalizer without charsmap");
+                charsmap_.load_base64(c->valuestring);
+                unigram_norm_.push_back({NormOp::CHARSMAP, "", "", true, true});
+            } else if (ty == "Replace") {
+                const cJSON* p = get("pattern");
+                const cJSON* c = get("content");
+                const std::string content = (c && c->valuestring) ? c->valuestring : "";
+                const cJSON* s = p ? cJSON_GetObjectItem(const_cast<cJSON*>(p), "String") : nullptr;
+                const cJSON* r = p ? cJSON_GetObjectItem(const_cast<cJSON*>(p), "Regex") : nullptr;
+                if (s && s->valuestring) {
+                    unigram_norm_.push_back({NormOp::REPLACE_LITERAL, s->valuestring, content, true, true});
+                } else if (r && r->valuestring) {
+                    const std::string re = r->valuestring;
+                    if (re == " {2,}" || re == " +" || re == " {1,}")
+                        unigram_norm_.push_back({NormOp::COLLAPSE_SPACES, re == " {2,}" ? "2" : "1", content, true, true});
+                }
+            } else if (ty == "Prepend") {
+                const cJSON* pr = get("prepend");
+                if (pr && pr->valuestring) unigram_norm_.push_back({NormOp::PREPEND, pr->valuestring, "", true, true});
+            } else if (ty == "Strip") {
+                const cJSON* l = get("strip_left");
+                const cJSON* r = get("strip_right");
+                unigram_norm_.push_back({NormOp::STRIP, "", "", !cJSON_IsFalse(l), !cJSON_IsFalse(r)});
+            }
+        };
+        const cJSON* ty = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "type");
+        if (ty && ty->valuestring && strcmp(ty->valuestring, "Sequence") == 0) {
+            const cJSON* list = cJSON_GetObjectItem(const_cast<cJSON*>(normalizer), "normalizers");
+            for (const cJSON* sub = cJSON_IsArray(list) ? list->child : nullptr; sub; sub = sub->next) one(sub);
+        } else {
+            one(normalizer);
+        }
+    }
+
+    /* Metaspace: `replacement`, `prepend_scheme` ("always" default, "first",
+     * "never") or the older boolean `add_prefix_space`, `split` (default true).
+     * Looks inside a Sequence pre-tokenizer too. */
+    void parse_metaspace(const cJSON* pre) {
+        metaspace_ = MetaspaceConfig();
+        if (!pre) return;
+        const cJSON* ty = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "type");
+        if (!ty || !ty->valuestring) return;
+        if (strcmp(ty->valuestring, "Sequence") == 0) {
+            const cJSON* list = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "pretokenizers");
+            bool ws_split = false;
+            for (const cJSON* sub = cJSON_IsArray(list) ? list->child : nullptr; sub; sub = sub->next) {
+                const cJSON* st = cJSON_GetObjectItem(const_cast<cJSON*>(sub), "type");
+                if (!st || !st->valuestring) continue;
+                if (strcmp(st->valuestring, "WhitespaceSplit") == 0) ws_split = true;
+                if (strcmp(st->valuestring, "Metaspace") == 0) {
+                    parse_metaspace(sub);   /* resets metaspace_ */
+                    metaspace_.whitespace_split = ws_split;
+                    return;
+                }
+            }
+            return;
+        }
+        if (strcmp(ty->valuestring, "Metaspace") != 0) return;
+        metaspace_.enabled = true;
+        const cJSON* rep = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "replacement");
+        if (rep && rep->valuestring && rep->valuestring[0]) metaspace_.replacement = rep->valuestring;
+        const cJSON* scheme = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "prepend_scheme");
+        const cJSON* aps = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "add_prefix_space");
+        if (scheme && scheme->valuestring) metaspace_.prepend = strcmp(scheme->valuestring, "never") != 0;
+        else if (cJSON_IsFalse(aps)) metaspace_.prepend = false;
+        const cJSON* sp = cJSON_GetObjectItem(const_cast<cJSON*>(pre), "split");
+        if (cJSON_IsFalse(sp)) metaspace_.split = false;
+    }
+
+    /* TemplateProcessing "single": SpecialToken ids around the Sequence A. */
+    void parse_single_template(const cJSON* post) {
+        const cJSON* single = cJSON_GetObjectItem(const_cast<cJSON*>(post), "single");
+        const cJSON* specials = cJSON_GetObjectItem(const_cast<cJSON*>(post), "special_tokens");
+        if (!cJSON_IsArray(single)) return;
+        bool seen_a = false;
+        std::vector<int> pre, suf;
+        for (const cJSON* it = single->child; it; it = it->next) {
+            if (cJSON_GetObjectItem(const_cast<cJSON*>(it), "Sequence")) { seen_a = true; continue; }
+            const cJSON* st = cJSON_GetObjectItem(const_cast<cJSON*>(it), "SpecialToken");
+            const cJSON* name = st ? cJSON_GetObjectItem(const_cast<cJSON*>(st), "id") : nullptr;
+            const cJSON* def = (name && name->valuestring && specials)
+                                   ? cJSON_GetObjectItem(const_cast<cJSON*>(specials), name->valuestring) : nullptr;
+            const cJSON* ids = def ? cJSON_GetObjectItem(const_cast<cJSON*>(def), "ids") : nullptr;
+            if (!cJSON_IsArray(ids)) return;
+            for (const cJSON* x = ids->child; x; x = x->next)
+                (seen_a ? suf : pre).push_back(x->valueint);
+        }
+        if (!seen_a) return;
+        single_prefix_ = pre;
+        single_suffix_ = suf;
+        single_template_ = true;
+    }
+
+    /* Normalizer ops, then Metaspace, then one Viterbi per pre-token. */
+    void unigram_encode(const std::string& text, std::vector<int>& ids) const {
+        std::string s = text;
+        for (const NormOp& op : unigram_norm_) {
+            switch (op.kind) {
+            case NormOp::CHARSMAP: s = charsmap_.normalize(s); break;
+            case NormOp::PREPEND: s = op.a + s; break;
+            case NormOp::STRIP: {
+                size_t b = 0, e = s.size();
+                if (op.left) while (b < e && (s[b] == ' ' || s[b] == '\t' || s[b] == '\n' || s[b] == '\r')) b++;
+                if (op.right) while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\n' || s[e - 1] == '\r')) e--;
+                s = s.substr(b, e - b);
+                break;
+            }
+            case NormOp::REPLACE_LITERAL: {
+                if (op.a.empty()) break;
+                std::string o;
+                size_t i = 0, f;
+                while ((f = s.find(op.a, i)) != std::string::npos) {
+                    o.append(s, i, f - i);
+                    o += op.b;
+                    i = f + op.a.size();
+                }
+                o.append(s, i, std::string::npos);
+                s.swap(o);
+                break;
+            }
+            case NormOp::COLLAPSE_SPACES: {
+                const size_t minrun = op.a == "2" ? 2 : 1;
+                std::string o;
+                o.reserve(s.size());
+                for (size_t i = 0; i < s.size();) {
+                    if (s[i] != ' ') { o.push_back(s[i++]); continue; }
+                    size_t j = i;
+                    while (j < s.size() && s[j] == ' ') j++;
+                    if (j - i >= minrun) o += op.b; else o.append(s, i, j - i);
+                    i = j;
+                }
+                s.swap(o);
+                break;
+            }
+            }
+        }
+        if (s.empty()) return;
+
+        if (!metaspace_.enabled) {
+            unigram_.encode_word(s, ids);
+            return;
+        }
+        if (!metaspace_.whitespace_split) {
+            metaspace_encode(s, ids);
+            return;
+        }
+        /* WhitespaceSplit, then Metaspace on each word: whitespace runs are
+         * dropped instead of becoming lone replacement pieces. */
+        std::string word;
+        for (size_t i = 0; i < s.size();) {
+            size_t len = 1;
+            if (utf8_is_whitespace(s, i, len)) {
+                if (!word.empty()) { metaspace_encode(word, ids); word.clear(); }
+            } else {
+                word.append(s, i, len);
+            }
+            i += len;
+        }
+        if (!word.empty()) metaspace_encode(word, ids);
+    }
+
+    void metaspace_encode(const std::string& s, std::vector<int>& ids) const {
+        const std::string& rep = metaspace_.replacement;
+        std::string m;
+        m.reserve(s.size() + rep.size() * 2);
+        for (char c : s) {
+            if (c == ' ') m += rep; else m.push_back(c);
+        }
+        if (metaspace_.prepend && m.compare(0, rep.size(), rep) != 0) m.insert(0, rep);
+        if (!metaspace_.split) {
+            unigram_.encode_word(m, ids);
+            return;
+        }
+        /* split, merged with next: each replacement starts a new word */
+        size_t start = 0;
+        std::string word;
+        for (size_t i = 1; i <= m.size();) {
+            if (i == m.size() || m.compare(i, rep.size(), rep) == 0) {
+                word.assign(m, start, i - start);
+                unigram_.encode_word(word, ids);
+                start = i;
+                i += rep.size();
+                if (i > m.size()) break;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    /* Normalise, pre-tokenize and sub-tokenize `text`; no special tokens. */
+    void tokenize_body(const std::string& text, std::vector<int>& ids) const {
+        if (type_ == UNIGRAM) {
+            unigram_encode(text, ids);
+            return;
+        }
+        /* Normalise and pre-tokenize into words. WordPiece follows HF's
+         * BertNormalizer switches; byte-level BPE keeps its legacy path. */
+        std::vector<std::string> words;
+        if (type_ == BPE) {
+            words = legacy_basic_tokenize(
+                do_lower_case_ ? legacy_bert_normalize(text) : text);
+        } else {
+            words = basic_tokenize(bert_normalize(text, lower_, strip_),
+                                   clean_text_, handle_chinese_);
+        }
 
         for (const auto& word : words) {
             if (type_ == WORDPIECE) {
@@ -585,6 +1101,43 @@ private:
                 bpe_tokenize(word, ids);
             }
         }
+    }
+
+    /* Encode a single text to token IDs */
+    std::vector<int> encode_single(const std::string& text) const {
+        std::vector<int> ids;
+
+        if (type_ == UNIGRAM) {
+            /* <s> $A </s> (or whatever the single template says) */
+            if (add_special_tokens_) {
+                if (single_template_) ids = single_prefix_;
+                else ids.push_back(cls_token_id_);
+            }
+            tokenize_body(text, ids);
+            if (add_special_tokens_) {
+                if (single_template_) ids.insert(ids.end(), single_suffix_.begin(), single_suffix_.end());
+                else ids.push_back(sep_token_id_);
+            }
+            if ((int)ids.size() > max_length_) {
+                ids.resize(max_length_);
+                if (add_special_tokens_) {
+                    if (single_template_ && !single_suffix_.empty()) {
+                        const size_t k = std::min(single_suffix_.size(), ids.size());
+                        std::copy(single_suffix_.end() - k, single_suffix_.end(), ids.end() - k);
+                    } else if (!single_template_) {
+                        ids.back() = sep_token_id_;
+                    }
+                }
+            }
+            return ids;
+        }
+
+        /* Add [CLS] for BERT-style models */
+        if (add_special_tokens_) {
+            ids.push_back(cls_token_id_);
+        }
+
+        tokenize_body(text, ids);
 
         /* Add [SEP] */
         if (add_special_tokens_) {
@@ -606,6 +1159,15 @@ private:
     void wordpiece_tokenize(const std::string& word, std::vector<int>& ids) const {
         if (word.empty()) return;
 
+        /* HF: a word of more than max_input_chars_per_word characters is one
+         * [UNK], whatever the vocabulary holds. */
+        size_t nchars = 0;
+        for (unsigned char c : word) if ((c & 0xC0) != 0x80) nchars++;
+        if (nchars > wp_max_chars_) {
+            ids.push_back(unk_token_id_);
+            return;
+        }
+
         /* Try full word first */
         auto it = vocab_.find(word);
         if (it != vocab_.end()) {
@@ -615,7 +1177,7 @@ private:
 
         /* Greedy longest-match-first from left */
         size_t start = 0;
-        bool found_any = false;
+        const size_t ids_before = ids.size();
         while (start < word.size()) {
             size_t end = word.size();
             bool found = false;
@@ -628,15 +1190,16 @@ private:
                 if (vit != vocab_.end()) {
                     ids.push_back(vit->second);
                     found = true;
-                    found_any = true;
                     start = end;
                     break;
                 }
                 end--;
             }
             if (!found) {
-                /* Character not in vocab — use [UNK] for entire word */
-                if (!found_any) ids.push_back(unk_token_id_);
+                /* A piece is not in the vocabulary: HF discards the pieces
+                 * already matched and emits one [UNK] for the whole word. */
+                ids.resize(ids_before);
+                ids.push_back(unk_token_id_);
                 return;
             }
         }
@@ -654,8 +1217,10 @@ private:
             if ((c & 0xE0) == 0xC0) bytes = 2;
             else if ((c & 0xF0) == 0xE0) bytes = 3;
             else if ((c & 0xF8) == 0xF0) bytes = 4;
-            symbols.push_back(word.substr(i, bytes));
-            i += bytes;
+            /* A truncated trailing sequence is kept as the bytes that are there. */
+            const size_t len = std::min((size_t)bytes, word.size() - i);
+            symbols.push_back(word.substr(i, len));
+            i += len;
         }
 
         /* Iteratively merge the highest-priority pair */

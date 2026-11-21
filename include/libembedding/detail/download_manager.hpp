@@ -12,6 +12,7 @@
 #ifndef LIBEMBEDDING_DETAIL_DOWNLOAD_MANAGER_HPP
 #define LIBEMBEDDING_DETAIL_DOWNLOAD_MANAGER_HPP
 
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <stdexcept>
@@ -63,12 +64,66 @@ inline const char* const* get_additional_files(int model_enum, int model_type) {
  * caller learns what to use instead. Local paths never come through here.
  * ========================================================================= */
 
-/* Distinct type so the C wrappers report LEMBED_ERROR_UNSUPPORTED, not a
- * download failure: a caller that retries or skips on download errors must
- * not do so here. */
-struct model_too_large_error : std::runtime_error {
+/* A registry model refused before any download or load. Distinct type so the
+ * C wrappers report LEMBED_ERROR_UNSUPPORTED, not a download failure: a caller
+ * that retries or skips on download errors must not do so here. */
+struct model_refused_error : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
+
+struct model_too_large_error : model_refused_error {
+    using model_refused_error::model_refused_error;
+};
+
+struct restricted_license_error : model_refused_error {
+    using model_refused_error::model_refused_error;
+};
+
+/* =========================================================================
+ * Registry models under a licence that is not MIT-compatible
+ *
+ * The project accepts only MIT-compatible licences. The licence audit of
+ * 2026-11-14 (roadmap T4) found two entries that are not: they stay in the
+ * enums, since removing them would shift the indices (ABI), but they are
+ * refused unless the user opts in with LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES=1,
+ * and they leave the registry in 2.0 (decision D4). Applies whether or not
+ * the files are cached; a local model path never comes through here.
+ * ========================================================================= */
+
+struct restricted_license {
+    const char* model_code;  /* lembed_model_info_t::model_code (repository downloaded) */
+    const char* licence;
+    const char* detail;
+};
+
+inline const restricted_license* find_restricted_license(const char* model_code) {
+    static const restricted_license entries[] = {
+        { "jinaai/jina-reranker-v2-base-multilingual", "CC-BY-NC-4.0",
+          "research and evaluation only, no commercial use" },
+        { "onnx-community/embeddinggemma-300m-ONNX", "Gemma Terms of Use",
+          "not an OSI licence, with Google's use restrictions" },
+    };
+    if (!model_code) return nullptr;
+    for (const auto& e : entries) {
+        if (std::strcmp(e.model_code, model_code) == 0) return &e;
+    }
+    return nullptr;
+}
+
+inline bool restricted_licenses_allowed() {
+    const char* v = std::getenv("LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES");
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
+inline void check_restricted_license(const lembed_model_info_t& info) {
+    const restricted_license* r = find_restricted_license(info.model_code);
+    if (!r || restricted_licenses_allowed()) return;
+    throw restricted_license_error(
+        std::string(info.model_code) + " is under " + r->licence + " (" + r->detail +
+        "), which is not MIT-compatible. Set LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES=1 to"
+        " load it anyway once you have read its licence, or pass a local model path."
+        " It will be removed from the registry in 2.0.");
+}
 
 inline void check_mobile_model_limit(const lembed_model_info_t& info, int model_type) {
     const int limit = lembed_mobile_model_limit_mb();
@@ -163,6 +218,7 @@ inline std::string ensure_model_by_kind(
         throw std::runtime_error("Unknown model enum: " + std::to_string(model_enum));
     }
 
+    check_restricted_license(info);
     check_mobile_model_limit(info, model_type);
 
     /* Get additional files for this model (ONNX data shards, etc.) */

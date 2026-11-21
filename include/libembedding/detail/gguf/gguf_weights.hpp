@@ -41,7 +41,9 @@
 #include <ggml-backend.h>
 #include <gguf.h>
 
+#include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -145,6 +147,7 @@ public:
     Weights() = default;
 
     ~Weights() {
+        free_blob_ctx();
         if (ctx_) ggml_free(ctx_);
         /* ctx_ is freed before buf_ on purpose: the tensors point into buf_. */
         if (buf_) ggml_backend_buffer_free(buf_);
@@ -167,25 +170,52 @@ public:
             return false;
         }
 
-        ggml_context* blob_ctx = nullptr;
-        gguf_init_params params{};
-        params.no_alloc = false; /* the blob has to be in RAM to be copied out */
-        params.ctx = &blob_ctx;
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if (!in) {
+            err = std::string("cannot read GGUF file '") + path + "'";
+            return false;
+        }
+        const std::streamoff file_size = (std::streamoff)in.tellg();
+        in.close();
+        if (file_size < 0 || !payload_fits_in(path, nullptr, 0, (uint64_t)file_size, err)) {
+            if (err.empty()) err = std::string("cannot read GGUF file '") + path + "'";
+            return false;
+        }
 
-        gguf_context* raw = gguf_init_from_file(path, params);
+        ggml_context* blob_ctx = nullptr;
+        gguf_context* raw = gguf_init_from_file(path, blob_params(&blob_ctx));
         if (!raw) {
             err = std::string("cannot read GGUF file '") + path + "'";
             return false;
         }
-        /* raw is non-null, so adopt() cannot fail; asking it would only produce
-         * a branch that has already lost the pointer. */
-        probe_.adopt(raw);
-        blob_ctx_ = blob_ctx;
+        return adopt_blob(raw, blob_ctx, err);
+    }
 
-        if (!read_hparams(err)) return false;
+    /* Same as open(), from a GGUF image already in memory. gguf parses a buffer
+     * through the same reader it uses for a file (gguf_init_from_buffer and
+     * gguf_init_from_file both end in gguf_init_from_reader), and copies what
+     * it keeps, so `data` can be released as soon as this returns.
+     *
+     * Used by the fuzzer (tests/fuzz/fuzz_gguf_loader.cpp): one input is one
+     * buffer, with no file to write per run. */
+    bool open_buffer(const void* data, size_t size, std::string& err) {
+        if (!data || size == 0) {
+            err = "empty GGUF buffer";
+            return false;
+        }
 
-        read_special_ids();
-        return true;
+        if (!payload_fits_in(nullptr, data, size, (uint64_t)size, err)) {
+            if (err.empty()) err = "cannot read GGUF buffer";
+            return false;
+        }
+
+        ggml_context* blob_ctx = nullptr;
+        gguf_context* raw = gguf_init_from_buffer(data, size, blob_params(&blob_ctx));
+        if (!raw) {
+            err = "cannot read GGUF buffer";
+            return false;
+        }
+        return adopt_blob(raw, blob_ctx, err);
     }
 
     /* Copies every required tensor into the backend buffer. Call only after
@@ -278,7 +308,10 @@ public:
     /* Drops the parsed header and with it the whole GGUF blob, which
      * gguf_free() owns. Called once the vocabulary has been read out of it: the
      * steady-state footprint then is the backend buffer alone. */
-    void release_header() { probe_.close(); }
+    void release_header() {
+        probe_.close();
+        free_blob_ctx();
+    }
 
     const Probe& probe() const { return probe_; }
     const SpladeHparams& hparams() const { return hp_; }
@@ -295,6 +328,67 @@ public:
     ggml_backend_buffer_type_t buffer_type() const { return lembed::detail::ggml_cpu_buffer_type(); }
 
 private:
+    /* gguf reads the data blob only when no_alloc is false, and the blob has to
+     * be in RAM to be copied out. */
+    static gguf_init_params blob_params(ggml_context** blob_ctx) {
+        gguf_init_params params{};
+        params.no_alloc = false;
+        params.ctx = blob_ctx;
+        return params;
+    }
+
+    /* Refuses a file whose tensor table declares more data than the file holds,
+     * before anything is allocated.
+     *
+     * With no_alloc = false, gguf_init allocates the whole declared payload
+     * (ggml_init of header + sum of tensor sizes, gguf.cpp:864) and only then
+     * tries to read it, so a header of a few hundred bytes can ask for
+     * hundreds of gigabytes. A metadata-only pass (no_alloc = true, no ggml
+     * context) gives the declared sizes for the price of the header; the real
+     * read happens only if they fit in the `available` bytes. Exactly one of
+     * `path` or `data` is the source. */
+    static bool payload_fits_in(const char* path, const void* data, size_t size,
+                               uint64_t available, std::string& err) {
+        gguf_init_params meta{};
+        meta.no_alloc = true;
+        meta.ctx = nullptr;
+        gguf_context* g = path ? gguf_init_from_file(path, meta)
+                               : gguf_init_from_buffer(data, size, meta);
+        if (!g) return false; /* the caller names the failure */
+
+        const uint64_t base = (uint64_t)gguf_get_data_offset(g);
+        uint64_t declared = 0;
+        const int64_t n = gguf_get_n_tensors(g);
+        for (int64_t i = 0; i < n; i++) {
+            const uint64_t end = (uint64_t)gguf_get_tensor_offset(g, i) +
+                                 (uint64_t)gguf_get_tensor_size(g, i);
+            if (end > declared) declared = end;
+        }
+        gguf_free(g);
+
+        if (base > available || declared > available - base) {
+            err = "cannot read GGUF: the tensor table declares more data than the file holds";
+            return false;
+        }
+        return true;
+    }
+
+    /* Takes ownership of a freshly parsed context, whatever it was read from,
+     * and resolves the hyper-parameters. */
+    bool adopt_blob(gguf_context* raw, ggml_context* blob_ctx, std::string& err) {
+        /* raw is non-null, so adopt() cannot fail; asking it would only produce
+         * a branch that has already lost the pointer. Both are owned from this
+         * line on, so every refusal below releases them through ~Weights(). */
+        free_blob_ctx();
+        probe_.adopt(raw);
+        blob_ctx_ = blob_ctx;
+
+        if (!read_hparams(err)) return false;
+
+        read_special_ids();
+        return true;
+    }
+
     /* Tries each known spelling of a scalar field, first hit wins. Converters
      * disagree on the spelling and none of them is wrong. */
     static bool read_i32_any(const Probe& probe, const char* arch,
@@ -436,6 +530,15 @@ private:
                 t->type != GGML_TYPE_Q8_0) {
                 err = "tensor '" + r.name + "' has type " + ggml_type_name(t->type) +
                       "; this runtime supports f32, f16 and q8_0";
+                return false;
+            }
+            /* Vectors (biases, layer-norm weights) are the second operand of
+             * ggml_add / ggml_mul, which the CPU backend only implements for
+             * an F32 src1 with an F32 activation: anything else aborts the
+             * process inside ggml. Converters always keep 1-D tensors F32. */
+            if (r.ne1 == 1 && t->type != GGML_TYPE_F32) {
+                err = "tensor '" + r.name + "' is a vector of type " +
+                      ggml_type_name(t->type) + "; vectors must be f32";
                 return false;
             }
             const bool rows_ok = (r.ne1 == kAnyRows) ? t->ne[1] >= 1 : t->ne[1] == r.ne1;
@@ -587,8 +690,17 @@ private:
 
     ggml_backend_buffer_t buf_ = nullptr;
     ggml_context* ctx_ = nullptr;
-    /* The gguf_context owns this: gguf_free() frees it. Never free it here. */
+    /* The tensor data context gguf_init wrote through params.ctx. gguf_free()
+     * does NOT free it (it only deletes the gguf_context), so Weights owns it
+     * and releases it in free_blob_ctx(). */
     ggml_context* blob_ctx_ = nullptr;
+
+    void free_blob_ctx() {
+        if (blob_ctx_) {
+            ggml_free(blob_ctx_);
+            blob_ctx_ = nullptr;
+        }
+    }
 };
 
 } /* namespace gguf */

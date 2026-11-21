@@ -1,0 +1,27 @@
+version: 2
+
+# Weekly, grouped, aimed at `dev` (feature branches and releases flow
+# dev -> main; a PR straight to `main` would publish through release.yml).
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  # python/pyproject.toml: runtime (cffi, numpy) and dev extras.
+  - package-ecosystem: pip
+    directory: "/python"
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore"

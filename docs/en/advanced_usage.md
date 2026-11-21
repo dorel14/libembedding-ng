@@ -47,8 +47,9 @@ from libembedding import TextEmbedding
 # CPU (default, always available)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# Apple CoreML (macOS/iOS), falls back to CPU if unavailable
+# Apple CoreML (macOS/iOS): UnsupportedError if it cannot be attached
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
+print(model.backend, model.provider)  # onnxruntime coreml
 ```
 
 **Supported providers:**
@@ -57,12 +58,15 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
 |----------|---------|----------|
 | `cpu` | CPU | All |
 | `coreml` | CoreML | macOS, iOS |
-| `llamacpp` | llama.cpp (CPU) | All |
-| `cuda`, `directml`, `tensorrt` | reserved: run on CPU | — |
+| `llamacpp` | llama.cpp (CPU), GGUF models only | All |
+| `cuda`, `directml`, `tensorrt` | reserved: `UnsupportedError` | — |
 
 GPU acceleration is out of scope before 1.x. The `cuda`, `directml` and
-`tensorrt` values are accepted to keep the API stable, but no build enables
-them: the model then runs on the CPU.
+`tensorrt` values exist to keep the API stable, but no build enables them. A
+provider other than `cpu` that is requested but unavailable raises
+`UnsupportedError` (`LEMBED_ERROR_UNSUPPORTED` in C) instead of running on the
+CPU without saying so; the `backend` and `provider` properties report what
+really serves the model (see [Effective backend and provider](api_reference.html#effective-backend-and-provider)).
 
 ### GGUF models (llama.cpp)
 
@@ -148,6 +152,8 @@ model = TextEmbedding(
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL (e.g. mirror) |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry: libembedding sets it to `1` when unset (nothing sent to Microsoft); `0` keeps ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
+| `LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES` | `1` loads the registry models whose licence is not MIT-compatible (`jina-reranker-v2-base-multilingual`, CC-BY-NC-4.0; `embeddinggemma-300m`, Gemma), refused by default |
 
 ```bash
 # Usage examples
@@ -223,6 +229,48 @@ from libembedding import TextEmbedding
 # Limit to 128 tokens (default is 512 for BGE-small)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", max_length=128)
 ```
+
+## Tokenizer fidelity (HuggingFace `tokenizers`)
+
+The built-in tokenizer is compared with the HuggingFace `tokenizers` library on a
+multilingual corpus (Greek, Cyrillic, Vietnamese, CJK, Arabic, Hebrew, Hindi, Thai,
+Korean, emoji, accented Latin, mixed case, punctuation, very long words). The
+references are JSON fixtures committed in `tests/data/tokenizer/`, produced by
+`scripts/gen_tokenizer_fixtures.py`; the `test_tokenizer_fidelity` test needs neither
+Python nor the `tokenizers` package.
+
+| Family | Models | Status |
+|---|---|---|
+| WordPiece + BertNormalizer (uncased) | MiniLM, bge-*-en, snowflake, gte-en, nomic, mxbai, SPLADE | identical to HF, 0/54 texts differ |
+| WordPiece, Chinese vocabulary | bge-*-zh | identical to HF, 0/54 |
+| WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identical to HF, 0/54 |
+| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identical to HF, 0/54 (precompiled charsmap, WhitespaceSplit + Metaspace, Viterbi, unk fusion, byte fallback); embeddings at cosine 1.000 from the reference. Reranker pairs: not covered yet |
+| Byte-level BPE | CLIP text, ModernBERT | not implemented in the built-in tokenizer: measured, not covered |
+
+Normalisation coverage (strip accents + lowercase), checked codepoint by codepoint up
+to U+2FFFF: Latin (Latin-1, Extended-A/B, Extended Additional including Vietnamese),
+IPA, combining diacritics, Greek and Coptic, Greek Extended (polytonic), Cyrillic,
+Armenian, Hebrew, Arabic, Devanagari, Thai, Hangul jamo and syllables (algorithmic
+decomposition), general punctuation and symbols (up to U+2BFF), kana, CJK, fullwidth
+forms, emoji: 0 mismatches. Still outside the tables (1.0% of the tested codepoints,
+1,835 of 183,376): CJK compatibility ideographs (U+F900-FAFF and U+2F800-2FA1F),
+Cherokee capitals, Glagolitic, Coptic, Cyrillic Extended-B, Deseret and other rare
+alphabets, precomposed Indic letters outside Devanagari, Hebrew presentation forms.
+These codepoints go through the tokenizer unchanged, which differs from HF.
+
+The same work fixed three pre-tokenisation differences with HF: a word with an unknown
+piece yields a single `[UNK]` (not the pieces already matched), a word longer than 100
+characters yields `[UNK]`, and Unicode punctuation, CJK ideographs and format
+characters (zero-width space, etc.) are handled as HF does.
+
+`BertNormalizer` options are read independently, as in HF: `lowercase`, `strip_accents`
+(absent or `null` follows `lowercase`), `clean_text` and `handle_chinese_chars`. A
+`Sequence` normalizer is supported for `Lowercase`, `StripAccents` and `NFD`/`NFKD`;
+accents are stripped only when both `StripAccents` and a decomposition are present. The
+"lowercase only" and "strip accents only" modes are also checked codepoint by codepoint.
+Byte-level BPE keeps its legacy behaviour (not HF-faithful) until it is rewritten; its
+ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
+`tokenizer.json` is in the machine's model cache (the family is skipped otherwise).
 
 ## Model lookup by code
 
@@ -311,6 +359,33 @@ embeddings = model.embed(["Hello"])  # returns np.ndarray directly
 - `embed()` returns a `np.ndarray` directly instead of a generator
 - No separate `passage_embed()` method — everything goes through `embed()`
 - Lighter classes, fewer Python dependencies
+
+## Thread safety
+
+The rule: **a context may be shared between threads, but calls on it are
+serialised** (text, sparse, reranker). Image contexts run calls in parallel.
+For parallelism, use one context per thread or `TextEmbeddingPool`. Never free
+a context while another thread still uses it, and never call back into a
+context from an `embed_stream` callback (it holds the context lock: deadlock).
+
+| Type | Shared between threads? | Why (source) |
+|---|---|---|
+| Text, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `detail/text_embedding_impl.hpp:125,169`; the tokenizer writes scratch strings and the GGUF backend has one `llama_context` |
+| Sparse, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `sparse_text_embedding.h:171,348`; GGUF workers reuse ggml graphs per call |
+| Reranker, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `detail/reranker_impl.hpp:91,341` |
+| Image | Yes, calls run in parallel | no per-context scratch, `OrtApi::Run` is thread-safe; only the counters are locked (`image_embedding.h:116`) |
+| Stats getters (`*_stats`, `*_stats_v2`) | Yes, never wait for an inference | separate `stats_mutex` (same lines) |
+| `TextEmbeddingPool` | Yes | each worker owns a context (serialised), calls from several threads queue per worker (`cpp/embedding_pool.hpp`) |
+| LRU cache (`lembed_cache_*`) | Yes | one mutex (`detail/embedding_cache_impl.hpp:142`). Use `lembed_cache_get_copy()`: `lembed_cache_get()` returns a borrowed pointer (deprecated) |
+| Autotune cache entries | Yes in a process | unique temporary name then atomic rename (`detail/autotune_cache.hpp:392`); several processes: last writer wins |
+| Legacy tune cache (`lembed_tune_cache_*`) | Yes in a process | process-wide mutex (`detail/autotune_cache_impl.hpp:91`); several processes: last writer wins |
+| Model downloader | Yes | unique temporary file per download, atomic publish (`detail/downloader_impl.hpp:339`). Two threads may download the same file twice |
+| `lembed_last_error()` | Yes | thread-local buffer (`error.h:79`): read it on the thread that got the failure |
+| `create` / `free` | Create contexts from any thread; free from one thread once no call is in flight | |
+
+Tests: `tests/test_concurrency.cpp` (also built with ThreadSanitizer by the
+`tsan.yml` workflow) and `tests/test_repeated_calls.cpp` (10 000 repeated calls,
+bounded RSS growth, `-DLIBEMBEDDING_STABILITY_TESTS=ON`).
 
 ## Performance tips
 

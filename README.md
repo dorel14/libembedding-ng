@@ -209,7 +209,8 @@ assumed:
   names the one it picked; record it with any GGUF benchmark.
 - ONNX models run on ONNX Runtime, which selects its own kernels at run time.
 
-The Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
+The Linux x86_64 wheel (`manylinux_2_31_x86_64`) needs glibc 2.31 or later. The
+Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
 glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
 bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
 libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
@@ -339,6 +340,8 @@ cmake --build . --parallel
 .\run_tests.ps1                # Unit tests only (no network)
 .\run_tests.ps1 --integration  # Include integration tests (downloads models)
 ```
+
+Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: see [SECURITY.md](SECURITY.md).
 
 ### Run Examples
 
@@ -789,17 +792,22 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | Enum | Backend |
 |---|---|
 | `LEMBED_PROVIDER_CPU` | CPU (default, always available) |
-| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), falls back to CPU if unavailable |
-| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU) |
-| `LEMBED_PROVIDER_CUDA` | Reserved: runs on CPU (GPU support is planned after 1.x) |
-| `LEMBED_PROVIDER_DIRECTML` | Reserved: runs on CPU (GPU support is planned after 1.x) |
-| `LEMBED_PROVIDER_TENSORRT` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), `LEMBED_ERROR_UNSUPPORTED` if it cannot be attached |
+| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU); `LEMBED_ERROR_UNSUPPORTED` on an ONNX model |
+| `LEMBED_PROVIDER_CUDA` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_DIRECTML` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_TENSORRT` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
 
 GPU acceleration is out of scope before 1.x. The CUDA, DirectML and TensorRT
 values exist so the enum stays stable, but no build enables them
-(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`): a
-model created with one of them runs on the CPU. ggml is built without GPU
-backends, so `llama_n_gpu_layers` has no effect.
+(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`). A
+provider other than `LEMBED_PROVIDER_CPU` that cannot be attached makes the
+create function fail with `LEMBED_ERROR_UNSUPPORTED` and a reason in
+`lembed_last_error()` instead of silently running on the CPU.
+`lembed_*_backend_name(ctx)` and `lembed_*_effective_provider(ctx)` report the
+runtime and provider actually serving a context (see
+[docs/en/api_reference.md](docs/en/api_reference.md#effective-backend-and-provider-c-api)).
+ggml is built without GPU backends, so `llama_n_gpu_layers` has no effect.
 
 ### Versioned options (v2)
 
@@ -941,6 +949,11 @@ Measured against the sparse ONNX model on the same texts, cosine similarity is
 0.9998 (worst case over 12 texts), i.e. Q8_0 quantisation noise rather than an
 implementation divergence. See `docs/gguf_sparse_runtime.md` and
 `docs/archive/LE-9.6-results.md`.
+
+This file is registered as `SPLADE-PP-En-v1-GGUF` (Apache-2.0, ~112 MB):
+`lembed_list_sparse_gguf_models()` / `lembed_find_sparse_gguf_model()` in C,
+and in Python `SparseTextEmbedding("SPLADE-PP-En-v1-GGUF")` downloads and loads
+it. The name is matched exactly, so the ONNX model's names still load ONNX.
 
 ---
 
@@ -1121,6 +1134,8 @@ The library allocates output buffers internally. Always free them with the match
 | `HF_ENDPOINT` | Custom HuggingFace Hub endpoint URL |
 | `LIBEMBEDDING_DOWNLOAD_STALL_TIMEOUT` | Seconds without any byte received before a download is aborted and retried (default 30; up to 3 attempts) |
 | `ORT_DISABLE_TELEMETRY` | ONNX Runtime telemetry. libembedding sets it to `1` when unset; set it to `0` to keep ORT's telemetry |
+| `LIBEMBEDDING_VERBOSE` | `1` prints diagnostics on stderr (autotune progress, auto model selection, cache cleanup dry runs); silent by default |
+| `LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES` | `1` loads the registry models whose licence is not MIT-compatible (`jina-reranker-v2-base-multilingual`, CC-BY-NC-4.0; `embeddinggemma-300m`, Gemma), refused by default |
 | `ONNXRUNTIME_ROOT` | Path to ONNX Runtime installation (for CMake) |
 
 **No telemetry.** libembedding sends nothing anywhere. ONNX Runtime 1.31 does:

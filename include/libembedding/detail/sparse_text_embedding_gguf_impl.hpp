@@ -36,6 +36,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,8 @@ lembed_status_t lembed_sparse_text_embedding_embed_gguf(
         result->count = out_offset;
 
         const auto t_end = std::chrono::high_resolution_clock::now();
+        /* The caller, lembed_sparse_text_embedding_embed(), holds call_mutex. */
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += (uint64_t)out_offset;
         ctx->batches_run += (uint64_t)num_batches;
         ctx->total_latency_ms += std::chrono::duration<double, std::milli>(
@@ -218,6 +221,18 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_model(
 
     return lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(),
                                                               &opts, out);
+}
+
+lembed_status_t lembed_sparse_text_embedding_set_max_batch_tokens(
+        lembed_sparse_embedding_ctx_t* ctx,
+        int max_batch_tokens) {
+    if (!ctx || max_batch_tokens < 0) return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!ctx->gguf) {
+        lembed::detail::set_error("max_batch_tokens applies to the GGUF runtime only");
+        return LEMBED_ERROR_UNSUPPORTED;
+    }
+    ctx->gguf->set_max_batch_tokens(max_batch_tokens);
+    return LEMBED_OK;
 }
 
 #ifdef __cplusplus
