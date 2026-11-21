@@ -245,7 +245,8 @@ Python nor the `tokenizers` package.
 | WordPiece, Chinese vocabulary | bge-*-zh | identical to HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identical to HF, 0/54 |
 | Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identical to HF, 0/54 (precompiled charsmap, WhitespaceSplit + Metaspace, Viterbi, unk fusion, byte fallback); embeddings at cosine 1.000 from the reference. Reranker pairs: not covered yet |
-| Byte-level BPE | CLIP text, ModernBERT | not implemented in the built-in tokenizer: measured, not covered |
+| Byte-level BPE (`Split` + `ByteLevel`, `</w>` suffix) | CLIP text | identical to HF, 0/54; embeddings at cosine 1.000 from the reference (before: min 0.29, mean 0.76). NFC limited to Latin (letters + U+0300-036F diacritics), Unicode 15.0 tables for `\p{L}`/`\p{N}` |
+| Byte-level BPE, others (ModernBERT, GPT-2) | ModernBERT | recognised when the JSON uses the same building blocks, otherwise falls back to the legacy path; not measured |
 
 Normalisation coverage (strip accents + lowercase), checked codepoint by codepoint up
 to U+2FFFF: Latin (Latin-1, Extended-A/B, Extended Additional including Vietnamese),
@@ -268,8 +269,8 @@ characters (zero-width space, etc.) are handled as HF does.
 `Sequence` normalizer is supported for `Lowercase`, `StripAccents` and `NFD`/`NFKD`;
 accents are stripped only when both `StripAccents` and a decomposition are present. The
 "lowercase only" and "strip accents only" modes are also checked codepoint by codepoint.
-Byte-level BPE keeps its legacy behaviour (not HF-faithful) until it is rewritten; its
-ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
+A byte-level BPE whose `tokenizer.json` is not fully understood keeps its legacy
+behaviour (not HF-faithful); its ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
 `tokenizer.json` is in the machine's model cache (the family is skipped otherwise).
 
 ## Model lookup by code
