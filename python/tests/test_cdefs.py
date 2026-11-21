@@ -90,6 +90,35 @@ def test_struct_sizes_match_c(type_name):
     )
 
 
+# Field offsets that move with the 4-byte pointer / size_t on 32-bit ABIs
+# (mirrors the offsetof checks in tests/test_struct_sizes.cpp).
+EXPECTED_OFFSETS_32 = [
+    ("lembed_model_desc_t", "dimension", 4),
+    ("lembed_model_desc_t", "device_id", 28),
+    ("lembed_model_desc_v2_t", "cache_size", 36),
+    ("lembed_embeddings_t", "num_embeddings", 4),
+    ("lembed_embeddings_t", "dim", 8),
+    ("lembed_sparse_embedding_t", "values", 4),
+    ("lembed_sparse_embedding_t", "length", 8),
+    ("lembed_cache_config_t", "current_size", 4),
+    ("lembed_cache_config_t", "ttl_seconds", 8),
+    ("lembed_text_options_t", "cache_dir", 12),
+    ("lembed_text_options_t", "max_length", 16),
+    ("lembed_text_options_t", "batch_strategy", 72),
+    ("lembed_text_options_v2_t", "quantization", 76),
+    ("lembed_stats_v2_t", "cache_hits", 24),
+    ("lembed_autotune_options_t", "texts", 12),
+    ("lembed_autotune_options_t", "max_latency_ms", 24),
+    ("lembed_quantization_measurement_t", "docs_per_sec", 8),
+]
+
+
+@pytest.mark.skipif(not IS_32_BIT_8ALIGN, reason="32-bit ABI with 8-byte double only")
+@pytest.mark.parametrize(("type_name", "field", "offset"), EXPECTED_OFFSETS_32)
+def test_struct_offsets_match_c_32bit(type_name, field, offset):
+    assert ffi.offsetof(type_name, field) == offset
+
+
 @pytest.mark.parametrize("type_name", sorted(EXPECTED_SIZES_64))
 def test_struct_declared_in_cdefs(type_name):
     """Every frozen struct must still be declared in _cdefs.h."""
