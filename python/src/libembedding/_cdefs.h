@@ -349,6 +349,8 @@ void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stat
 void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_text_embedding_free(lembed_text_embedding_t* ctx);
 lembed_status_t lembed_embeddings_truncate(lembed_embeddings_t* emb, int new_dim, int renormalize);
+const char* lembed_text_embedding_backend_name(const lembed_text_embedding_t* ctx);
+const char* lembed_text_embedding_effective_provider(const lembed_text_embedding_t* ctx);
 
 /* ═══ Functions: Sparse text embedding ═════════════════════════════ */
 
@@ -364,6 +366,8 @@ int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t*
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
 void lembed_sparse_text_embedding_stats_v2(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_v2_t* out);
 void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
+const char* lembed_sparse_text_embedding_backend_name(const lembed_sparse_embedding_ctx_t* ctx);
+const char* lembed_sparse_text_embedding_effective_provider(const lembed_sparse_embedding_ctx_t* ctx);
 
 /* ═══ Functions: Image embedding ════════════════════════════════════ */
 
@@ -378,6 +382,8 @@ int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx);
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out);
 void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed_stats_v2_t* out);
 void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
+const char* lembed_image_embedding_backend_name(const lembed_image_embedding_t* ctx);
+const char* lembed_image_embedding_effective_provider(const lembed_image_embedding_t* ctx);
 
 /* ═══ Functions: Reranker ══════════════════════════════════════════ */
 
@@ -394,6 +400,8 @@ int lembed_reranker_max_length(const lembed_reranker_t* ctx);
 void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out);
 void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* out);
 void lembed_reranker_free(lembed_reranker_t* ctx);
+const char* lembed_reranker_backend_name(const lembed_reranker_t* ctx);
+const char* lembed_reranker_effective_provider(const lembed_reranker_t* ctx);
 
 /* ═══ Functions: Model registry ════════════════════════════════════ */
 

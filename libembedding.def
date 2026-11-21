@@ -51,6 +51,8 @@ lembed_ggml_cpu_features
     lembed_text_embedding_stats_v2
     lembed_text_embedding_free
     lembed_embeddings_truncate
+    lembed_text_embedding_backend_name
+    lembed_text_embedding_effective_provider
 
     ; ---- Sparse text embedding ----
     lembed_sparse_text_embedding_create
@@ -64,6 +66,8 @@ lembed_ggml_cpu_features
     lembed_sparse_text_embedding_stats
     lembed_sparse_text_embedding_stats_v2
     lembed_sparse_text_embedding_free
+    lembed_sparse_text_embedding_backend_name
+    lembed_sparse_text_embedding_effective_provider
     lembed_sparse_text_embedding_set_max_batch_tokens
 
     ;@IF NOT LIBEMBEDDING_NO_IMAGE
@@ -79,6 +83,8 @@ lembed_ggml_cpu_features
     lembed_image_embedding_stats
     lembed_image_embedding_stats_v2
     lembed_image_embedding_free
+    lembed_image_embedding_backend_name
+    lembed_image_embedding_effective_provider
 ;@ENDIF
 
     ; ---- Reranker ----
@@ -95,6 +101,8 @@ lembed_ggml_cpu_features
     lembed_reranker_stats
     lembed_reranker_stats_v2
     lembed_reranker_free
+    lembed_reranker_backend_name
+    lembed_reranker_effective_provider
 
     ; ---- Model registry ----
     lembed_get_text_model_info

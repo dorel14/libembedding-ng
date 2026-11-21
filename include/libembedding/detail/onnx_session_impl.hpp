@@ -37,6 +37,8 @@
 #include <string>
 #include <vector>
 
+#include "../error.h"
+
 /* Implementation of the public lembed_onnxruntime_version() declared in
  * config.h. It lives here because this is the first header that includes
  * onnxruntime_c_api.h, and config.h is deliberately dependency-free so that a
@@ -143,18 +145,113 @@ inline void ort_check(OrtStatus* status) {
     }
 }
 
-/* Owns an OrtSessionOptions until the session has been created. ort_check()
- * throws, so every failure between CreateSessionOptions and the release (a
- * garbage model in CreateSession, a refused provider or option) used to leak
- * the options. */
-struct OrtSessionOptionsGuard {
-    OrtSessionOptions* opts = nullptr;
-    OrtSessionOptionsGuard() = default;
-    OrtSessionOptionsGuard(const OrtSessionOptionsGuard&) = delete;
-    OrtSessionOptionsGuard& operator=(const OrtSessionOptionsGuard&) = delete;
-    ~OrtSessionOptionsGuard() {
-        if (opts) ort_api()->ReleaseSessionOptions(opts);
+/* Thrown when an execution provider other than CPU was requested and cannot be
+ * attached to the session (decision D3).
+ *
+ * LEMBED_PROVIDER_CPU is the default of every options struct and there is no
+ * "auto" provider value, so any other value is an explicit request. It used to
+ * fall back to CPU without a word, which made a CPU run look like a GPU one.
+ * The create functions map this type to LEMBED_ERROR_UNSUPPORTED through
+ * onnx_create_status(); every other exception keeps its historical status. */
+class provider_unavailable_error : public std::runtime_error {
+public:
+    explicit provider_unavailable_error(const std::string& what)
+        : std::runtime_error(what) {}
+};
+
+/* Status a create function returns for an exception caught while building an
+ * ONNX context: LEMBED_ERROR_UNSUPPORTED for an unavailable provider,
+ * `fallback` (the code that path has always returned) for anything else. */
+inline lembed_status_t onnx_create_status(const std::exception& e,
+                                          lembed_status_t fallback) {
+    return dynamic_cast<const provider_unavailable_error*>(&e)
+        ? LEMBED_ERROR_UNSUPPORTED : fallback;
+}
+
+/* Non-throwing check for the providers this build can never attach (no
+ * USE_CUDA / USE_DML / USE_TENSORRT, CoreML off Apple, llama.cpp, unknown
+ * value). Returns true and fills *message when `provider` is one of them.
+ *
+ * The create functions call it first through onnx_provider_precheck(), so the
+ * common "explicit provider unavailable" failure is a plain status return and
+ * never an exception crossing the extern "C" boundary: MSVC /EHsc treats
+ * extern "C" functions as nothrow and, under /O2, may drop the handlers
+ * around code it inlined into them. A provider that is compiled in but fails to
+ * attach at runtime still throws from apply_provider_config(). */
+inline bool provider_never_available(int provider, std::string* message) {
+    const char* name = nullptr;
+    const char* why = nullptr;
+    std::string unknown;
+    switch (provider) {
+        case 0: /* CPU */
+            return false;
+        case 1: /* CUDA */
+#ifdef USE_CUDA
+            return false;
+#else
+            name = "CUDA";
+            why = "this build has no CUDA support (USE_CUDA)";
+            break;
+#endif
+        case 2: /* CoreML */
+#if defined(__APPLE__)
+            return false;
+#else
+            name = "CoreML";
+            why = "CoreML exists on Apple platforms only";
+            break;
+#endif
+        case 3: /* DirectML (Windows only, requires onnxruntime-dml) */
+#if (defined(_WIN32) || defined(WIN32)) && defined(USE_DML)
+            return false;
+#else
+            name = "DirectML";
+            why = "this build has no DirectML support (USE_DML)";
+            break;
+#endif
+        case 4: /* TensorRT */
+#ifdef USE_TENSORRT
+            return false;
+#else
+            name = "TensorRT";
+            why = "this build has no TensorRT support (USE_TENSORRT)";
+            break;
+#endif
+        case 5: /* LEMBED_PROVIDER_LLAMACPP */
+            name = "llama.cpp";
+            why = "it is not an ONNX Runtime execution provider; load a .gguf "
+                  "model to use the llama.cpp backend";
+            break;
+        default:
+            unknown = std::to_string(provider);
+            name = unknown.c_str();
+            why = "unknown lembed_execution_provider_t value";
+            break;
     }
+    if (message) {
+        *message = std::string("Execution provider ") + name +
+                   " was requested but is not available: " + why +
+                   ". Use LEMBED_PROVIDER_CPU (provider=\"cpu\") to run on the CPU.";
+    }
+    return true;
+}
+
+/* LEMBED_OK when `provider` may be attempted, else LEMBED_ERROR_UNSUPPORTED
+ * with the thread-local error set. Never throws for those cases. */
+inline lembed_status_t onnx_provider_precheck(int provider) {
+    std::string message;
+    if (!provider_never_available(provider, &message)) return LEMBED_OK;
+    set_error(message);
+    return LEMBED_ERROR_UNSUPPORTED;
+}
+
+/* Releases an OrtSessionOptions when the scope ends, exception or not. */
+struct SessionOptionsGuard {
+    OrtSessionOptions* opts;
+    explicit SessionOptionsGuard(OrtSessionOptions* o) : opts(o) {}
+    ~SessionOptionsGuard() { if (opts) ort_api()->ReleaseSessionOptions(opts); }
+    SessionOptionsGuard(const SessionOptionsGuard&) = delete;
+    SessionOptionsGuard& operator=(const SessionOptionsGuard&) = delete;
 };
 
 /* Wrapper around an ORT session */
@@ -180,10 +277,12 @@ public:
                         int provider = 0 /* CPU */,
                         int quantization = 0) {
         const OrtApi* api = ort_api();
-        OrtSessionOptionsGuard guard;
+        OrtSessionOptions* opts = nullptr;
 
-        ort_check(api->CreateSessionOptions(&guard.opts));
-        OrtSessionOptions* opts = guard.opts;
+        ort_check(api->CreateSessionOptions(&opts));
+        /* Released on every exit: apply_provider_config() and ort_check() throw,
+         * and the options used to leak on those paths. */
+        SessionOptionsGuard opts_guard(opts);
         ort_check(api->EnableMemPattern(opts));
         ort_check(api->EnableCpuMemArena(opts));
 
@@ -222,10 +321,10 @@ public:
                           int provider = 0,
                           int quantization = 0) {
         const OrtApi* api = ort_api();
-        OrtSessionOptionsGuard guard;
+        OrtSessionOptions* opts = nullptr;
 
-        ort_check(api->CreateSessionOptions(&guard.opts));
-        OrtSessionOptions* opts = guard.opts;
+        ort_check(api->CreateSessionOptions(&opts));
+        SessionOptionsGuard opts_guard(opts);
         ort_check(api->EnableMemPattern(opts));
         ort_check(api->EnableCpuMemArena(opts));
         ort_check(api->SetSessionGraphOptimizationLevel(opts, ORT_ENABLE_ALL));
@@ -517,54 +616,82 @@ private:
      * 3 = DirectML
      * 4 = TensorRT
      *
-     * For non-CPU providers, the user must have the corresponding
-     * ONNX Runtime provider library installed. We attempt to append
-     * the provider and fall back silently to CPU on failure.
+     * 5 = llama.cpp (not an ONNX Runtime provider)
+     *
+     * CPU needs nothing. Every other value is an explicit request (CPU is the
+     * default and there is no "auto" provider), so a provider this build or
+     * this machine cannot attach throws provider_unavailable_error, which the
+     * create functions return as LEMBED_ERROR_UNSUPPORTED (decision D3). It
+     * used to fall back to CPU silently. Checked before the model is parsed,
+     * so the failure is cheap.
      * ========================================================================= */
+    [[noreturn]] static void provider_unavailable(const char* name, const char* why) {
+        throw provider_unavailable_error(
+            std::string("Execution provider ") + name +
+            " was requested but is not available: " + why +
+            ". Use LEMBED_PROVIDER_CPU (provider=\"cpu\") to run on the CPU.");
+    }
+
+    /* Appends a provider whose OrtStatus says whether it worked. */
+    static void append_or_throw(const OrtApi* api, OrtStatus* status, const char* name) {
+        if (!status) return;
+        std::string why = api->GetErrorMessage(status);
+        api->ReleaseStatus(status);
+        provider_unavailable(name, why.c_str());
+    }
+
     void apply_provider_config(const OrtApi* api, OrtSessionOptions* opts, int provider) {
-#ifdef ORT_API_VERSION
+        (void)api;
+        (void)opts;
+        /* Providers this build can never attach: same check the create
+         * functions run first (onnx_provider_precheck), kept here for direct
+         * callers of load_from_*. */
+        std::string message;
+        if (provider_never_available(provider, &message))
+            throw provider_unavailable_error(message);
+
         switch (provider) {
-            case 1: { /* CUDA */
 #ifdef USE_CUDA
+            case 1: { /* CUDA */
                 OrtCUDAProviderOptions cuda_opts;
                 memset(&cuda_opts, 0, sizeof(cuda_opts));
-                api->SessionOptionsAppendExecutionProvider_CUDA(opts, &cuda_opts);
-#endif
-                break;
+                append_or_throw(api,
+                    api->SessionOptionsAppendExecutionProvider_CUDA(opts, &cuda_opts),
+                    "CUDA");
+                return;
             }
-            case 2: { /* CoreML */
+#endif
 #if defined(__APPLE__)
+            case 2: /* CoreML */
                 /* Generic, string-keyed entry point (CoreML since ORT 1.20):
                  * unlike OrtSessionOptionsAppendExecutionProvider_CoreML it
                  * needs no coreml_provider_factory.h, which only the GitHub
                  * osx archive ships (the NuGet fallback package does not). */
-                OrtStatus* s = api->SessionOptionsAppendExecutionProvider(
-                    opts, "CoreML", nullptr, nullptr, 0);
-                if (s) api->ReleaseStatus(s); /* fall back to CPU */
+                append_or_throw(api,
+                    api->SessionOptionsAppendExecutionProvider(
+                        opts, "CoreML", nullptr, nullptr, 0),
+                    "CoreML");
+                return;
 #endif
-                break;
-            }
-            case 3: { /* DirectML (Windows only, requires onnxruntime-dml) */
-#if defined(_WIN32) || defined(WIN32)
-#ifdef USE_DML
-                OrtStatus* s = OrtSessionOptionsAppendExecutionProvider_Dml(opts, 0);
-                if (s) api->ReleaseStatus(s); /* fall back to CPU */
+#if (defined(_WIN32) || defined(WIN32)) && defined(USE_DML)
+            case 3: /* DirectML (Windows only, requires onnxruntime-dml) */
+                append_or_throw(api,
+                    OrtSessionOptionsAppendExecutionProvider_Dml(opts, 0), "DirectML");
+                return;
 #endif
-#endif
-                break;
-            }
-            case 4: { /* TensorRT */
 #ifdef USE_TENSORRT
+            case 4: { /* TensorRT */
                 OrtTensorRTProviderOptions trt_opts;
                 memset(&trt_opts, 0, sizeof(trt_opts));
-                api->SessionOptionsAppendExecutionProvider_TensorRT(opts, &trt_opts);
-#endif
-                break;
+                append_or_throw(api,
+                    api->SessionOptionsAppendExecutionProvider_TensorRT(opts, &trt_opts),
+                    "TensorRT");
+                return;
             }
-            default:
-                break;
-        }
 #endif
+            default: /* CPU */
+                return;
+        }
     }
 };
 
