@@ -121,9 +121,19 @@ jobs:
           cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
           ls -la python/src/libembedding/
 
+      # Same model cache as build-wheel.yml (shared key, same runner OS/arch).
+      - name: Cache downloaded models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: |
+            models-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Run Python tests
         env:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
+          LIBEMBEDDING_CACHE_DIR: ${{ runner.temp }}/libembedding-models
         run: |
           cd python
           pip install -e .[dev]

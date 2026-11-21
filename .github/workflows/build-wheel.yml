@@ -373,6 +373,25 @@ jobs:
           sys.exit(failed)
           EOF
 
+      # ── Model download cache ─────────────────────────────────────
+      # The network tests download models of several hundred MB (SPLADE,
+      # CLIP vision...). LIBEMBEDDING_CACHE_DIR (downloader_impl.hpp) pins
+      # one directory so the cache path is the same on every OS. Tests run
+      # on the host, not in the manylinux container, so no mount is needed.
+      # Fixed key: bump v1 to refresh; saved only when the job succeeds, so a
+      # partial download is never cached.
+      - name: Set model cache directory
+        shell: bash
+        run: echo "LIBEMBEDDING_CACHE_DIR=${{ runner.temp }}/libembedding-models" >> "$GITHUB_ENV"
+
+      - name: Cache downloaded models
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: |
+            models-${{ runner.os }}-${{ runner.arch }}-
+
       # ── Install wheel and run tests ──────────────────────────────
       - name: Install wheel and run tests
         shell: bash
