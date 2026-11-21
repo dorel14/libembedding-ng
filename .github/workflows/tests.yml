@@ -154,6 +154,26 @@ jobs:
           Set-Location build
           ctest --output-on-failure -C Release
 
+      # On failure: which runtime DLLs sit next to the tests and which ones
+      # Windows ships, so a crash in the first ORT call can be told apart
+      # from a DLL version mismatch.
+      - name: Diagnose Windows runtime DLLs
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem build -Recurse -Filter test_matryoshka.exe | Select-Object -First 1 | ForEach-Object DirectoryName
+          Write-Host "test dir: $dir"
+          $dlls = @(Get-ChildItem $dir -Filter *.dll) + @(Get-Item C:\Windows\System32\onnxruntime.dll, C:\Windows\System32\msvcp140.dll, C:\Windows\System32\vcruntime140.dll -ErrorAction SilentlyContinue)
+          $dlls | ForEach-Object { "{0,-70} {1}" -f $_.FullName, $_.VersionInfo.FileVersion }
+          Get-ChildItem $dir -Filter test_*.exe | ForEach-Object {
+            & $_.FullName *> "$env:RUNNER_TEMP\$($_.BaseName).log"
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              Write-Host ("{0}: exit 0x{1:X8}" -f $_.Name, $code)
+              Get-Content "$env:RUNNER_TEMP\$($_.BaseName).log" -Tail 15
+            }
+          }
+
       # The shipped binaries must run on any x86-64 CPU (no AVX2 assumed in
       # libembedding's own code; ggml picks its CPU variant at run time).
       # Intel SDE emulates older and newer CPUs: an instruction the emulated
