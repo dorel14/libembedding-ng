@@ -264,8 +264,8 @@ ligne.
 Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
 corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
 BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
-tokenizer (T38). Le reranker construit en outre sa paire comme le texte
-`query [SEP] document`, là où HF encode une vraie paire.
+tokenizer (T38). Le reranker (ONNX et GGUF) encode désormais une vraie paire,
+comme HF (le GGUF la construit depuis les tokens spéciaux du vocabulaire).
 
 Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de
 l'architecture, pas du `tokenizer.json`) : all-mpnet-base-v2, bge-large-en-v1.5,
