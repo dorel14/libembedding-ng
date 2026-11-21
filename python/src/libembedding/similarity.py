@@ -1,7 +1,7 @@
 """Native similarity functions operating on raw float arrays.
 
 Auteur: David Orel
-Version: 1.15.0
+Version: 1.16.0
 """
 
 from __future__ import annotations

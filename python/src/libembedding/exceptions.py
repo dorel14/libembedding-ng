@@ -1,7 +1,7 @@
 """Exception hierarchy mapped from lembed_status_t.
 
 Auteur: David Orel
-Version: 1.15.0
+Version: 1.16.0
 """
 
 

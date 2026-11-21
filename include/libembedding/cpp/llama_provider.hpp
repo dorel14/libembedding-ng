@@ -3,7 +3,7 @@
  * llama.cpp backend implementation for embeddings.
  *
  * Author: David Orel
- * Version: 1.15.0
+ * Version: 1.16.0
  *
  * SPDX-License-Identifier: MIT
  */
