@@ -3,7 +3,7 @@
  * Sparse text embedding C API (SPLADE, BGE-M3)
  *
  * Auteur: David Orel
- * Version: 1.14.0
+ * Version: 1.15.0
  *
  * SPDX-License-Identifier: MIT
  */
