@@ -116,7 +116,9 @@ En cours / ouvert :
   seulement (SIMD maison si > 3 % mesuré), score CPUID ggml + override
   `LEMBED_GGML_CPU_VARIANT`, une wheel par plateforme avec toutes les variantes, baseline
   x86-64-v1 / armv7 NEON-VFPv4 / aarch64 ARMv8.0 / macOS M1, ordre Windows → Linux →
-  macOS/ARM. Suivant : phase 1, mesure Windows (créneau machine calme).
+  macOS/ARM. Pas de matériel Apple Silicon / AMD : validation par la CI (runners, Intel
+  SDE pour la correction par ISA, QEMU armv7l) ; la perf hors runners se corrige sur
+  retours utilisateurs. Suivant : phase 1, mesure Windows (créneau machine calme).
 - **Fix chargement `libembedding.dylib` sur macOS** : implémenté, validation sur runner
   `macos-14` et doc `python/README.md` restantes.
 - **ONNX Runtime 1.20.1 → 1.31.0** : planifié (3 workflows, `third_party/onnxruntime/`,
