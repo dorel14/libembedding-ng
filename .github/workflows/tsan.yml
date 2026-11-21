@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake clang libcurl4-openssl-dev
-          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION" | tail -n 1)"
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION")"; ort_root="${ort_root##*$'\n'}"
           echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Cache models
@@ -76,7 +76,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libcurl4-openssl-dev
-          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION" | tail -n 1)"
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION")"; ort_root="${ort_root##*$'\n'}"
           echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Cache models
