@@ -119,8 +119,15 @@ lembed_text_embedding_free(embedder);
 - [Auto-tune workers C API](https://dorel14.github.io/libembedding-ng/c_api/worker_autotune.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/worker_autotune.md)
 - [Benchmark C API](https://dorel14.github.io/libembedding-ng/c_api/embedding_benchmark.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/embedding_benchmark.md)
 - [Registre de modèles GGUF C API](https://dorel14.github.io/libembedding-ng/c_api/gguf_registry.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/gguf_registry.md)
+- [ADR-001: Backend routing by file extension](https://dorel14.github.io/libembedding-ng/adr/ADR-001-routing-by-extension.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-001-routing-by-extension.md)
+- [ADR-002: CPU dispatch through the upstream ggml mechanism](https://dorel14.github.io/libembedding-ng/adr/ADR-002-cpu-dispatch-ggml.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-002-cpu-dispatch-ggml.md)
+- [ADR-003: In-house ggml runtime for sparse GGUF](https://dorel14.github.io/libembedding-ng/adr/ADR-003-sparse-gguf-ggml-runtime.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-003-sparse-gguf-ggml-runtime.md)
+- [ADR-004: Removal list for 2.0](https://dorel14.github.io/libembedding-ng/adr/ADR-004-2-0-removals.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-004-2-0-removals.md)
+- [Architecture decision records](https://dorel14.github.io/libembedding-ng/adr/README.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/adr/README.md)
+- [Méthodologie des benchmarks](https://dorel14.github.io/libembedding-ng/benchmark_methodology.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/benchmark_methodology.md)
 - [GGUF sparse embedding convention](https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md)
 - [Runtime sparse GGUF](https://dorel14.github.io/libembedding-ng/gguf_sparse_runtime.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_runtime.md)
+- [Troncature Matryoshka](https://dorel14.github.io/libembedding-ng/matryoshka.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/matryoshka.md)
 - [Plateformes supportées](https://dorel14.github.io/libembedding-ng/platforms.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/platforms.md)
 
 ## Code examples

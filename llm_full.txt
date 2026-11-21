@@ -220,7 +220,8 @@ assumed:
   names the one it picked; record it with any GGUF benchmark.
 - ONNX models run on ONNX Runtime, which selects its own kernels at run time.
 
-The Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
+The Linux x86_64 wheel (`manylinux_2_31_x86_64`) needs glibc 2.31 or later. The
+Linux aarch64 wheel (`manylinux_2_31_aarch64`) runs on 64-bit ARM Linux with
 glibc 2.31 or later: Raspberry Pi 3/4/5 under 64-bit Raspberry Pi OS (bullseye,
 bookworm), Ubuntu 20.04 and later, AWS Graviton, Ampere. ggml ships eight ARM CPU
 libraries (`ggml-cpu-armv8.0_1` … `ggml-cpu-armv9.2_2`) and loads the best one at
@@ -350,6 +351,8 @@ cmake --build . --parallel
 .\run_tests.ps1                # Unit tests only (no network)
 .\run_tests.ps1 --integration  # Include integration tests (downloads models)
 ```
+
+Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: see [SECURITY.md](SECURITY.md).
 
 ### Run Examples
 
@@ -800,17 +803,22 @@ The `batch_size`, `offline`, `pooling`, and `dim` fields are available in all op
 | Enum | Backend |
 |---|---|
 | `LEMBED_PROVIDER_CPU` | CPU (default, always available) |
-| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), falls back to CPU if unavailable |
-| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU) |
-| `LEMBED_PROVIDER_CUDA` | Reserved: runs on CPU (GPU support is planned after 1.x) |
-| `LEMBED_PROVIDER_DIRECTML` | Reserved: runs on CPU (GPU support is planned after 1.x) |
-| `LEMBED_PROVIDER_TENSORRT` | Reserved: runs on CPU (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_COREML` | Apple CoreML (macOS/iOS), `LEMBED_ERROR_UNSUPPORTED` if it cannot be attached |
+| `LEMBED_PROVIDER_LLAMACPP` | llama.cpp backend for GGUF models (always enabled, CPU); `LEMBED_ERROR_UNSUPPORTED` on an ONNX model |
+| `LEMBED_PROVIDER_CUDA` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_DIRECTML` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
+| `LEMBED_PROVIDER_TENSORRT` | Reserved: `LEMBED_ERROR_UNSUPPORTED` (GPU support is planned after 1.x) |
 
 GPU acceleration is out of scope before 1.x. The CUDA, DirectML and TensorRT
 values exist so the enum stays stable, but no build enables them
-(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`): a
-model created with one of them runs on the CPU. ggml is built without GPU
-backends, so `llama_n_gpu_layers` has no effect.
+(`USE_CUDA`, `USE_DML`, `USE_TENSORRT` in `detail/onnx_session_impl.hpp`). A
+provider other than `LEMBED_PROVIDER_CPU` that cannot be attached makes the
+create function fail with `LEMBED_ERROR_UNSUPPORTED` and a reason in
+`lembed_last_error()` instead of silently running on the CPU.
+`lembed_*_backend_name(ctx)` and `lembed_*_effective_provider(ctx)` report the
+runtime and provider actually serving a context (see
+[docs/en/api_reference.md](docs/en/api_reference.md#effective-backend-and-provider-c-api)).
+ggml is built without GPU backends, so `llama_n_gpu_layers` has no effect.
 
 ### Versioned options (v2)
 
@@ -1845,6 +1853,7 @@ TextEmbedding(
     auto_workers=False,
     cache_size=0,
     quantization=None,
+    truncate_dim=None,
     num_threads=None,  # deprecated
 )
 ```
@@ -1867,6 +1876,7 @@ TextEmbedding(
 | `cache_size` | `int` | `0` | LRU embedding cache size (`0` = disabled) |
 | `quantization` | `str \| None` | `None` | Quantization mode: `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = model default). **Selects the registry entry providing that mode**, i.e. a different set of weights — it is not a session option. A mode the registry does not offer for this model raises `ModelNotFoundError` naming the modes that are available. ⚠️ `"auto"` is accepted by this parameter but **selects no weights**: it loads the default entry (FP32) and the `.quantization` property reports `"auto"`. For a measured auto-selection, use `preferred_quantization="auto"`. ⚠️ `"fp16"` is not INT8: those are `FLOAT16` weights served by an ORT-optimized graph. On a CPU without native FP16 arithmetic they are slower than FP32 while occupying less disk — useful for size, not for throughput. The four `Qdrant/*-onnx-Q` entries (including `bge-small-en-v1.5`) fall into that case; their `_Q` suffix and their historical "Quantized" description did not change that. |
 | `preferred_quantization` | `str \| None` | `None` | `"auto"` = **measured selection**: the variants the registry actually ships for this model are benchmarked once per (model, machine, library version), the winner is cached, and later loads read the cache. Rule: no measurable FP32 baseline → FP32; a variant must beat FP32 by **more than 5 %**; and **dynamic INT8 is preferred** — another variant must beat it by **more than 15 %**. Cost: ~3.5 s on the very first load of a model, then free. See [Quantization](#quantization--fp32-vs-int8) for the measurements. |
+| `truncate_dim` | `int \| None` | `None` | [Matryoshka](matryoshka.md) truncation: keeps the first `truncate_dim` components of every vector, then L2-renormalises them. Between `1` and the native dimension (otherwise `ValueError`). Meant for Matryoshka-trained models (`nomic-embed-text-v1.5`, `mxbai-embed-large-v1`, `embeddinggemma-300m`). |
 | `num_threads` | `int \| None` | `None` | **Deprecated** — use `threads` instead |
 
 #### Methods and properties
@@ -1876,12 +1886,16 @@ TextEmbedding(
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed texts. Returns array of shape `(n, dim)` with `float32` dtype. L2-normalized. |
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed as a stream — calls `callback(array, dim, userdata)` for each embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed in batches, yielding an array per batch |
-| `dim` | `int` (property) | Embedding dimension |
+| `dim` | `int` (property) | Dimension of the returned vectors (`truncate_dim` when set) |
+| `native_dim` | `int` (property) | Dimension produced by the model, before truncation |
+| `truncate_dim` | `int \| None` (property) | Matryoshka truncation size, `None` when vectors are kept whole |
 | `quantization` | `str` (property) | Quantization mode actually in use (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). With `preferred_quantization="auto"`, reports the mode that was selected. |
 | `quantization_reason` | `str` (property) | Why `preferred_quantization="auto"` picked that mode, e.g. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Empty when nothing was measured (explicit mode, or a model with no quantized sibling). |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name or local path |
 | `model_name` | `str` (property) | Registry name of the loaded model |
+| `backend` | `str` (property) | Runtime actually serving the model: `"onnxruntime"` or `"llama.cpp"` (see [Effective backend and provider](#effective-backend-and-provider)) |
+| `provider` | `str` (property) | Execution provider actually in use, lowercase: `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"`; `"gpu"` for llama.cpp with offloaded layers |
 | `info()` | `ModelDesc` | Loaded model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -1962,6 +1976,8 @@ SparseTextEmbedding(
 | `embed(texts, batch_size=0)` | `list[SparseEmbedding]` | Returns a list of `SparseEmbedding` objects |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name |
+| `backend` | `str` (property) | `"onnxruntime"` or `"ggml-sparse"` (the library's own ggml runtime for GGUF SPLADE models, not llama.cpp) |
+| `provider` | `str` (property) | Execution provider actually in use (`"cpu"` for `"ggml-sparse"`) |
 | `info()` | `ModelDesc` | Model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -2013,6 +2029,8 @@ ImageEmbedding(
 | `dim` | `int` (property) | Embedding dimension |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name |
+| `backend` | `str` (property) | Always `"onnxruntime"` |
+| `provider` | `str` (property) | Execution provider actually in use |
 | `info()` | `ModelDesc` | Model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -2033,6 +2051,8 @@ print(embeddings.shape)  # (2, 512)
 ### Reranker
 
 Scores and sorts documents by relevance to a query (cross-encoder).
+
+On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared.
 
 #### Constructor
 
@@ -2080,6 +2100,8 @@ Reranker(
 | `rerank(query, documents, batch_size=0)` | `list[RerankResult]` | Returns results sorted by descending score |
 | `batch_size` | `int` (property) | Configured batch size |
 | `name` | `str` (property) | Model name |
+| `backend` | `str` (property) | `"onnxruntime"` or `"llama.cpp"`: with `backend="auto"` a model without ONNX files may be served by its GGUF counterpart, and this is where that switch shows |
+| `provider` | `str` (property) | Execution provider actually in use (`"cpu"` for llama.cpp) |
 | `info()` | `ModelDesc` | Model descriptor |
 | `stats()` | `Stats` | Runtime usage statistics |
 | `close()` | `None` | Release resources |
@@ -2415,11 +2437,54 @@ class ModelDesc:
     pooling: str   # "cls" or "mean"
     num_threads: int
     batch_size: int
-    provider: str
-    device_id: int
+    provider: str = "cpu"          # requested provider ("llama" for every GGUF context)
+    device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    backend: str = ""              # "onnxruntime", "llama.cpp" or "ggml-sparse"
+    effective_provider: str = ""   # provider actually in use: "cpu", "cuda", ...
 ```
+
+`backend` and `effective_provider` are appended last with a default value, so
+code building a `ModelDesc` positionally keeps working. `info()` always fills
+them.
+
+### Effective backend and provider
+
+Every model reports which runtime serves it and which provider it really runs
+on (`backend` / `provider` properties, `info().backend` /
+`info().effective_provider` fields):
+
+| `backend` | Meaning | `provider` |
+|---|---|---|
+| `"onnxruntime"` | ONNX model | `"cpu"`, or the requested provider if it could be attached |
+| `"llama.cpp"` | Dense or reranker GGUF model | `"cpu"`; `"gpu"` when `llama_n_gpu_layers != 0` and ggml has a GPU device (none in the shipped builds) |
+| `"ggml-sparse"` | SPLADE GGUF model (in-house ggml runtime) | `"cpu"` |
+
+**Explicitly requested but unavailable provider: error.** `"cpu"` is the
+default and there is no "auto" provider, so any other value is an explicit
+request. When it cannot be attached (build without CUDA, DirectML or
+TensorRT, CoreML outside Apple, `"llama"` on an ONNX model, unknown value),
+construction raises `UnsupportedError` with the reason, instead of running on
+the CPU without saying so. The check happens before the model is parsed.
+
+```python
+from libembedding import TextEmbedding
+from libembedding.exceptions import UnsupportedError
+
+try:
+    model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda")
+except UnsupportedError as e:
+    print(e.detail)  # "Execution provider CUDA was requested but is not available: ..."
+
+model = TextEmbedding("BAAI/bge-small-en-v1.5")
+print(model.backend, model.provider)  # onnxruntime cpu
+```
+
+**`Reranker(backend="auto")` switch to GGUF: kept, but visible.** When the
+requested model has no ONNX files and a GGUF counterpart exists, the reranker
+is served by llama.cpp: `reranker.backend` is then `"llama.cpp"`, and
+`LIBEMBEDDING_VERBOSE=1` writes the switch to stderr.
 
 ---
 
@@ -2553,6 +2618,53 @@ if (lembed_cache_get(cache, "Hello world", &vec, &dim)) {
 
 lembed_cache_free(cache);
 ```
+
+### Effective backend and provider (C API)
+
+Two accessors per context type. They return static strings (never freed), or
+`NULL` when the context is `NULL`. No field is added to `lembed_model_desc_t`:
+its size (ABI) does not change.
+
+| Function | Values |
+|---|---|
+| `lembed_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_text_embedding_effective_provider(ctx)` | `"CPU"`, `"CUDA"`, `"CoreML"`, `"DirectML"`, `"TensorRT"`; llama.cpp: `"CPU"`, or `"GPU"` when layers are offloaded to a ggml GPU device |
+| `lembed_sparse_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"ggml-sparse"` |
+| `lembed_sparse_text_embedding_effective_provider(ctx)` | as for ONNX; `"CPU"` for `"ggml-sparse"` |
+| `lembed_reranker_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_reranker_effective_provider(ctx)` | as for ONNX; `"CPU"` for llama.cpp |
+| `lembed_image_embedding_backend_name(ctx)` | `"onnxruntime"` |
+| `lembed_image_embedding_effective_provider(ctx)` | as for ONNX |
+
+Provider names use the spelling of `lembed_execution_provider_name()`.
+
+```c
+lembed_text_options_t opts = lembed_text_options_default();
+opts.provider = LEMBED_PROVIDER_CUDA;
+lembed_text_embedding_t* ctx = NULL;
+lembed_status_t s = lembed_text_embedding_create(&opts, &ctx);
+if (s == LEMBED_ERROR_UNSUPPORTED) {
+    /* "Execution provider CUDA was requested but is not available: ..." */
+    fprintf(stderr, "%s\n", lembed_last_error());
+    opts.provider = LEMBED_PROVIDER_CPU;
+    s = lembed_text_embedding_create(&opts, &ctx);
+}
+printf("%s on %s\n", lembed_text_embedding_backend_name(ctx),
+       lembed_text_embedding_effective_provider(ctx));  /* onnxruntime on CPU */
+```
+
+**Behaviour change (decision D3).** A provider other than
+`LEMBED_PROVIDER_CPU` that cannot be attached to the ONNX Runtime session makes
+the create function fail with `LEMBED_ERROR_UNSUPPORTED` and a message in
+`lembed_last_error()`, instead of silently falling back to the CPU.
+`LEMBED_PROVIDER_CPU` is the default of every options struct and there is no
+"auto" provider, so any other value is an explicit request. This also applies
+to `LEMBED_PROVIDER_LLAMACPP` given to an ONNX model and to an out-of-range
+value. The GGUF paths (llama.cpp, `ggml-sparse`) ignore the provider as before.
+
+The reranker `LEMBED_BACKEND_AUTO` switch (ONNX model not found, matching GGUF
+entry) is kept: `lembed_reranker_backend_name()` then returns `"llama.cpp"`
+and `LIBEMBEDDING_VERBOSE=1` logs the switch.
 
 ### Similarity (C API)
 
@@ -2814,6 +2926,53 @@ other names of the ONNX model keep loading the ONNX model.
 > licence. It leaves the registry in 2.0.
 
 ---
+
+## Compatibility matrix (reference validation)
+
+A model is *validated* only once libembedding reproduces a reference. The reference
+is the **same ONNX file** run with Python `onnxruntime`, fed with the ids, attention
+mask and token types of HuggingFace `tokenizers`, then pooled and normalised as the
+registry entry says. Weights and runtime are shared, so the gap measured here comes
+from libembedding's tokenizer, input packing and pooling only. The test is
+`python/tests/test_model_reference.py` (marker `network`, skipped when the model is
+not cached or `onnxruntime`/`tokenizers` are missing); the report is regenerated with
+`python python/tests/model_reference.py --json report.json`.
+
+Corpus: the 54 texts of `tests/data/tokenizer/corpus.json` (English, accented Latin,
+Vietnamese, Greek, Cyrillic, Arabic, Hebrew, Devanagari, CJK, Korean, Thai, emoji,
+punctuation, combining marks, full-width) plus a text of more than 512 tokens.
+Truncation is set to 512 on both sides. Measured with the WordPiece normalisation fix
+of PR #62 (0 id mismatches against HF on the corpus).
+
+Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999,
+**broken** < 0.99. Measured on 2026-11-17, quantized siblings in the same row.
+
+| Model | Tokenizer family | Min / mean cosine (all) | English min | Status |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2, L12-v2 | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| bge-small-en-v1.5, bge-base-en-v1.5 | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| nomic-embed-text-v1.5 | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| mxbai-embed-large-v1 (quantized) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| gte-base-en-v1.5, gte-large-en-v1.5 (quantized) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| Splade_PP_en_v1 (sparse, cosine of the vectors) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0.021 / 0.347 | 0.034 | broken |
+| multilingual-e5-small | Unigram (SentencePiece) | 0.768 / 0.823 | 0.768 | broken |
+| clip-vit-base-patch32 (text) | BPE byte-level | 0.295 / 0.763 | 0.316 | broken |
+| jina-reranker-v1-turbo-en (reranker, Pearson of the scores) | BPE (not byte-level) | 0.42-0.46 | n/a | broken |
+
+Reading: **every measured WordPiece model matches the reference** on the whole
+multilingual corpus (lowest min cosine 0.9999999999999984). Unigram (XLM-R) and
+byte-level BPE (CLIP, ModernBERT) are broken even in English: they need their own
+tokenizer (T38). The reranker also builds its pair as the text `query [SEP] document`,
+where HF encodes a real pair.
+
+Not measured (not in the local cache or over 560 MB; the family comes from the
+architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,
+bge-small/large-zh-v1.5, nomic-embed-text-v1 and jina-embeddings-v2 (WordPiece),
+bge-m3, multilingual-e5-base/large, paraphrase-multilingual-mpnet-base-v2 and the
+XLM-R rerankers (Unigram), modernbert-embed-large (byte-level BPE), embeddinggemma-300m
+(SentencePiece), the image models and the GGUF models. These are **not validated**.
 
 ## Querying model information
 
@@ -3115,7 +3274,28 @@ exposes those three fields, filled with the model defaults, for information.
 (1×P, 2×P/2, P×1 in QUICK; + 1×logical and 4×P/4 in FULL) × batch (32 in QUICK;
 16/32/64/128 in FULL), on a synthetic corpus of 32 (QUICK) or 256 (FULL) texts.
 Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
-`max_tokens` × batch. Sparse and image: threads × batch.
+`max_tokens` × batch. Sparse (ONNX) and image: threads × batch.
+
+**Sparse GGUF runtime.** `sparse_autotune()` (and `lembed_sparse_autotune()`,
+whose result struct is unchanged; `lembed_sparse_autotune_v2()` also returns
+`workers`, `max_batch_tokens` and `from_cache`) also accept the sparse GGUF registry name (`"SPLADE-PP-En-v1-GGUF"`, already
+cached locally: the tuner never downloads) or a path ending in `.gguf`; the
+backend is chosen by the name, there is no `backend=` parameter. The grid is
+threads × workers (graphs sharing the weights) × batch × `max_batch_tokens`
+(token budget per batch, 512 by default). `top_k` and `min_weight` are never
+tuned. The default configuration is point 0 of the grid and is returned when no
+candidate beats it, so the result is never worse than the default on the same
+benchmark. Entries live in the same tune cache (`sparse/` sub-directory), keyed
+by the file path (or registry name) plus the file size and modification time; a
+second call returns the stored configuration without benchmarking
+(`from_cache=True`). Apply the result with `threads=`, `workers=` and
+`set_max_batch_tokens()`:
+
+```python
+r = sparse_autotune("model.gguf")
+m = SparseTextEmbedding("model.gguf", threads=r.threads, workers=r.workers)
+m.set_max_batch_tokens(r.max_batch_tokens)
+```
 
 ### Measurement methodology
 
@@ -3231,6 +3411,27 @@ embeddings = pool.embed(texts)
 | Semantic search, max quality | `"quality"` |
 | General production | `"balanced"` (default) |
 
+### Candidates and the model cache
+
+The selection runs a QUICK autotune on each candidate. It only measures
+candidates that are already in the model cache: it downloads nothing, and it
+leaves nothing behind (no model folder is created for a candidate that is
+missing, which is skipped). To let the selection consider a model, download it
+first.
+
+| Candidate | Cache directory | Download |
+|---|---|---|
+| `Qdrant/all-MiniLM-L6-v2-onnx` | `models--Qdrant-all-MiniLM-L6-v2-onnx` | 90 MB |
+| `Xenova/all-MiniLM-L6-v2` (INT8) | `models--Xenova-all-MiniLM-L6-v2` | 23 MB |
+| `Xenova/all-MiniLM-L12-v2` | `models--Xenova-all-MiniLM-L12-v2` | 133 MB |
+| `Xenova/bge-small-en-v1.5` | `models--Xenova-bge-small-en-v1.5` | 133 MB |
+| `Xenova/bge-base-en-v1.5` | `models--Xenova-bge-base-en-v1.5` | 436 MB |
+| `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | `models--Xenova-paraphrase-multilingual-MiniLM-L12-v2` | 470 MB |
+| `intfloat/multilingual-e5-small` | `models--intfloat-multilingual-e5-small` | 470 MB |
+
+The cache is the default directory: `LIBEMBEDDING_CACHE_DIR`, then
+`FASTEMBED_CACHE_DIR`, then `~/.cache/libembedding`.
+
 ---
 
 ## llama.cpp / GGUF Performance
@@ -3261,7 +3462,7 @@ model = TextEmbedding(
 ### Preset modes
 
 ```python
-# FAST : speed priority
+# FAST : speed priority (all-MiniLM-L6-v2, 384 dim, ~90 MB)
 model = TextEmbedding.from_mode("fast")
 
 # BALANCED : speed/quality compromise (default)
@@ -3671,8 +3872,9 @@ from libembedding import TextEmbedding
 # CPU (default, always available)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# Apple CoreML (macOS/iOS), falls back to CPU if unavailable
+# Apple CoreML (macOS/iOS): UnsupportedError if it cannot be attached
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
+print(model.backend, model.provider)  # onnxruntime coreml
 ```
 
 **Supported providers:**
@@ -3681,12 +3883,15 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
 |----------|---------|----------|
 | `cpu` | CPU | All |
 | `coreml` | CoreML | macOS, iOS |
-| `llamacpp` | llama.cpp (CPU) | All |
-| `cuda`, `directml`, `tensorrt` | reserved: run on CPU | — |
+| `llamacpp` | llama.cpp (CPU), GGUF models only | All |
+| `cuda`, `directml`, `tensorrt` | reserved: `UnsupportedError` | — |
 
 GPU acceleration is out of scope before 1.x. The `cuda`, `directml` and
-`tensorrt` values are accepted to keep the API stable, but no build enables
-them: the model then runs on the CPU.
+`tensorrt` values exist to keep the API stable, but no build enables them. A
+provider other than `cpu` that is requested but unavailable raises
+`UnsupportedError` (`LEMBED_ERROR_UNSUPPORTED` in C) instead of running on the
+CPU without saying so; the `backend` and `provider` properties report what
+really serves the model (see [Effective backend and provider](api_reference.html#effective-backend-and-provider)).
 
 ### GGUF models (llama.cpp)
 
@@ -3850,6 +4055,48 @@ from libembedding import TextEmbedding
 model = TextEmbedding("BAAI/bge-small-en-v1.5", max_length=128)
 ```
 
+## Tokenizer fidelity (HuggingFace `tokenizers`)
+
+The built-in tokenizer is compared with the HuggingFace `tokenizers` library on a
+multilingual corpus (Greek, Cyrillic, Vietnamese, CJK, Arabic, Hebrew, Hindi, Thai,
+Korean, emoji, accented Latin, mixed case, punctuation, very long words). The
+references are JSON fixtures committed in `tests/data/tokenizer/`, produced by
+`scripts/gen_tokenizer_fixtures.py`; the `test_tokenizer_fidelity` test needs neither
+Python nor the `tokenizers` package.
+
+| Family | Models | Status |
+|---|---|---|
+| WordPiece + BertNormalizer (uncased) | MiniLM, bge-*-en, snowflake, gte-en, nomic, mxbai, SPLADE | identical to HF, 0/54 texts differ |
+| WordPiece, Chinese vocabulary | bge-*-zh | identical to HF, 0/54 |
+| WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identical to HF, 0/54 |
+| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identical to HF, 0/54 (precompiled charsmap, WhitespaceSplit + Metaspace, Viterbi, unk fusion, byte fallback); embeddings at cosine 1.000 from the reference. Reranker pairs: not covered yet |
+| Byte-level BPE | CLIP text, ModernBERT | not implemented in the built-in tokenizer: measured, not covered |
+
+Normalisation coverage (strip accents + lowercase), checked codepoint by codepoint up
+to U+2FFFF: Latin (Latin-1, Extended-A/B, Extended Additional including Vietnamese),
+IPA, combining diacritics, Greek and Coptic, Greek Extended (polytonic), Cyrillic,
+Armenian, Hebrew, Arabic, Devanagari, Thai, Hangul jamo and syllables (algorithmic
+decomposition), general punctuation and symbols (up to U+2BFF), kana, CJK, fullwidth
+forms, emoji: 0 mismatches. Still outside the tables (1.0% of the tested codepoints,
+1,835 of 183,376): CJK compatibility ideographs (U+F900-FAFF and U+2F800-2FA1F),
+Cherokee capitals, Glagolitic, Coptic, Cyrillic Extended-B, Deseret and other rare
+alphabets, precomposed Indic letters outside Devanagari, Hebrew presentation forms.
+These codepoints go through the tokenizer unchanged, which differs from HF.
+
+The same work fixed three pre-tokenisation differences with HF: a word with an unknown
+piece yields a single `[UNK]` (not the pieces already matched), a word longer than 100
+characters yields `[UNK]`, and Unicode punctuation, CJK ideographs and format
+characters (zero-width space, etc.) are handled as HF does.
+
+`BertNormalizer` options are read independently, as in HF: `lowercase`, `strip_accents`
+(absent or `null` follows `lowercase`), `clean_text` and `handle_chinese_chars`. A
+`Sequence` normalizer is supported for `Lowercase`, `StripAccents` and `NFD`/`NFKD`;
+accents are stripped only when both `StripAccents` and a decomposition are present. The
+"lowercase only" and "strip accents only" modes are also checked codepoint by codepoint.
+Byte-level BPE keeps its legacy behaviour (not HF-faithful) until it is rewritten; its
+ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
+`tokenizer.json` is in the machine's model cache (the family is skipped otherwise).
+
 ## Model lookup by code
 
 libembedding automatically resolves models by HuggingFace name or ONNX repo code:
@@ -3937,6 +4184,33 @@ embeddings = model.embed(["Hello"])  # returns np.ndarray directly
 - `embed()` returns a `np.ndarray` directly instead of a generator
 - No separate `passage_embed()` method — everything goes through `embed()`
 - Lighter classes, fewer Python dependencies
+
+## Thread safety
+
+The rule: **a context may be shared between threads, but calls on it are
+serialised** (text, sparse, reranker). Image contexts run calls in parallel.
+For parallelism, use one context per thread or `TextEmbeddingPool`. Never free
+a context while another thread still uses it, and never call back into a
+context from an `embed_stream` callback (it holds the context lock: deadlock).
+
+| Type | Shared between threads? | Why (source) |
+|---|---|---|
+| Text, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `detail/text_embedding_impl.hpp:125,169`; the tokenizer writes scratch strings and the GGUF backend has one `llama_context` |
+| Sparse, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `sparse_text_embedding.h:171,348`; GGUF workers reuse ggml graphs per call |
+| Reranker, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `detail/reranker_impl.hpp:91,341` |
+| Image | Yes, calls run in parallel | no per-context scratch, `OrtApi::Run` is thread-safe; only the counters are locked (`image_embedding.h:116`) |
+| Stats getters (`*_stats`, `*_stats_v2`) | Yes, never wait for an inference | separate `stats_mutex` (same lines) |
+| `TextEmbeddingPool` | Yes | each worker owns a context (serialised), calls from several threads queue per worker (`cpp/embedding_pool.hpp`) |
+| LRU cache (`lembed_cache_*`) | Yes | one mutex (`detail/embedding_cache_impl.hpp:142`). Use `lembed_cache_get_copy()`: `lembed_cache_get()` returns a borrowed pointer (deprecated) |
+| Autotune cache entries | Yes in a process | unique temporary name then atomic rename (`detail/autotune_cache.hpp:392`); several processes: last writer wins |
+| Legacy tune cache (`lembed_tune_cache_*`) | Yes in a process | process-wide mutex (`detail/autotune_cache_impl.hpp:91`); several processes: last writer wins |
+| Model downloader | Yes | unique temporary file per download, atomic publish (`detail/downloader_impl.hpp:339`). Two threads may download the same file twice |
+| `lembed_last_error()` | Yes | thread-local buffer (`error.h:79`): read it on the thread that got the failure |
+| `create` / `free` | Create contexts from any thread; free from one thread once no call is in flight | |
+
+Tests: `tests/test_concurrency.cpp` (also built with ThreadSanitizer by the
+`tsan.yml` workflow) and `tests/test_repeated_calls.cpp` (10 000 repeated calls,
+bounded RSS growth, `-DLIBEMBEDDING_STABILITY_TESTS=ON`).
 
 ## Performance tips
 
@@ -5647,7 +5921,7 @@ similarity = np.dot(embeddings[0], embeddings[1])  # ≈ 0.82
 ```python
 from libembedding import TextEmbedding
 
-# FAST : MiniLM-L12-v2 quantifié (vitesse maximale)
+# FAST : all-MiniLM-L6-v2 (6 couches, 384 dim, ~90 Mo, vitesse maximale)
 model = TextEmbedding.from_mode("fast")
 
 # BALANCED : BGE-small (compromis vitesse/qualité)
@@ -5759,6 +6033,7 @@ TextEmbedding(
     auto_workers=False,
     cache_size=0,
     quantization=None,
+    truncate_dim=None,
     num_threads=None,  # déprécié
 )
 ```
@@ -5781,6 +6056,7 @@ TextEmbedding(
 | `cache_size` | `int` | `0` | Taille du cache LRU d'embeddings (`0` = désactivé) |
 | `quantization` | `str \| None` | `None` | Mode de quantification : `"none"`, `"static"`, `"dynamic"`, `"fp16"` (None = défaut du modèle). **Sélectionne l'entrée de registre qui fournit ce mode**, donc un autre fichier de poids — ce n'est pas une simple option de session. Un mode absent du registre pour ce modèle lève `ModelNotFoundError` en indiquant les modes disponibles. ⚠️ `"auto"` est accepté par ce paramètre mais **ne sélectionne aucun poids** : il charge l'entrée par défaut (FP32) et la propriété `.quantization` rapporte `"auto"`. Pour une auto-sélection mesurée, utiliser `preferred_quantization="auto"`. ⚠️ `"fp16"` n'est pas de l'INT8 : ce sont des poids `FLOAT16` servis par un graphe optimisé ORT. Sur un CPU sans arithmétique FP16 native, ils sont plus lents que FP32 tout en occupant moins de disque — utile pour la taille, pas pour le débit. Les quatre entrées `Qdrant/*-onnx-Q` (dont `bge-small-en-v1.5`) sont dans ce cas ; leur suffixe `_Q` et leur description historique « Quantized » ne Changeaient pas. |
 | `preferred_quantization` | `str \| None` | `None` | `"auto"` = **sélection mesurée** : les variantes réellement livrées par le registre pour ce modèle sont benchmarkées une fois par (modèle, machine, version de la lib), le gagnant est mis en cache, et les chargements suivants lisent le cache. Règle : sans baseline FP32 mesurable → FP32 ; une variante doit battre FP32 de **plus de 5 %** ; et **l'INT8 dynamique est préféré** — une autre variante doit le battre de **plus de 15 %**. Coût : ~3,5 s au tout premier chargement d'un modèle, puis gratuit. Voir [Quantification](#quantification--fp32-vs-int8) pour les mesures. |
+| `truncate_dim` | `int \| None` | `None` | Troncature [Matryoshka](matryoshka.md) : garde les `truncate_dim` premières composantes de chaque vecteur puis les renormalise en L2. Entre `1` et la dimension native (sinon `ValueError`). Réservé aux modèles entraînés en Matryoshka (`nomic-embed-text-v1.5`, `mxbai-embed-large-v1`, `embeddinggemma-300m`). |
 | `num_threads` | `int \| None` | `None` | **Déprécié** — utiliser `threads` à la place |
 
 #### Méthodes et propriétés
@@ -5790,12 +6066,16 @@ TextEmbedding(
 | `embed(texts, batch_size=None)` | `np.ndarray` | Embed les textes. Retourne un tableau de forme `(n, dim)` en `float32`. L2-normalisé. |
 | `embed_stream(texts, callback, batch_size=None)` | `None` | Embed en streaming — appelle `callback(array, dim, userdata)` pour chaque embedding |
 | `embed_batched(texts, batch_size=None)` | `Generator` | Embed en lots, génère un tableau par lot |
-| `dim` | `int` (property) | Dimension de l'embedding |
+| `dim` | `int` (property) | Dimension des vecteurs renvoyés (`truncate_dim` s'il est défini) |
+| `native_dim` | `int` (property) | Dimension produite par le modèle, avant troncature |
+| `truncate_dim` | `int \| None` (property) | Taille de troncature Matryoshka, `None` si les vecteurs sont complets |
 | `quantization` | `str` (property) | Mode de quantification effectivement utilisé (`"none"`, `"static"`, `"dynamic"`, `"fp16"`). Avec `preferred_quantization="auto"`, indique le mode sélectionné. |
 | `quantization_reason` | `str` (property) | Justification du choix quand `preferred_quantization="auto"` a tourné, ex. `"1.69x the fp32 variant (15 -> 26 docs/s)"`. Vide si aucun mode n'a été mesuré (mode explicite, ou modèle sans variante quantifiée). |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle ou chemin local |
 | `model_name` | `str` (property) | Nom de registre du modèle chargé |
+| `backend` | `str` (property) | Runtime qui sert réellement le modèle : `"onnxruntime"` ou `"llama.cpp"` (voir [Backend et provider effectifs](#backend-et-provider-effectifs)) |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé, en minuscules : `"cpu"`, `"cuda"`, `"coreml"`, `"directml"`, `"tensorrt"` ; `"gpu"` pour llama.cpp avec des couches déportées |
 | `info()` | `ModelDesc` | Descripteur du modèle chargé |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources C sous-jacentes |
@@ -5876,6 +6156,8 @@ SparseTextEmbedding(
 | `embed(texts, batch_size=0)` | `list[SparseEmbedding]` | Retourne une liste d'objets `SparseEmbedding` |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | `"onnxruntime"` ou `"ggml-sparse"` (runtime ggml maison des GGUF SPLADE, pas llama.cpp) |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé (`"cpu"` pour `"ggml-sparse"`) |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
@@ -5927,6 +6209,8 @@ ImageEmbedding(
 | `dim` | `int` (property) | Dimension de l'embedding |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | Toujours `"onnxruntime"` |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `close()` | `None` | Libère les ressources |
 | `list_supported_models()` | `list[ModelInfo]` | (static) Liste les modèles image |
@@ -5946,6 +6230,8 @@ print(embeddings.shape)  # (2, 512)
 ### Reranker
 
 Score et trie des documents par pertinence par rapport à une requête (cross-encoder).
+
+Sur ONNX, requête et document sont encodés comme une vraie paire de séquences, selon le `post_processor` du `tokenizer.json` (gabarit de paire, tokens spéciaux, `token_type_ids`), avec troncature `longest_first` ; à défaut, style BERT `[CLS] q [SEP] d [SEP]`.
 
 #### Constructeur
 
@@ -5993,6 +6279,8 @@ Reranker(
 | `rerank(query, documents, batch_size=0)` | `list[RerankResult]` | Retourne les résultats triés par score décroissant |
 | `batch_size` | `int` (property) | Taille de batch configurée |
 | `name` | `str` (property) | Nom du modèle |
+| `backend` | `str` (property) | `"onnxruntime"` ou `"llama.cpp"` : avec `backend="auto"`, un modèle sans fichiers ONNX peut être servi par son équivalent GGUF, et c'est ici que la bascule se voit |
+| `provider` | `str` (property) | Provider d'exécution réellement utilisé (`"cpu"` pour llama.cpp) |
 | `info()` | `ModelDesc` | Descripteur du modèle |
 | `stats()` | `Stats` | Statistiques d'utilisation runtime |
 | `close()` | `None` | Libère les ressources |
@@ -6256,11 +6544,54 @@ class ModelDesc:
     pooling: str   # "cls" ou "mean"
     num_threads: int
     batch_size: int
-    provider: str
-    device_id: int
+    provider: str = "cpu"          # provider demandé ("llama" pour tout contexte GGUF)
+    device_id: int = 0
     quantization: str = "none"
     cache_size: int = 0
+    backend: str = ""              # "onnxruntime", "llama.cpp" ou "ggml-sparse"
+    effective_provider: str = ""   # provider réellement utilisé : "cpu", "cuda", ...
 ```
+
+`backend` et `effective_provider` sont ajoutés en fin de classe avec une valeur
+par défaut : le code qui construit un `ModelDesc` par position continue de
+fonctionner. `info()` les remplit toujours.
+
+### Backend et provider effectifs
+
+Chaque modèle indique quel runtime le sert et sur quel provider il tourne
+réellement (propriétés `backend` / `provider`, champs `info().backend` /
+`info().effective_provider`) :
+
+| `backend` | Signification | `provider` |
+|---|---|---|
+| `"onnxruntime"` | Modèle ONNX | `"cpu"`, ou le provider demandé s'il a pu être attaché |
+| `"llama.cpp"` | Modèle GGUF dense ou reranker | `"cpu"` ; `"gpu"` si `llama_n_gpu_layers != 0` et que ggml dispose d'un périphérique GPU (aucun dans les builds livrés) |
+| `"ggml-sparse"` | Modèle GGUF SPLADE (runtime ggml maison) | `"cpu"` |
+
+**Provider demandé explicitement mais indisponible : erreur.** `"cpu"` est la
+valeur par défaut et il n'existe pas de provider « auto » : toute autre valeur
+est une demande explicite. Si elle ne peut pas être attachée (build sans CUDA,
+DirectML ou TensorRT, CoreML hors Apple, `"llama"` sur un modèle ONNX, valeur
+inconnue), la construction lève `UnsupportedError` avec la raison, au lieu de
+tourner sur CPU sans le dire. La vérification a lieu avant l'analyse du modèle.
+
+```python
+from libembedding import TextEmbedding
+from libembedding.exceptions import UnsupportedError
+
+try:
+    model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cuda")
+except UnsupportedError as e:
+    print(e.detail)  # "Execution provider CUDA was requested but is not available: ..."
+
+model = TextEmbedding("BAAI/bge-small-en-v1.5")
+print(model.backend, model.provider)  # onnxruntime cpu
+```
+
+**Bascule `Reranker(backend="auto")` vers GGUF : conservée mais visible.** Quand
+le modèle demandé n'a pas de fichiers ONNX et qu'un équivalent GGUF existe, le
+reranker est servi par llama.cpp : `reranker.backend` vaut alors `"llama.cpp"`,
+et `LIBEMBEDDING_VERBOSE=1` écrit la bascule sur stderr.
 
 ---
 
@@ -6485,6 +6816,54 @@ if (lembed_cache_get(cache, "Hello world", &vec, &dim)) {
 
 lembed_cache_free(cache);
 ```
+
+### Backend et provider effectifs (C API)
+
+Deux accesseurs par type de contexte. Ils renvoient des chaînes statiques (à ne
+pas libérer), `NULL` si le contexte est `NULL`. Aucun champ n'est ajouté à
+`lembed_model_desc_t` : sa taille (ABI) ne change pas.
+
+| Fonction | Valeurs |
+|---|---|
+| `lembed_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_text_embedding_effective_provider(ctx)` | `"CPU"`, `"CUDA"`, `"CoreML"`, `"DirectML"`, `"TensorRT"` ; llama.cpp : `"CPU"`, ou `"GPU"` si des couches sont déportées sur un périphérique GPU ggml |
+| `lembed_sparse_text_embedding_backend_name(ctx)` | `"onnxruntime"`, `"ggml-sparse"` |
+| `lembed_sparse_text_embedding_effective_provider(ctx)` | idem ONNX ; `"CPU"` pour `"ggml-sparse"` |
+| `lembed_reranker_backend_name(ctx)` | `"onnxruntime"`, `"llama.cpp"` |
+| `lembed_reranker_effective_provider(ctx)` | idem ONNX ; `"CPU"` pour llama.cpp |
+| `lembed_image_embedding_backend_name(ctx)` | `"onnxruntime"` |
+| `lembed_image_embedding_effective_provider(ctx)` | idem ONNX |
+
+Les noms de provider suivent l'orthographe de `lembed_execution_provider_name()`.
+
+```c
+lembed_text_options_t opts = lembed_text_options_default();
+opts.provider = LEMBED_PROVIDER_CUDA;
+lembed_text_embedding_t* ctx = NULL;
+lembed_status_t s = lembed_text_embedding_create(&opts, &ctx);
+if (s == LEMBED_ERROR_UNSUPPORTED) {
+    /* "Execution provider CUDA was requested but is not available: ..." */
+    fprintf(stderr, "%s\n", lembed_last_error());
+    opts.provider = LEMBED_PROVIDER_CPU;
+    s = lembed_text_embedding_create(&opts, &ctx);
+}
+printf("%s on %s\n", lembed_text_embedding_backend_name(ctx),
+       lembed_text_embedding_effective_provider(ctx));  /* onnxruntime on CPU */
+```
+
+**Changement de comportement (décision D3).** Un provider autre que
+`LEMBED_PROVIDER_CPU` qui ne peut pas être attaché à la session ONNX Runtime fait
+échouer la création avec `LEMBED_ERROR_UNSUPPORTED` et un message dans
+`lembed_last_error()`, au lieu de basculer silencieusement sur CPU.
+`LEMBED_PROVIDER_CPU` est la valeur par défaut des structures d'options et il
+n'existe pas de provider « auto » : toute autre valeur est une demande explicite.
+Cela vaut aussi pour `LEMBED_PROVIDER_LLAMACPP` passé à un modèle ONNX et pour
+une valeur hors énumération. Les chemins GGUF (llama.cpp, `ggml-sparse`)
+ignorent le provider comme avant.
+
+La bascule `LEMBED_BACKEND_AUTO` du reranker (modèle ONNX introuvable, entrée
+GGUF correspondante) est conservée : `lembed_reranker_backend_name()` renvoie
+alors `"llama.cpp"` et `LIBEMBEDDING_VERBOSE=1` journalise la bascule.
 
 ---
 
@@ -6714,6 +7093,54 @@ et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
 > Il quittera le registre en 2.0.
 
 ---
+
+## Matrice de compatibilité (validation par référence)
+
+Un modèle n'est *validé* que lorsque libembedding reproduit une référence. La référence
+est le **même fichier ONNX** exécuté avec `onnxruntime` Python, alimenté par les ids, le
+masque d'attention et les types de jetons de `tokenizers` (HuggingFace), puis poolé et
+normalisé comme l'indique l'entrée du registry. Poids et runtime sont communs : l'écart
+mesuré vient uniquement du tokenizer, de la mise en forme des entrées et du pooling de
+libembedding. Le test est `python/tests/test_model_reference.py` (marqueur `network`,
+ignoré si le modèle n'est pas en cache ou si `onnxruntime`/`tokenizers` manquent) ; le
+rapport se régénère avec `python python/tests/model_reference.py --json report.json`.
+
+Corpus : les 54 textes de `tests/data/tokenizer/corpus.json` (anglais, latin accentué,
+vietnamien, grec, cyrillique, arabe, hébreu, devanagari, CJK, coréen, thaï, emoji,
+ponctuation, accents combinants, pleine chasse) plus un texte de plus de 512 jetons.
+La troncature est fixée à 512 des deux côtés. Mesuré avec la correction de normalisation
+WordPiece de la PR #62 (0 écart d'ids avec HF sur le corpus).
+
+Statut selon le cosinus minimal : **validé** >= 0,999, **dégradé** 0,99 à 0,999,
+**cassé** < 0,99. Mesuré le 2026-11-17 ; les variantes quantifiées sont dans la même
+ligne.
+
+| Modèle | Famille de tokenizer | Cosinus min / moyen (tous) | Anglais min | Statut |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2, L12-v2 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| bge-small-en-v1.5, bge-base-en-v1.5 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| nomic-embed-text-v1.5 | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| mxbai-embed-large-v1 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| gte-base-en-v1.5, gte-large-en-v1.5 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| Splade_PP_en_v1 (sparse, cosinus des vecteurs) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0,021 / 0,347 | 0,034 | cassé |
+| multilingual-e5-small | Unigram (SentencePiece) | 0,768 / 0,823 | 0,768 | cassé |
+| clip-vit-base-patch32 (texte) | BPE byte-level | 0,295 / 0,763 | 0,316 | cassé |
+| jina-reranker-v1-turbo-en (reranker, Pearson des scores) | BPE (non byte-level) | 0,42-0,46 | n/d | cassé |
+
+Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
+corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
+BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
+tokenizer (T38). Le reranker construit en outre sa paire comme le texte
+`query [SEP] document`, là où HF encode une vraie paire.
+
+Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de
+l'architecture, pas du `tokenizer.json`) : all-mpnet-base-v2, bge-large-en-v1.5,
+bge-small/large-zh-v1.5, nomic-embed-text-v1 et jina-embeddings-v2 (WordPiece), bge-m3,
+multilingual-e5-base/large, paraphrase-multilingual-mpnet-base-v2 et les rerankers XLM-R
+(Unigram), modernbert-embed-large (BPE byte-level), embeddinggemma-300m (SentencePiece),
+les modèles d'image et les modèles GGUF. Ils sont **non validés**.
 
 ## Obtention des informations de modèle
 
@@ -7020,7 +7447,28 @@ vitesse : ils ne sont plus choisis par le tuner (seuls threads × batch le sont)
 (1×P, 2×P/2, P×1 en QUICK ; + 1×logiques et 4×P/4 en FULL) × batch (32 en QUICK ;
 16/32/64/128 en FULL), sur un corpus synthétique de 32 (QUICK) ou 256 (FULL)
 textes. Reranker : threads (cœurs physiques et logiques en QUICK ; + 1, 2, P/2 en
-FULL) × `max_tokens` × batch. Sparse et image : threads × batch.
+FULL) × `max_tokens` × batch. Sparse (ONNX) et image : threads × batch.
+
+**Runtime GGUF sparse.** `sparse_autotune()` (et `lembed_sparse_autotune()`, dont
+la structure de résultat est inchangée ; `lembed_sparse_autotune_v2()` renvoie en
+plus `workers`, `max_batch_tokens` et `from_cache`) acceptent aussi le nom du registre GGUF sparse (`"SPLADE-PP-En-v1-GGUF"`, déjà en
+cache local : le tuner ne télécharge jamais) ou un chemin se terminant par
+`.gguf` ; le backend se choisit par le nom, il n'y a pas de paramètre `backend=`.
+La grille est threads × workers (graphes partageant les poids) × batch ×
+`max_batch_tokens` (budget de tokens par batch, 512 par défaut). `top_k` et
+`min_weight` ne sont jamais réglés. La configuration par défaut est le point 0 de
+la grille et elle est renvoyée si aucun candidat ne la bat : le résultat n'est
+jamais pire que le défaut sur le même benchmark. Les entrées vont dans le même
+cache de tuning (sous-dossier `sparse/`), indexées par le chemin du fichier (ou le
+nom du registre) plus sa taille et sa date de modification ; un second appel
+renvoie la configuration stockée sans benchmark (`from_cache=True`). Appliquer le
+résultat avec `threads=`, `workers=` et `set_max_batch_tokens()` :
+
+```python
+r = sparse_autotune("model.gguf")
+m = SparseTextEmbedding("model.gguf", threads=r.threads, workers=r.workers)
+m.set_max_batch_tokens(r.max_batch_tokens)
+```
 
 ### Méthodologie de mesure
 
@@ -7138,6 +7586,27 @@ pool = TextEmbeddingPool(
 | Recherche sémantique, qualité maximale | `"quality"` |
 | Production généraliste | `"balanced"` (défaut) |
 
+### Candidats et cache des modèles
+
+La sélection passe un autotune QUICK sur chaque candidat. Elle ne mesure que
+les candidats déjà présents dans le cache des modèles : elle ne télécharge
+rien et ne laisse rien derrière elle (aucun dossier de modèle n'est créé pour
+un candidat absent, qui est simplement ignoré). Pour qu'un modèle soit pris en
+compte, le télécharger d'abord.
+
+| Candidat | Dossier du cache | Téléchargement |
+|---|---|---|
+| `Qdrant/all-MiniLM-L6-v2-onnx` | `models--Qdrant-all-MiniLM-L6-v2-onnx` | 90 Mo |
+| `Xenova/all-MiniLM-L6-v2` (INT8) | `models--Xenova-all-MiniLM-L6-v2` | 23 Mo |
+| `Xenova/all-MiniLM-L12-v2` | `models--Xenova-all-MiniLM-L12-v2` | 133 Mo |
+| `Xenova/bge-small-en-v1.5` | `models--Xenova-bge-small-en-v1.5` | 133 Mo |
+| `Xenova/bge-base-en-v1.5` | `models--Xenova-bge-base-en-v1.5` | 436 Mo |
+| `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | `models--Xenova-paraphrase-multilingual-MiniLM-L12-v2` | 470 Mo |
+| `intfloat/multilingual-e5-small` | `models--intfloat-multilingual-e5-small` | 470 Mo |
+
+Le cache est le dossier par défaut : `LIBEMBEDDING_CACHE_DIR`, puis
+`FASTEMBED_CACHE_DIR`, puis `~/.cache/libembedding`.
+
 ---
 
 ## Performance llama.cpp / GGUF
@@ -7169,7 +7638,7 @@ model = TextEmbedding(
 ### Modes prédéfinis
 
 ```python
-# FAST : priorité vitesse
+# FAST : priorité vitesse (all-MiniLM-L6-v2, 384 dim, ~90 Mo)
 model = TextEmbedding.from_mode("fast")
 
 # BALANCED : compromis vitesse/qualité (défaut)
@@ -7585,8 +8054,9 @@ from libembedding import TextEmbedding
 # CPU (défaut, toujours disponible)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# Apple CoreML (macOS/iOS), repli sur le CPU s'il est indisponible
+# Apple CoreML (macOS/iOS) : UnsupportedError s'il ne peut pas être attaché
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
+print(model.backend, model.provider)  # onnxruntime coreml
 ```
 
 **Providers supportés :**
@@ -7595,12 +8065,15 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
 |----------|---------|-----------|
 | `cpu` | CPU | Toutes |
 | `coreml` | CoreML | macOS, iOS |
-| `llamacpp` | llama.cpp (CPU) | Toutes |
-| `cuda`, `directml`, `tensorrt` | réservés : exécution sur CPU | — |
+| `llamacpp` | llama.cpp (CPU), modèles GGUF uniquement | Toutes |
+| `cuda`, `directml`, `tensorrt` | réservés : `UnsupportedError` | — |
 
 L'accélération GPU est hors périmètre avant la 1.x. Les valeurs `cuda`,
-`directml` et `tensorrt` sont acceptées pour garder l'API stable, mais aucune
-build ne les active : le modèle tourne alors sur le CPU.
+`directml` et `tensorrt` existent pour garder l'API stable, mais aucune build ne
+les active. Un provider autre que `cpu` demandé mais indisponible lève
+`UnsupportedError` (`LEMBED_ERROR_UNSUPPORTED` en C) au lieu de tourner sur CPU
+sans le dire ; les propriétés `backend` et `provider` indiquent ce qui sert
+réellement le modèle (voir [Backend et provider effectifs](api_reference.html#backend-et-provider-effectifs)).
 
 ### Modèles GGUF (llama.cpp)
 
@@ -7764,6 +8237,51 @@ from libembedding import TextEmbedding
 model = TextEmbedding("BAAI/bge-small-en-v1.5", max_length=128)
 ```
 
+## Fidélité du tokenizer (HuggingFace `tokenizers`)
+
+Le tokenizer intégré est comparé à la bibliothèque HuggingFace `tokenizers` sur un
+corpus multilingue (grec, cyrillique, vietnamien, CJK, arabe, hébreu, hindi, thaï,
+coréen, emoji, latin accentué, casse mixte, ponctuation, mots très longs). Les
+références sont des fixtures JSON versionnées dans `tests/data/tokenizer/`, produites
+par `scripts/gen_tokenizer_fixtures.py` ; le test `test_tokenizer_fidelity` n'a besoin
+ni de Python ni du paquet `tokenizers`.
+
+| Famille | Modèles | Statut |
+|---|---|---|
+| WordPiece + BertNormalizer (uncased) | MiniLM, bge-*-en, snowflake, gte-en, nomic, mxbai, SPLADE | identique à HF, 0/54 textes différents |
+| WordPiece, vocabulaire chinois | bge-*-zh | identique à HF, 0/54 |
+| WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identique à HF, 0/54 |
+| Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identique à HF, 0/54 (charsmap précompilé, WhitespaceSplit + Metaspace, Viterbi, fusion des inconnus, byte fallback) ; embeddings à cosinus 1,000 de la référence. Paires du reranker : pas encore couvertes |
+| BPE byte-level | CLIP texte, ModernBERT | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+
+Couverture de la normalisation (strip accents + minuscules), vérifiée point de code par
+point de code jusqu'à U+2FFFF : Latin (Latin-1, Étendu-A/B, Étendu additionnel dont le
+vietnamien), IPA, diacritiques combinants, grec et copte, grec étendu (polytonique),
+cyrillique, arménien, hébreu, arabe, devanagari, thaï, jamo et syllabes hangul
+(décomposition algorithmique), ponctuation et symboles généraux (jusqu'à U+2BFF),
+kana, CJK, formes pleine chasse, emoji : 0 écart. Reste hors table (1,0 % des points
+de code testés, 1 835 sur 183 376) : formes de compatibilité CJK (U+F900-FAFF et
+U+2F800-2FA1F), capitales cherokee, glagolitique, copte, cyrillique étendu B, deseret
+et autres alphabets rares, lettres indiennes précomposées hors devanagari, formes de
+présentation hébraïques. Ces points de code traversent le tokenizer inchangés, ce qui
+diffère de HF.
+
+Le même travail a corrigé trois écarts de pré-tokenisation avec HF : un mot dont une
+partie est inconnue donne un seul `[UNK]` (et non les morceaux déjà trouvés), un mot
+de plus de 100 caractères donne `[UNK]`, et les ponctuations Unicode, les idéogrammes
+CJK et les caractères de format (espace de largeur nulle, etc.) sont traités comme
+dans HF.
+
+Les options du `BertNormalizer` sont lues indépendamment, comme dans HF : `lowercase`,
+`strip_accents` (absent ou `null` : suit `lowercase`), `clean_text` et
+`handle_chinese_chars`. Un normaliseur `Sequence` est pris en charge pour `Lowercase`,
+`StripAccents` et `NFD`/`NFKD` ; les accents ne sont retirés que si `StripAccents` et une
+décomposition sont tous deux présents. Les modes « minuscules seules » et « accents
+seuls » sont aussi vérifiés point de code par point de code. Le BPE byte-level garde
+son comportement historique (non conforme à HF) jusqu'à sa réécriture ; ses ids sont
+figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
+`tokenizer.json` exact est dans le cache du poste (sinon la famille est ignorée).
+
 ## Recherche de modèles par code
 
 libembedding recherche automatiquement les modèles par nom HuggingFace ou par code de repo ONNX :
@@ -7851,6 +8369,34 @@ embeddings = model.embed(["Hello"])  # retourne np.ndarray directement
 - `embed()` retourne directement un `np.ndarray` au lieu d'un générateur
 - Pas de méthode `passage_embed()` séparée — tout passe par `embed()`
 - Classes plus légères, moins de dépendances Python
+
+## Thread safety
+
+La règle : **un contexte peut être partagé entre threads, mais les appels sur
+ce contexte sont sérialisés** (texte, sparse, reranker). Les contextes image
+exécutent les appels en parallèle. Pour du parallélisme, utiliser un contexte
+par thread ou `TextEmbeddingPool`. Ne jamais libérer un contexte pendant qu'un
+autre thread l'utilise, ni rappeler le même contexte depuis le callback de
+`embed_stream` (il tient le verrou du contexte : interblocage).
+
+| Type | Partageable entre threads ? | Pourquoi (source) |
+|---|---|---|
+| Texte, ONNX et GGUF | Oui, appels sérialisés | `call_mutex` dans `detail/text_embedding_impl.hpp:125,169` ; le tokenizer écrit des chaînes temporaires et le backend GGUF n'a qu'un `llama_context` |
+| Sparse, ONNX et GGUF | Oui, appels sérialisés | `call_mutex` dans `sparse_text_embedding.h:171,348` ; les workers GGUF réutilisent leurs graphes ggml |
+| Reranker, ONNX et GGUF | Oui, appels sérialisés | `call_mutex` dans `detail/reranker_impl.hpp:91,341` |
+| Image | Oui, appels en parallèle | pas d'état temporaire par contexte, `OrtApi::Run` est thread-safe ; seuls les compteurs sont verrouillés (`image_embedding.h:116`) |
+| Stats (`*_stats`, `*_stats_v2`) | Oui, n'attendent jamais une inférence | `stats_mutex` séparé (mêmes lignes) |
+| `TextEmbeddingPool` | Oui | chaque worker possède un contexte (sérialisé), les appels de plusieurs threads s'enfilent par worker (`cpp/embedding_pool.hpp`) |
+| Cache LRU (`lembed_cache_*`) | Oui | un seul mutex (`detail/embedding_cache_impl.hpp:142`). Utiliser `lembed_cache_get_copy()` : `lembed_cache_get()` rend un pointeur emprunté (déprécié) |
+| Entrées du cache d'autotune | Oui dans un process | nom temporaire unique puis renommage atomique (`detail/autotune_cache.hpp:392`) ; plusieurs process : le dernier écrivain gagne |
+| Ancien cache de tuning (`lembed_tune_cache_*`) | Oui dans un process | mutex global au process (`detail/autotune_cache_impl.hpp:91`) ; plusieurs process : le dernier écrivain gagne |
+| Téléchargeur de modèles | Oui | fichier temporaire unique par téléchargement, publication atomique (`detail/downloader_impl.hpp:339`). Deux threads peuvent télécharger deux fois le même fichier |
+| `lembed_last_error()` | Oui | tampon thread-local (`error.h:79`) : le lire sur le thread qui a reçu l'échec |
+| `create` / `free` | Créer depuis n'importe quel thread ; libérer depuis un seul thread, sans appel en cours | |
+
+Tests : `tests/test_concurrency.cpp` (aussi compilé sous ThreadSanitizer par le
+workflow `tsan.yml`) et `tests/test_repeated_calls.cpp` (10 000 appels répétés,
+croissance de RSS bornée, `-DLIBEMBEDDING_STABILITY_TESTS=ON`).
 
 ## Performance
 
@@ -9486,6 +10032,295 @@ if (status == LEMBED_OK) {
 
 ---
 
+## DOCUMENT (FR): ADR-001: Backend routing by file extension
+Source: https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-001-routing-by-extension.md
+Rendu: https://dorel14.github.io/libembedding-ng/adr/ADR-001-routing-by-extension.html
+
+# ADR-001: Backend routing by file extension
+
+Status: Accepted (2026-11-08)
+
+## Context
+
+The library has two backends: ONNX Runtime and llama.cpp (GGUF). Callers should not
+need to know which one runs. An explicit `backend` option leaks an implementation
+detail into the API and invites inconsistent combinations (a `.onnx` path with the
+llama.cpp backend).
+
+Today the C options carry a `backend` field (`lembed_backend_t`:
+`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`, in
+`include/libembedding/types.h`), defaulting to `AUTO`. Python's `Reranker` has a
+matching `backend="auto"` argument.
+
+## Decision
+
+- The backend is chosen from the model path or identifier:
+  `.gguf` -> llama.cpp; `.onnx`, a Hugging Face identifier or anything unknown ->
+  ONNX Runtime (`resolve_effective_backend()` in
+  `include/libembedding/detail/session_factory.hpp`).
+- No new API takes a `backend=` parameter, in C or Python.
+- The existing `backend` field is kept for ABI compatibility and documented as
+  deprecated (documentation only, no `deprecated` attribute, which would add warnings
+  to our own tests). It is removed in 2.0 (ADR-004).
+- A provider requested explicitly but unavailable returns
+  `LEMBED_ERROR_UNSUPPORTED`; it does not fall back silently.
+- The reranker `AUTO` fallback from ONNX to GGUF stays but must be visible (log and
+  introspection).
+
+## Consequences
+
+- Simple mental model: the file you pass decides the runtime.
+- A model cannot be forced onto the other backend. Users who need that convert the
+  model.
+- Until 2.0 the deprecated field stays in the structs and in `_cdefs.h`.
+- Backend comparison for one model is done through benchmarks that load both files,
+  not through a switch.
+
+---
+
+## DOCUMENT (FR): ADR-002: CPU dispatch through the upstream ggml mechanism
+Source: https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-002-cpu-dispatch-ggml.md
+Rendu: https://dorel14.github.io/libembedding-ng/adr/ADR-002-cpu-dispatch-ggml.html
+
+# ADR-002: CPU dispatch through the upstream ggml mechanism
+
+Status: Accepted (2026-11-08)
+
+## Context
+
+A wheel must run on CPUs from baseline x86-64 to AVX-512 (and NEON/SVE on Arm). A
+build with `GGML_NATIVE` targets the build machine and cannot be shipped. Writing our
+own runtime dispatch was considered (RFC P2.6).
+
+The part of libembedding compiled by us was measured with and without AVX2:
+0.98 to 1.03x, which is noise (decision of 2026-11-08). The hot kernels are in ggml
+and ONNX Runtime, not in our code.
+
+## Decision
+
+- Use ggml's own mechanism: `GGML_BACKEND_DL` plus `GGML_CPU_ALL_VARIANTS`, which
+  builds one ggml CPU library per instruction-set level and selects the best at run
+  time. Controlled by the CMake option `LIBEMBEDDING_CPU_DISPATCH`.
+- Default ON, except on Apple and on 32-bit Arm (`CMakeLists.txt`: ggml has no variant
+  set for armv7; Apple keeps the native build until the Apple Silicon variants are
+  validated). OFF builds a single `ggml-cpu` for the build machine.
+- Our own code is no longer compiled with AVX2 flags. One generic wheel per platform,
+  no "optimised" wheel.
+- ONNX Runtime keeps its own dispatch; we do not touch it.
+- No patch of `third_party/` (for instance an MSVC variant-selection quirk on Ice Lake
+  is left as is, as it has no effect on the code that runs).
+- Variants are validated with Intel SDE in CI.
+
+## Consequences
+
+- Wheels are larger: they ship every x86-64 variant module.
+- Backend modules must be found at run time next to the library; the fuzz build turns
+  dispatch off to keep one statically linked, fully instrumented ggml.
+- Any ggml bump is done in a separate worktree and re-validated under SDE.
+- A custom SIMD kernel in libembedding needs a measured gain over ggml/ORT before it
+  is accepted.
+
+---
+
+## DOCUMENT (FR): ADR-003: In-house ggml runtime for sparse GGUF
+Source: https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-003-sparse-gguf-ggml-runtime.md
+Rendu: https://dorel14.github.io/libembedding-ng/adr/ADR-003-sparse-gguf-ggml-runtime.html
+
+# ADR-003: In-house ggml runtime for sparse GGUF
+
+Status: Accepted (2026-11-08)
+
+## Context
+
+Sparse (SPLADE) embeddings need the masked-language-model head: logits per token,
+then log(1 + ReLU) and a max over tokens. llama.cpp does not expose MLM logits for
+the BERT architecture (the graph never assigns `res->t_logits`), so
+`llama_get_logits_ith()` cannot be used. The dense path uses `llama_encode()` and
+`llama_get_embeddings_seq()` and is unaffected.
+
+Patching the vendored llama.cpp is not allowed (`third_party/` is never patched).
+
+## Decision
+
+- Sparse GGUF runs on a runtime of our own, built on ggml and the `gguf` reader:
+  header and weights in `include/libembedding/detail/gguf/gguf_weights.hpp`, the BERT
+  graph in `gguf_bert_graph.hpp`, the session in `gguf_sparse_session.hpp`, the entry
+  point in `include/libembedding/detail/sparse_text_embedding_gguf_impl.hpp`.
+- Batches are capped at a 512-token budget (best throughput of 128 to 2048 measured).
+- F32 and F16 weight formats are rejected: no end-to-end gain and about 3.6x RSS.
+  Quantised weights (for example Q8_0) are dequantised inside `ggml_mul_mat`; code
+  never reads a quantised tensor element by element.
+- The GGUF is untrusted input: the loader validates bounds, types and size against the
+  file, and is fuzzed (see `SECURITY.md`).
+- Scope stays at BERT-family encoders. Generalising the runtime to other architectures
+  needs its own ADR first.
+
+## Consequences
+
+- We own a loader and a graph: more code to maintain and fuzz.
+- Sparse GGUF does not depend on llama.cpp internals, so llama.cpp bumps do not break
+  it, but ggml API changes can.
+- Equivalence with the ONNX sparse path is checked by tests, not assumed.
+
+---
+
+## DOCUMENT (FR): ADR-004: Removal list for 2.0
+Source: https://github.com/dorel14/libembedding/blob/main/docs/adr/ADR-004-2-0-removals.md
+Rendu: https://dorel14.github.io/libembedding-ng/adr/ADR-004-2-0-removals.html
+
+# ADR-004: Removal list for 2.0
+
+Status: Accepted (2026-11-08). The list is open until 2.0 is cut.
+
+## Context
+
+Several public symbols and fields are deprecated or kept only for ABI stability.
+Removing any of them breaks the ABI, so all removals are grouped into one major
+version, not scattered over 1.x. 2.0 does not start before the end of phase 3 of the
+roadmap (performance and platforms).
+
+Deprecation is documentation only: no `deprecated` attribute, because it would
+produce warnings in our own tests.
+
+## Decision
+
+Remove in 2.0 (each symbol verified in the repository):
+
+| Item | Where | Replacement |
+|---|---|---|
+| `backend` field and `lembed_backend_t` (`LEMBED_BACKEND_*`) in options; Python `Reranker(backend=...)` | `include/libembedding/types.h` | routing by extension (ADR-001) |
+| `lembed_cache_get()` (borrowed pointer, racy) | `include/libembedding/embedding_cache.h` | `lembed_cache_get_copy()` |
+| `lembed_sparse_best_config()` | `include/libembedding/sparse_text_embedding.h` | `lembed_sparse_autotune()` (`autotuner.h`) |
+| Registry entries under a non-MIT-compatible licence: `jinaai/jina-reranker-v2-base-multilingual` (CC-BY-NC-4.0), `onnx-community/embeddinggemma-300m-ONNX` (Gemma Terms), with their enum values | `include/libembedding/model_registry.h` | MIT/Apache-2.0 replacements, validated (fidelity, Recall@K) |
+| `lembed_autotune_unified()`, `lembed_autotune_unified_config()`, `lembed_autotune_unified_clear_cache()` facades | `include/libembedding/autotuner.h` | `lembed_autotune_ex()` |
+
+Until 2.0 the restricted-licence entries stay in the enums, since removing them would
+shift indices, and are refused at load time unless
+`LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES=1` is set.
+
+## Consequences
+
+- 1.x keeps every symbol above, with a deprecation note in the headers and docs.
+- Removals in 2.0 must be mirrored in `_cdefs.h`, `libembedding.def` and
+  `test_struct_sizes`.
+- New items are added to this table when they are deprecated, not after.
+- `lembed_tune_cache_*` is kept (it is not on this list).
+
+---
+
+## DOCUMENT (FR): Architecture decision records
+Source: https://github.com/dorel14/libembedding/blob/main/docs/adr/README.md
+Rendu: https://dorel14.github.io/libembedding-ng/adr/README.html
+
+# Architecture decision records
+
+Short records of decisions that are costly to reverse. Each ADR has Context,
+Decision, Consequences and Status. A superseded ADR is kept and marked as such.
+
+| ADR | Title | Status |
+|---|---|---|
+| [ADR-001](ADR-001-routing-by-extension.md) | Backend routing by file extension, no `backend=` | Accepted |
+| [ADR-002](ADR-002-cpu-dispatch-ggml.md) | CPU dispatch through the upstream ggml mechanism | Accepted |
+| [ADR-003](ADR-003-sparse-gguf-ggml-runtime.md) | In-house ggml runtime for sparse GGUF | Accepted |
+| [ADR-004](ADR-004-2-0-removals.md) | Removal list for 2.0 | Accepted |
+
+To add one: copy the structure of an existing ADR, take the next number, and add a
+row above.
+
+---
+
+## DOCUMENT (FR): Méthodologie des benchmarks
+Source: https://github.com/dorel14/libembedding/blob/main/docs/benchmark_methodology.md
+Rendu: https://dorel14.github.io/libembedding-ng/benchmark_methodology.html
+
+# Méthodologie des benchmarks
+
+Version: 1.0.0
+
+Un chiffre de performance n'a de valeur que s'il est reproductible. Cette page fixe
+le protocole que suivent les benchmarks de `benchmarks/` et les métadonnées que
+chaque rapport doit contenir. English: [Benchmark methodology](en/benchmark_methodology.html).
+
+## 1. Protocole
+
+1. **Un sous-process par backend.** Le pic de mémoire (RSS) est un *high-water mark*
+   par processus : il ne peut que monter. Un processus qui a déjà exécuté un premier
+   backend ne peut donc plus mesurer le pic du suivant. Un sous-process par
+   configuration est la seule façon d'attribuer la mémoire, et il isole aussi un backend
+   qui plante ou manque de mémoire.
+2. **Warmup séparé du run chronométré.** Le warmup s'exécute sur la même instance que
+   celle mesurée (le chargement paresseux et le pool de threads sont par instance),
+   mais sur son propre sous-ensemble de documents, jamais sur celui qui est chronométré.
+3. **Temps de chargement du modèle mesuré à part**, avant le warmup.
+4. **Tours alternés pour un A/B.** Pour comparer deux configurations (ou deux builds),
+   alterner A, B, A, B, ... plutôt que « tous les A puis tous les B » : la dérive
+   thermique et la charge de la machine touchent alors les deux de la même façon.
+5. **Médiane sur au moins 10 tours** pour une conclusion de performance, et p95 en plus
+   pour la latence. Une moyenne se laisse tirer par un seul tour aberrant.
+6. **Seuil de bruit : un écart inférieur à 5 % est du bruit.** On ne conclut ni à un
+   gain ni à une régression en dessous de 5 %, sauf si la mesure est répétée et que
+   l'écart se maintient.
+7. **Machine au repos, pas de builds en parallèle.** Noter toute charge de fond.
+8. **Ne pas présumer qu'une quantification est plus rapide : mesurer.**
+
+## 2. Métadonnées obligatoires
+
+Chaque rapport (JSON et Markdown) porte les champs suivants. Un champ absent,
+`unknown` ou nul est signalé par `missing_fields()`.
+
+| Groupe | Champs |
+|---|---|
+| Source | commit git (et indicateur *dirty*), version de libembedding |
+| Machine | OS, modèle de CPU, cœurs physiques / logiques, RAM, jeu d'instructions détecté |
+| Logiciel | version de Python, version d'ONNX Runtime ; llama.cpp / ggml quand les bindings l'exposent |
+| Run | threads, batch, warmup, itérations, format (onnx/gguf), quantization, dataset |
+| Résultats | p50 et p95, temps de chargement, RSS pic |
+
+Un rapport dont le commit est *dirty* mesure du code non commité : ne pas le publier
+comme référence.
+
+## 3. Utiliser `benchmarks/_benchmeta.py`
+
+```python
+import _benchmeta as bm
+
+machine = bm.collect_machine_metadata()
+run = bm.RunParams(threads=0, batch=32, warmup=50, iterations=10,
+                   format="onnx", quantization="fp32", dataset="synthetic-1000")
+
+model, load_ms = bm.timed_load(lambda: TextEmbedding(name))
+# ... warmup, puis boucle chronométrée -> samples_ms
+stats = bm.summarize_latencies(samples_ms)    # n, min_ms, p50_ms, p95_ms, max_ms
+peak = bm.peak_rss_mb()                       # dans le sous-process du backend
+
+report = bm.build_report(machine, run, results={"p50_ms": stats["p50_ms"],
+                                                "load_ms": load_ms, "peak_mb": peak})
+assert not bm.missing_fields(report)
+bm.write_json(report, "result.json")          # LF, sans BOM
+print(bm.to_markdown(report))                 # bloc Markdown « Run metadata »
+```
+
+- `threads=0` signifie « valeur par défaut de la bibliothèque ».
+- `batch` accepte un entier ou la liste des tailles d'un balayage.
+- `percentile()` interpole linéairement entre les rangs ; `p50` et `p95` en dérivent.
+- `is_noise(baseline, candidate)` applique le seuil de 5 % de la section 1.
+- Les fonctions ne lèvent pas quand une source manque (pas de DLL, pas de git) : le
+  champ vaut `unknown` et apparaît dans `missing_fields()`.
+
+Scripts déjà branchés : `benchmarks/sparse/bench_sparse_backend_comparison.py`
+(option `--output-json`, colonnes p50/p95 du tableau) et
+`benchmarks/quantization/bench_quantization.py` (clé `metadata` du JSON).
+
+## 4. Limites connues
+
+- Les bindings n'exposent pas de numéro de version ggml ni llama.cpp :
+  `lembed_llama_version()` indique seulement si llama.cpp est activé. Le snapshot
+  vendorisé est décrit dans `third_party/README.md`.
+- Le p95 sur peu d'itérations (5) est une interpolation entre les deux plus grands
+  échantillons : il n'a de sens statistique qu'à partir d'une vingtaine de tours.
+
+---
+
 ## DOCUMENT (FR): GGUF sparse embedding convention
 Source: https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md
 Rendu: https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html
@@ -10020,6 +10855,41 @@ copie. `LEMBED_ERROR_GGUF` est un code *ajouté en fin* d'énumération, et non
 demande est **plafonnée** à la longueur de contexte du modèle, pas refusée : une
 séquence plus longue indexerait hors de la table.
 
+### 4.1 Fuzzing du chargeur
+
+Un GGUF est une entrée non fiable. Les bornes et contrôles de forme ci-dessus
+(`detail/gguf/gguf_weights.hpp`, `read_hparams()` et `validate_tensors()`) sont
+mis à l'épreuve par un harnais libFuzzer, `tests/fuzz/fuzz_gguf_loader.cpp`.
+
+- **Cible** : `SparseSession::load_from_buffer()`, qui fait les mêmes contrôles
+  que le chargement par chemin (le lecteur gguf est commun à
+  `gguf_init_from_buffer` et `gguf_init_from_file`). Une entrée = une image GGUF
+  en mémoire, aucun fichier temporaire. Un fichier accepté embarque ensuite un
+  texte court : un fichier accepté ne doit jamais atteindre un `GGML_ASSERT`.
+- **Graines** : `test_sparse_gguf --write-fuzz-seeds <dossier>` écrit les
+  fixtures des tests unitaires (F32, F16, Q8_0, sans tête, sans `vocab_size`…).
+  Elles sont générées, pas versionnées.
+- **Build** : clang uniquement, dans un dossier dédié. L'option instrumente tout
+  le build (ggml compris) avec ASan, UBSan et la couverture libFuzzer.
+
+```bash
+cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DLIBEMBEDDING_BUILD_FUZZERS=ON -DLIBEMBEDDING_CPU_DISPATCH=OFF -DGGML_OPENMP=OFF \
+  -DLIBEMBEDDING_BUILD_EXAMPLES=OFF
+cmake --build build-fuzz --parallel 4 --target fuzz_gguf_loader test_sparse_gguf
+mkdir -p corpus && build-fuzz/tests/test_sparse_gguf --write-fuzz-seeds corpus
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  build-fuzz/tests/fuzz/fuzz_gguf_loader corpus -max_total_time=60
+```
+
+La CI (`.github/workflows/fuzz.yml`, Linux clang) le lance 60 s sur chaque PR
+qui touche le chargeur ou le harnais, échoue sur tout crash ou rapport
+ASan/UBSan, et publie les entrées fautives en artefact. Une entrée fautive se
+rejoue avec `fuzz_gguf_loader <fichier>` ; corrigée dans notre code, elle devient
+un test de régression dans `test_sparse_gguf`. Un défaut dans ggml est signalé,
+pas corrigé dans `third_party/`.
+
 ---
 
 ## 5. Mesures
@@ -10198,6 +11068,111 @@ poids réels.
 
 ---
 
+## DOCUMENT (FR): Troncature Matryoshka
+Source: https://github.com/dorel14/libembedding/blob/main/docs/matryoshka.md
+Rendu: https://dorel14.github.io/libembedding-ng/matryoshka.html
+
+# Troncature Matryoshka
+
+Un modèle entraîné avec *Matryoshka Representation Learning* (MRL) range
+l'information la plus utile dans les premières composantes de ses vecteurs.
+Garder seulement les `k` premières composantes, puis renormaliser, donne un
+vecteur plus petit qui reste utilisable pour la recherche : moins de mémoire,
+moins de disque, des produits scalaires plus rapides dans votre index.
+
+libembedding applique cette troncature **après** l'inférence : le modèle tourne
+à sa dimension native, puis chaque vecteur est coupé à `k` composantes et
+renormalisé en L2. Le coût de l'encodeur ne change pas.
+
+> ⚠️ Sur un modèle **non** entraîné en Matryoshka, le préfixe d'un vecteur n'a
+> aucune garantie de qualité. La bibliothèque ne l'interdit pas (elle ne connaît
+> pas l'entraînement d'un modèle local), mais les résultats peuvent s'effondrer.
+
+## Modèles du registre entraînés en Matryoshka
+
+| Modèle | Dimension native | Dimensions documentées par l'auteur |
+|--------|------------------|--------------------------------------|
+| `nomic-ai/nomic-embed-text-v1.5` (FP32 et INT8) | 768 | 768, 512, 256, 128, 64 |
+| `mixedbread-ai/mxbai-embed-large-v1` (FP32 et INT8) | 1024 | 1024 → 64 (toute valeur ; 512 recommandé) |
+| `google/embeddinggemma-300m` | 768 | 768, 512, 256, 128 |
+
+Les autres modèles du registre (dont `nomic-ai/nomic-embed-text-v1`, la v1 sans
+MRL) ne sont pas entraînés en Matryoshka.
+
+## Python
+
+```python
+from libembedding import TextEmbedding
+
+model = TextEmbedding("nomic-ai/nomic-embed-text-v1.5", truncate_dim=256)
+model.dim          # 256  (taille des vecteurs renvoyés)
+model.native_dim   # 768  (taille produite par le modèle)
+model.truncate_dim # 256
+
+vecs = model.embed(["search_query: qu'est-ce que Matryoshka ?"])
+vecs.shape         # (1, 256), chaque ligne de norme 1
+```
+
+- `truncate_dim` doit valoir entre `1` et la dimension native. `0`, une valeur
+  négative ou une valeur supérieure à la dimension native lèvent `ValueError`
+  à la construction ; un type autre que `int` lève `TypeError`.
+- `None` (défaut) conserve le vecteur complet.
+- Les vecteurs sont **toujours renormalisés** : cosinus et produit scalaire
+  restent équivalents, comme pour un vecteur complet.
+- `embed()`, `embed_iter()`, `embed_bytes()`, `embed_stream()` et
+  `embed_batched()` appliquent tous la troncature. `TextEmbeddingPool` accepte
+  le même paramètre et le transmet à chaque worker.
+
+Le résultat est identique, à 1e-6 près, à la référence numpy
+`v[:, :k] / np.linalg.norm(v[:, :k], axis=1, keepdims=True)`
+(`python/tests/test_matryoshka.py`).
+
+## API C
+
+```c
+#include <libembedding/libembedding.h>
+
+lembed_status_t lembed_embeddings_truncate(lembed_embeddings_t* emb,
+                                           int new_dim,
+                                           int renormalize);
+```
+
+| Paramètre | Description |
+|-----------|-------------|
+| `emb` | Résultat dense (`lembed_text_embedding_embed`, `lembed_image_embedding_embed`, ou un tampon de l'appelant). Modifié en place. |
+| `new_dim` | Nouvelle dimension, `1 <= new_dim <= emb->dim`. |
+| `renormalize` | `1` = renormalisation L2 de chaque ligne tronquée (une ligne nulle reste nulle) ; `0` = simple préfixe. |
+
+Comportement :
+
+- Les lignes sont compactées en place (`emb->data` devient un tableau
+  `[num_embeddings * new_dim]`) et `emb->dim` est mis à jour.
+- Le tampon **n'est pas réalloué** : `emb->data` garde la même adresse,
+  `lembed_embeddings_free()` le libère toujours. La fonction ne libère ni
+  n'alloue rien, elle accepte donc aussi un tampon possédé par l'appelant.
+- `new_dim == emb->dim` est valide : rien n'est déplacé, la renormalisation est
+  appliquée si demandée.
+- Erreurs : `emb` NULL, `emb->dim <= 0`, `emb->num_embeddings < 0`, `data` NULL
+  avec des lignes, ou `new_dim` hors de `[1, emb->dim]` →
+  `LEMBED_ERROR_INVALID_ARGUMENT`, détail dans `lembed_last_error()`. En cas
+  d'erreur, `emb` n'est pas modifié.
+
+```c
+lembed_embeddings_t emb = {0};
+if (lembed_text_embedding_embed(ctx, texts, n, 0, &emb) == LEMBED_OK) {
+    if (lembed_embeddings_truncate(&emb, 256, 1) != LEMBED_OK)
+        fprintf(stderr, "%s\n", lembed_last_error());
+    /* emb.dim == 256 */
+    lembed_embeddings_free(&emb);
+}
+```
+
+## Qualité par dimension (nDCG@10, BEIR SciFact)
+
+NDCG_TABLE_FR
+
+---
+
 ## DOCUMENT (FR): Plateformes supportées
 Source: https://github.com/dorel14/libembedding/blob/main/docs/platforms.md
 Rendu: https://dorel14.github.io/libembedding-ng/platforms.html
@@ -10216,7 +11191,7 @@ comme tel.
 | Plateforme | Livrable | Testé en CI | Jamais exécuté sur matériel physique ? |
 |---|---|---|---|
 | Windows x64 | wheel PyPI | oui (`windows-2022`) | — |
-| Linux x86_64 | wheel PyPI | oui (`ubuntu-22.04`) | — |
+| Linux x86_64 | wheel PyPI `manylinux_2_31_x86_64` | oui (`ubuntu-22.04`) | — |
 | Linux aarch64 | wheel PyPI `manylinux_2_31_aarch64` | oui (runner ARM `ubuntu-22.04-arm`) | oui (Raspberry Pi) |
 | Linux armv7l (32 bits) | wheel PyPI `manylinux_2_35_armv7l` | oui (conteneur Debian 12 armhf sous QEMU) | oui (Raspberry Pi) |
 | macOS arm64 (Apple Silicon, macOS 14+) | wheel PyPI | oui (`macos-15`) | — |
@@ -10232,6 +11207,18 @@ Sources : `.github/workflows/ci.yml` (matrice `python-tests`),
 Sur macOS et iOS, ggml est compilé sans Metal (`-DGGML_METAL=OFF` dans
 `.github/workflows/build-wheel.yml` et `scripts/build_ios.sh`) : le GPU est
 hors périmètre avant la 1.x.
+
+## Linux x86_64 : plancher glibc
+
+La wheel `manylinux_2_31_x86_64` s'installe sur tout Linux x86_64 avec glibc
+2.31 ou plus (Debian 11+, Ubuntu 20.04+, RHEL/Rocky/Alma 9+). Elle est
+construite dans le conteneur `quay.io/pypa/manylinux_2_28_x86_64` par
+`scripts/build_wheel_manylinux.sh`, le même script que la wheel aarch64 ;
+auparavant, construite directement sur le runner `ubuntu-22.04`, elle portait
+le tag `manylinux_2_34` et excluait Debian 11 et Ubuntu 20.04.
+Le tag `manylinux_2_28` n'est pas atteint : `libllama` (llama.cpp) référence
+`GLIBCXX_3.4.25`, que la politique `manylinux_2_28` d'auditwheel n'admet pas.
+La CI teste la wheel installée sur le runner `ubuntu-22.04` (glibc 2.35).
 
 ## Linux aarch64 et Raspberry Pi
 
@@ -10515,6 +11502,22 @@ les contient (`build-wheel.yml`, étape « Check licence texts »).
 
 Le xcframework iOS porte les siennes dans chaque `libembedding.framework`
 (voir [xcframework](#xcframework)).
+
+## Contrôles qualité en CI
+
+- **Versions de Python** : `wheel-checks.yml` (appelé par `ci.yml` une fois les
+  wheels construites) installe la wheel `py3-none` Linux x86_64 sous Python 3.9
+  à 3.13 et lance les tests sur le paquet installé
+  (`LIBEMBEDDING_TEST_INSTALLED=1`, sans les tests `network`). La construction
+  de la wheel teste elle-même 3.12 avec tous les tests.
+- **`twine check --strict`** passe sur chaque wheel construite par la CI.
+- **Pas de sdist** : le paquet embarque une bibliothèque native précompilée,
+  une distribution source s'installerait puis échouerait à l'import.
+- **CodeQL** (`codeql.yml`) analyse Python et C/C++ (mode sans build,
+  `third_party/` exclu) sur les pull requests, `main`/`dev` et chaque semaine.
+  Ce n'est pas un check obligatoire pour l'instant.
+- **Dependabot** (`.github/dependabot.yml`) propose chaque semaine des mises à
+  jour groupées des GitHub Actions et des dépendances de `python/`, sur `dev`.
 
 ## Voir aussi
 
