@@ -26,6 +26,7 @@
 #define LIBEMBEDDING_IMPLEMENTATION
 #endif
 #include <libembedding/libembedding.h>
+#include <libembedding/detail/gguf_lookup.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -326,6 +327,63 @@ static void test_cached_gguf_reranker() {
     lembed_reranker_free(ctx);
 }
 
+/* Registry-wide: every ONNX registry reranker that has a GGUF counterpart
+ * (same HuggingFace model code) resolves to exactly that entry, and one without
+ * counterpart resolves to nothing. No network. The pre-fix lookup
+ * (display-name substring) is reported for comparison. */
+static void test_gguf_lookup_rerankers() {
+    const lembed_model_info_t* models = nullptr;
+    int n = 0;
+    ASSERT(lembed_list_reranker_models(&models, &n) == LEMBED_OK && n > 0, "reranker registry lists");
+    const lembed_gguf_model_info_t* ggufs = nullptr;
+    int gn = 0;
+    ASSERT(lembed_list_gguf_models(&ggufs, &gn) == LEMBED_OK && gn > 0, "GGUF registry lists");
+    if (!models || !ggufs) return;
+    int with_counterpart = 0;
+    for (int i = 0; i < n; i++) {
+        const lembed_gguf_model_info_t* expected = nullptr;
+        for (int j = 0; j < gn && !expected; j++) {
+            if (lembed__gguf_ieq(ggufs[j].model_code, models[i].model_name) ||
+                lembed__gguf_ieq(ggufs[j].model_code, models[i].model_code)) {
+                expected = &ggufs[j];
+            }
+        }
+        const lembed_gguf_model_info_t* got =
+            lembed__gguf_for_model(models[i].model_name, models[i].model_code, 0);
+        const lembed_gguf_model_info_t* old_hit = lembed_find_gguf_model(models[i].model_name);
+        if (!old_hit) old_hit = lembed_find_gguf_model(models[i].model_code);
+        printf("  reranker %-48s new=%-26s old=%s\n", models[i].model_name,
+               got ? got->name : "(none)", old_hit ? old_hit->name : "(none)");
+        if (expected) {
+            with_counterpart++;
+            ASSERT(got == expected, "reranker resolves to its GGUF counterpart");
+            ASSERT(got && got->gguf_url && got->gguf_url[0], "resolved GGUF has a URL");
+        } else {
+            ASSERT(got == nullptr, "reranker without GGUF counterpart resolves to nothing");
+        }
+    }
+    ASSERT(with_counterpart >= 3, "at least 3 registry rerankers have a GGUF counterpart");
+}
+
+/* Text path keeps its behaviour: a hit never changes the dimension and an
+ * exact model_code match wins. */
+static void test_gguf_lookup_text() {
+    const lembed_model_info_t* models = nullptr;
+    int n = 0;
+    if (lembed_list_text_models(&models, &n) != LEMBED_OK || !models) return;
+    for (int i = 0; i < n; i++) {
+        const lembed_gguf_model_info_t* got =
+            lembed__gguf_for_model(models[i].model_name, models[i].model_code, models[i].dim);
+        if (got && got->dim > 0) ASSERT(got->dim == models[i].dim, "text GGUF lookup keeps the dimension");
+    }
+    const lembed_gguf_model_info_t* mini =
+        lembed__gguf_for_model("sentence-transformers/all-MiniLM-L6-v2", "x", 384);
+    ASSERT(mini && streq(mini->model_code, "sentence-transformers/all-MiniLM-L6-v2"),
+           "MiniLM resolves by model code");
+    ASSERT(lembed__gguf_for_model("sentence-transformers/all-MiniLM-L6-v2", "x", 768) == nullptr,
+           "dimension mismatch rejects the entry");
+}
+
 int main(void) {
     /* Unbuffered: a crash must not swallow the progress lines (ctest only
      * shows what reached the pipe). */
@@ -352,6 +410,10 @@ int main(void) {
     test_cached_gguf_text();
     printf("stage: cached GGUF reranker\n");
     test_cached_gguf_reranker();
+
+    printf("stage: GGUF lookup\n");
+    test_gguf_lookup_rerankers();
+    test_gguf_lookup_text();
 
     printf("test_backend_introspection: %d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;
