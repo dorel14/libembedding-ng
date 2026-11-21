@@ -56,6 +56,9 @@ esac
 
 ORT_VERSION=1.30.0
 ORT_SHA256=e6f1670c14406fd9f082bb400ab197a9b0a9646058ca6366e440642e2b54a2ea
+# Fallback: the Microsoft.ML.OnnxRuntime NuGet package ships the same static
+# xcframework (runtimes/ios/native/onnxruntime.xcframework.zip).
+ORT_NUGET_SHA256=30df119bd9164eaa187666d93147448fdd4a9a1a3caf83f1505daf7af2d1c5d2
 CA_BUNDLE_DATE=2026-11-05   # Mozilla data as of 2026-11-05, published by curl.se
 CA_BUNDLE_SHA256=427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-15.1}"  # the ORT pod's minimum
@@ -66,10 +69,26 @@ ort="$work/ort"
 if [ ! -f "$ort/onnxruntime.xcframework/Info.plist" ]; then
     mkdir -p "$ort"
     zip="$work/onnxruntime-c-$ORT_VERSION.zip"
-    curl -fsSL --retry 3 -o "$zip" \
-        "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-$ORT_VERSION.zip"
-    echo "$ORT_SHA256  $zip" | shasum -a 256 -c -
-    unzip -q -o "$zip" -d "$ort"
+    if curl -fsSL --retry 3 -o "$zip" \
+        "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-$ORT_VERSION.zip"; then
+        echo "$ORT_SHA256  $zip" | shasum -a 256 -c -
+        unzip -q -o "$zip" -d "$ort"
+    else
+        echo "pod archive unavailable, falling back to NuGet" >&2
+        nupkg="$work/microsoft.ml.onnxruntime.$ORT_VERSION.nupkg"
+        curl -fsSL --retry 3 -o "$nupkg" \
+            "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$ORT_VERSION/microsoft.ml.onnxruntime.$ORT_VERSION.nupkg"
+        echo "$ORT_NUGET_SHA256  $nupkg" | shasum -a 256 -c -
+        nuget="$work/ort-nuget"
+        rm -rf "$nuget"
+        unzip -q -o "$nupkg" -d "$nuget" \
+            runtimes/ios/native/onnxruntime.xcframework.zip LICENSE 'build/native/include/*'
+        unzip -q -o "$nuget/runtimes/ios/native/onnxruntime.xcframework.zip" -d "$ort"
+        mkdir -p "$ort/Headers"
+        cp "$nuget"/build/native/include/*.h "$ort/Headers/"
+        cp "$nuget/LICENSE" "$ort/LICENSE"
+        rm -rf "$nuget"
+    fi
 fi
 ort_lib="$ort/onnxruntime.xcframework/$slice/onnxruntime.framework/onnxruntime"
 if [ ! -f "$ort_lib" ]; then
