@@ -19,7 +19,7 @@
  *     tokenizer.json in the model cache ($LIBEMBEDDING_CACHE_DIR, else
  *     ~/.cache/libembedding) with the SHA-256 the fixture was generated from;
  *     a missing or different file skips the family. Families libembedding
- *     implements must match exactly; the others (unigram, byte-level BPE) are
+ *     implements (WordPiece, Unigram) must match exactly; the others (byte-level BPE) are
  *     only measured when LEMBED_TOKENIZER_REPORT_ALL=1, because their 17 MB
  *     vocabularies make a Debug run take minutes.
  *
@@ -307,7 +307,7 @@ static void test_pretokenizer(const std::string& dir, const std::vector<CorpusTe
  * implements, and which must therefore match HF id for id. The others are
  * measured and reported so the gap has a number attached. */
 static bool family_supported(const std::string& family) {
-    return family.rfind("wordpiece-", 0) == 0;
+    return family.rfind("wordpiece-", 0) == 0 || family.rfind("unigram-", 0) == 0;
 }
 
 static std::string cache_root() {
