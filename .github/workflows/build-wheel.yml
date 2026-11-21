@@ -22,13 +22,13 @@ jobs:
     name: ${{ inputs.os }}
     runs-on: ${{ inputs.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python }}
 
@@ -410,7 +410,7 @@ jobs:
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
       - name: Upload repaired wheel artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ inputs.os }}
           if-no-files-found: error
