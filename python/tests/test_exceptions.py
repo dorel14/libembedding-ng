@@ -81,6 +81,16 @@ def test_llama_error():
     assert isinstance(err, LembedError)
 
 
+def test_cache_miss_and_gguf_errors_mapped():
+    from libembedding import CacheMissError, GgufError
+    from libembedding._status import _STATUS_MAP
+
+    assert issubclass(CacheMissError, LembedError)
+    assert issubclass(GgufError, LembedError)
+    assert _STATUS_MAP[11] is CacheMissError
+    assert _STATUS_MAP[12] is GgufError
+
+
 def test_exception_hierarchy():
     assert issubclass(InvalidArgumentError, LembedError)
     assert issubclass(OutOfMemoryError, LembedError)

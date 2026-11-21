@@ -68,7 +68,7 @@ class TextEmbedding:
             for llama.cpp backend.
         cache_size: Size of LRU embedding cache (0 = disabled).
         quantization: Override model quantization mode ("none", "static",
-            "dynamic"). If None, uses the model's default.
+            "dynamic", "auto", "fp16"). If None, uses the model's default.
         preferred_quantization: Auto-select best quantization ("auto"),
             or one of "none", "static", "dynamic".
         truncate_dim: Matryoshka truncation. Keep only the first

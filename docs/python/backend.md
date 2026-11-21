@@ -5,7 +5,7 @@ nav_order: 7
 
 # Auto-détection de backend
 
-Le module `backend` fournit l'auto-détection du backend (ONNX ou llama.cpp) basée sur le nom du modèle ou le chemin du fichier.
+Le module `backend` fournit `detect_backend()`, une fonction utilitaire autonome qui indique quel backend (ONNX ou llama.cpp) correspond à un nom de modèle ou à un chemin. Les constructeurs (`TextEmbedding`, `Reranker`, etc.) ne l'appellent pas : le routage réel se fait côté C, selon l'extension du fichier (`.gguf`, insensible à la casse, vers llama.cpp) ou le point d'entrée utilisé ; tout le reste (`.onnx`, identifiant HuggingFace, inconnu) passe par ONNX Runtime.
 
 > `backend=` est une option de constructeur de `Reranker` et de `TextEmbedding` (`"auto"`, `"onnx"`, `"llama"`, défaut `"auto"`). `SparseTextEmbedding` et `ImageEmbedding` n'ont pas ce paramètre : le backend y suit l'extension du modèle. Voir [Routage des modèles](../model_routing.html).
 
@@ -30,13 +30,15 @@ Détecte quel backend utiliser selon le modèle et la préférence utilisateur.
 | `"onnx"` | Backend ONNX |
 | `"llama"` | Backend llama.cpp |
 
-## Logique de détection
+## Logique de `detect_backend()`
+
+Cette logique est propre à la fonction utilitaire ; elle ne décrit pas le routage des constructeurs.
 
 1. Si `backend` explicite → retourne directement
 2. Si fichier `.gguf` → `"llama"`
 3. Si fichier `.onnx` → `"onnx"`
 4. Chemin local → détecte par contenu du répertoire
-5. HuggingFace ID → GGUF si modèle GGUF connu, sinon ONNX
+5. Sinon (identifiant HuggingFace ou nom inconnu) → `"onnx"` ; aucune recherche de « modèle GGUF connu » n'est faite
 
 ## Utilisation
 
