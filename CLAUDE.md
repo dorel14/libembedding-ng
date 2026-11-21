@@ -112,9 +112,11 @@ benchmark 4 backends (colonne Sparse GGUF encore `unavailable`), audit llama.cpp
 
 En cours / ouvert :
 - **P2.6 — CPU dispatch runtime** (baseline/AVX2/AVX-512/NEON/SVE) : XL, phases 0→6.
-  Phase 0 = compléter `rfc-cpu-dispatch.md` (stub). Questions ouvertes : périmètre
-  (kernels ORT ou seulement SIMD maison), priorité AVX-512 sur CPU hybrides, stratégie
-  de wheels, baseline minimale.
+  Phase 0 close (`.kilo/plans/rfc-cpu-dispatch.md`, décisions actées 2026-11-21) : ggml
+  seulement (SIMD maison si > 3 % mesuré), score CPUID ggml + override
+  `LEMBED_GGML_CPU_VARIANT`, une wheel par plateforme avec toutes les variantes, baseline
+  x86-64-v1 / armv7 NEON-VFPv4 / aarch64 ARMv8.0 / macOS M1, ordre Windows → Linux →
+  macOS/ARM. Suivant : phase 1, mesure Windows (créneau machine calme).
 - **Fix chargement `libembedding.dylib` sur macOS** : implémenté, validation sur runner
   `macos-14` et doc `python/README.md` restantes.
 - **ONNX Runtime 1.20.1 → 1.31.0** : planifié (3 workflows, `third_party/onnxruntime/`,
