@@ -128,7 +128,10 @@ lembed_text_embedding_free(embedder);
 - [GGUF sparse embedding convention](https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md)
 - [Runtime sparse GGUF](https://dorel14.github.io/libembedding-ng/gguf_sparse_runtime.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_runtime.md)
 - [Troncature Matryoshka](https://dorel14.github.io/libembedding-ng/matryoshka.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/matryoshka.md)
+- [Routage des modèles](https://dorel14.github.io/libembedding-ng/model_routing.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/model_routing.md)
 - [Plateformes supportées](https://dorel14.github.io/libembedding-ng/platforms.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/platforms.md)
+- [Quantification](https://dorel14.github.io/libembedding-ng/quantization.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/quantization.md)
+- [Dépannage](https://dorel14.github.io/libembedding-ng/troubleshooting.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/troubleshooting.md)
 
 ## Code examples
 

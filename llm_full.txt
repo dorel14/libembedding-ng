@@ -4070,7 +4070,8 @@ Python nor the `tokenizers` package.
 | WordPiece, Chinese vocabulary | bge-*-zh | identical to HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identical to HF, 0/54 |
 | Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identical to HF, 0/54 (precompiled charsmap, WhitespaceSplit + Metaspace, Viterbi, unk fusion, byte fallback); embeddings at cosine 1.000 from the reference. Reranker pairs: not covered yet |
-| Byte-level BPE | CLIP text, ModernBERT | not implemented in the built-in tokenizer: measured, not covered |
+| Byte-level BPE (`Split` + `ByteLevel`, `</w>` suffix) | CLIP text | identical to HF, 0/54; embeddings at cosine 1.000 from the reference (before: min 0.29, mean 0.76). NFC limited to Latin (letters + U+0300-036F diacritics), Unicode 15.0 tables for `\p{L}`/`\p{N}` |
+| Byte-level BPE, others (ModernBERT, GPT-2) | ModernBERT | recognised when the JSON uses the same building blocks, otherwise falls back to the legacy path; not measured |
 
 Normalisation coverage (strip accents + lowercase), checked codepoint by codepoint up
 to U+2FFFF: Latin (Latin-1, Extended-A/B, Extended Additional including Vietnamese),
@@ -4093,8 +4094,8 @@ characters (zero-width space, etc.) are handled as HF does.
 `Sequence` normalizer is supported for `Lowercase`, `StripAccents` and `NFD`/`NFKD`;
 accents are stripped only when both `StripAccents` and a decomposition are present. The
 "lowercase only" and "strip accents only" modes are also checked codepoint by codepoint.
-Byte-level BPE keeps its legacy behaviour (not HF-faithful) until it is rewritten; its
-ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
+A byte-level BPE whose `tokenizer.json` is not fully understood keeps its legacy
+behaviour (not HF-faithful); its ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
 `tokenizer.json` is in the machine's model cache (the family is skipped otherwise).
 
 ## Model lookup by code
@@ -8252,7 +8253,8 @@ ni de Python ni du paquet `tokenizers`.
 | WordPiece, vocabulaire chinois | bge-*-zh | identique à HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identique à HF, 0/54 |
 | Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identique à HF, 0/54 (charsmap précompilé, WhitespaceSplit + Metaspace, Viterbi, fusion des inconnus, byte fallback) ; embeddings à cosinus 1,000 de la référence. Paires du reranker : pas encore couvertes |
-| BPE byte-level | CLIP texte, ModernBERT | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+| BPE byte-level (`Split` + `ByteLevel`, suffixe `</w>`) | CLIP texte | identique à HF, 0/54 ; embeddings à cosinus 1,000 de la référence (avant : min 0,29, moyenne 0,76). NFC limité au latin (lettres + diacritiques U+0300-036F), tables Unicode 15.0 pour `\p{L}`/`\p{N}` |
+| BPE byte-level, autres (ModernBERT, GPT-2) | ModernBERT | reconnu si le JSON utilise les mêmes briques, sinon repli sur l'ancien chemin ; non mesuré |
 
 Couverture de la normalisation (strip accents + minuscules), vérifiée point de code par
 point de code jusqu'à U+2FFFF : Latin (Latin-1, Étendu-A/B, Étendu additionnel dont le
@@ -8277,9 +8279,9 @@ Les options du `BertNormalizer` sont lues indépendamment, comme dans HF : `lowe
 `handle_chinese_chars`. Un normaliseur `Sequence` est pris en charge pour `Lowercase`,
 `StripAccents` et `NFD`/`NFKD` ; les accents ne sont retirés que si `StripAccents` et une
 décomposition sont tous deux présents. Les modes « minuscules seules » et « accents
-seuls » sont aussi vérifiés point de code par point de code. Le BPE byte-level garde
-son comportement historique (non conforme à HF) jusqu'à sa réécriture ; ses ids sont
-figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
+seuls » sont aussi vérifiés point de code par point de code. Un BPE byte-level dont le
+`tokenizer.json` n'est pas entièrement compris garde son comportement historique (non
+conforme à HF) ; ses ids sont figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
 `tokenizer.json` exact est dans le cache du poste (sinon la famille est ignorée).
 
 ## Recherche de modèles par code
@@ -11173,6 +11175,92 @@ NDCG_TABLE_FR
 
 ---
 
+## DOCUMENT (FR): Routage des modèles
+Source: https://github.com/dorel14/libembedding/blob/main/docs/model_routing.md
+Rendu: https://dorel14.github.io/libembedding-ng/model_routing.html
+
+# Routage des modèles
+
+> **English:** [Model routing](en/model_routing.html)
+
+Comment la bibliothèque choisit le backend (ONNX Runtime ou llama.cpp / GGUF) pour un modèle donné, et comment vérifier ce qui tourne réellement.
+
+## Principe
+
+**Le backend suit le format du modèle**, pas un paramètre (`include/libembedding/text_embedding.h`, doc de `lembed_text_embedding_backend_name`) :
+
+- un fichier `.gguf` est servi par le backend GGUF ;
+- un fichier ou répertoire ONNX, un modèle du registre (identifiant HuggingFace) ou tout autre nom passe par ONNX Runtime.
+
+Il n'y a **pas de paramètre `backend=`** sur `TextEmbedding` ni sur `SparseTextEmbedding` en Python. Deux exceptions de surface, décrites plus bas : le reranker (`backend=`) et la fonction utilitaire `detect_backend()`.
+
+## Règles par point d'entrée
+
+### Texte dense
+
+| Entrée | Règle |
+|---|---|
+| Python `TextEmbedding(nom)` | Nom finissant par `.gguf` (casse ignorée) : llama.cpp. Soit un fichier local existant, soit `<repo>/<fichier>.gguf` (téléchargé). Sinon : chemin local (existant, ou finissant par `.onnx` / `.json`) ou modèle du registre : ONNX Runtime. Un nom inconnu lève `ModelNotFoundError` (`python/src/libembedding/text_embedding.py`, `models.py`). |
+| C `lembed_text_embedding_create()` | Modèle du registre (énumération) : ONNX Runtime. |
+| C `lembed_text_embedding_create_from_path()` | Chemin finissant par `.gguf` (en minuscules exactement) : llama.cpp, via `lembed_text_embedding_create_from_gguf_path()`. Sinon répertoire ONNX contenant `model.onnx` et `tokenizer.json` (`config.json` facultatif) (`detail/text_embedding_impl.hpp`). |
+| C `..._create_from_gguf_path()` / `..._create_from_gguf_model()` | llama.cpp, explicitement. |
+
+### Sparse
+
+`lembed_sparse_text_embedding_create_from_path()` envoie un chemin finissant par `.gguf` (casse ignorée) vers le **runtime ggml maison**, pas vers llama.cpp, dont le chargeur ne sait pas lire ces fichiers (`sparse_text_embedding.h`). Tout le reste passe par ONNX Runtime. Voir [Runtime sparse GGUF](gguf_sparse_runtime.html).
+
+### Reranker
+
+Le reranker est le seul à exposer un sélecteur : champ `backend` de `lembed_reranker_options_t` (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`, défaut `AUTO` dans `lembed_reranker_options_default()`) et argument `backend="auto"` de `Reranker` en Python (`"auto"`, `"onnx"`, `"llama"`).
+
+- `LLAMACPP` : toujours GGUF.
+- `ONNX` : toujours ONNX Runtime.
+- `AUTO` : ONNX Runtime d'abord ; **seulement si les fichiers ONNX du modèle sont introuvables** (`LEMBED_ERROR_MODEL_NOT_FOUND`), le reranker bascule sur l'équivalent GGUF. Un fournisseur indisponible (`LEMBED_ERROR_UNSUPPORTED`) ou un modèle ONNX cassé reste une erreur : il ne provoque pas de bascule (`detail/reranker_impl.hpp`, `lembed_reranker_create`).
+- `lembed_reranker_create_from_path()` envoie un chemin finissant par `.gguf` (casse ignorée) vers GGUF, et accepte aussi un répertoire ONNX (`reranker.h`).
+
+Le champ `backend` existe aussi dans `lembed_text_options_t` ; `lembed_text_embedding_create()` n'y vérifie que la validité de la valeur (`detail/text_embedding_onnx_impl.hpp`). Pour le texte dense, choisir le format par le point d'entrée comme ci-dessus.
+
+### `detect_backend()` (Python)
+
+`libembedding.detect_backend(model_name, backend="auto")` (`python/src/libembedding/backend.py`) est une fonction utilitaire autonome : elle renvoie `"onnx"` ou `"llama"` à partir de l'extension (`.gguf`, `.onnx`), du contenu d'un répertoire local, ou `"onnx"` par défaut. Les constructeurs Python ne l'appellent pas ; ce n'est donc pas ce qui décide du backend d'un `TextEmbedding`. Détails : [Auto-détection de backend](python/backend.html).
+
+## Fournisseur d'exécution et backend
+
+Le fournisseur (`provider`) est indépendant du backend : `"llama"` / `"llamacpp"` (valeur 5) n'est **pas** un fournisseur ONNX Runtime. Le passer avec un modèle ONNX échoue avec `LEMBED_ERROR_UNSUPPORTED` et le message `it is not an ONNX Runtime execution provider; load a .gguf model to use the llama.cpp backend` (`detail/onnx_session_impl.hpp`). Voir [Dépannage](troubleshooting.html).
+
+## Vérifier le backend utilisé
+
+### C
+
+| Fonction | Valeurs |
+|---|---|
+| `lembed_text_embedding_backend_name(ctx)` | `"onnxruntime"` ou `"llama.cpp"` |
+| `lembed_sparse_text_embedding_backend_name(ctx)` | `"onnxruntime"` ou `"ggml-sparse"` |
+| `lembed_reranker_backend_name(ctx)` | `"onnxruntime"` ou `"llama.cpp"` |
+| `lembed_image_embedding_backend_name(ctx)` | toujours `"onnxruntime"` |
+| `lembed_*_effective_provider(ctx)` | ONNX Runtime : `"CPU"`, `"CUDA"`, `"CoreML"`, `"DirectML"` ou `"TensorRT"` ; llama.cpp : `"CPU"`, ou `"GPU"` si `llama_n_gpu_layers != 0` et qu'un périphérique GPU existe dans ggml (les builds livrées n'en ont pas) ; `ggml-sparse` : toujours `"CPU"` |
+
+Ces fonctions renvoient une chaîne statique à ne pas libérer, ou `NULL` si `ctx` est `NULL`. Un fournisseur autre que CPU qui ne peut pas être attaché fait échouer la création : `effective_provider` ne rapporte donc jamais un fournisseur inutilisé.
+
+### Python
+
+```python
+from libembedding import TextEmbedding
+
+emb = TextEmbedding("BAAI/bge-small-en-v1.5")
+print(emb.backend)   # "onnxruntime" ou "llama.cpp"
+print(emb.provider)  # "cpu", "cuda"... (minuscules)
+info = emb.info()    # descripteur : inclut backend et effective_provider
+```
+
+`TextEmbedding`, `SparseTextEmbedding`, `ImageEmbedding` et `Reranker` exposent les propriétés `backend` et `provider`. Pour llama.cpp, `provider` vaut `"cpu"`, ou `"gpu"` si des couches sont déchargées sur un périphérique GPU ggml (`text_embedding.py`).
+
+### Journal
+
+Avec `LIBEMBEDDING_VERBOSE=1` (lu une fois au démarrage du processus), la bibliothèque journalise sur stderr, notamment la bascule ONNX vers GGUF du reranker en mode `AUTO` (`reranker.h`, `detail/log.hpp`).
+
+---
+
 ## DOCUMENT (FR): Plateformes supportées
 Source: https://github.com/dorel14/libembedding/blob/main/docs/platforms.md
 Rendu: https://dorel14.github.io/libembedding-ng/platforms.html
@@ -11524,6 +11612,248 @@ Le xcframework iOS porte les siennes dans chaque `libembedding.framework`
 - [Démarrage](getting_started.html) — installation
 - [C API — Téléchargement](c_api/downloader.html) — certificats, limite mobile
 - [Modèles](models.html) — registre
+
+---
+
+## DOCUMENT (FR): Quantification
+Source: https://github.com/dorel14/libembedding/blob/main/docs/quantization.md
+Rendu: https://dorel14.github.io/libembedding-ng/quantization.html
+
+# Quantification
+
+> **English:** [Quantization](en/quantization.html)
+
+Cette page décrit les modes de quantification que la bibliothèque connaît, la façon d'en choisir un, ce que fait le mode `auto`, et les types de tenseurs acceptés par le runtime sparse GGUF.
+
+**Règle du projet : ne jamais supposer qu'une quantification est plus rapide. Mesurer** (voir [Mesurer](#mesurer)).
+
+## Modes disponibles
+
+Énumération C `lembed_quantization_t` (`include/libembedding/types.h`) :
+
+| Constante C | Nom Python | Valeur | Sens |
+|---|---|---|---|
+| `LEMBED_QUANTIZATION_NONE` | `"none"` | 0 | Poids FP32 |
+| `LEMBED_QUANTIZATION_STATIC` | `"static"` | 1 | INT8 statique |
+| `LEMBED_QUANTIZATION_DYNAMIC` | `"dynamic"` | 2 | INT8 dynamique |
+| `LEMBED_QUANTIZATION_AUTO` | `"auto"` | 3 | Demande de sélection automatique (jamais un état : voir plus bas) |
+| `LEMBED_QUANTIZATION_FP16` | `"fp16"` | 4 | Poids float16 |
+
+`FP16` n'est pas une quantification INT8 : il divise par deux le fichier et la mémoire résidente, mais sur un CPU sans arithmétique FP16 native il reconvertit en FP32 pour calculer. Il échange donc du débit contre de la taille (commentaire de `types.h`).
+
+Les valeurs numériques font partie de l'ABI publique ; `FP16` a été ajouté en dernier pour ne pas les décaler.
+
+## Une variante est un autre fichier
+
+Dans le registre, chaque variante quantifiée est **sa propre entrée** avec son propre `model_file`, par exemple `onnx/model_quantized.onnx` à côté du fichier FP32 (`include/libembedding/model_registry.h`). Choisir un mode de quantification revient donc à choisir d'autres poids, pas une autre configuration de session.
+
+- Le champ `quantization` de chaque entrée du registre dit quel mode elle implémente. En Python, `list_text_models()` renvoie des `ModelInfo` dont l'attribut `quantization` vaut `"none"`, `"static"`, `"dynamic"`, `"auto"` ou `"fp16"` (`python/src/libembedding/models.py`).
+- Tous les modèles n'ont pas toutes les variantes. `lembed_find_text_model_variant(model_name, quantization)` renvoie l'index de l'entrée, ou `-1` si le modèle n'a pas ce mode ; l'erreur thread-local nomme alors le mode demandé et ceux que le modèle possède (`model_registry.h`).
+- La correspondance se fait sur le nom canonique du registre (`model_name`), pas sur un identifiant HuggingFace arbitraire.
+
+## Choisir un mode
+
+### Python
+
+```python
+from libembedding import TextEmbedding
+
+# Mode explicite : charge la variante correspondante du registre
+emb = TextEmbedding("BAAI/bge-small-en-v1.5", quantization="dynamic")
+
+# Sélection automatique (mesure, puis décision mise en cache)
+emb = TextEmbedding("BAAI/bge-small-en-v1.5", preferred_quantization="auto")
+```
+
+(`python/src/libembedding/text_embedding.py`.)
+
+- `quantization=` : `None` (défaut) garde le mode par défaut du modèle. Les valeurs acceptées sont les clés de `_QUANTIZATION_ENUM` : `"none"`, `"static"`, `"dynamic"`, `"auto"`, `"fp16"` (insensible à la casse). Toute autre valeur lève `ValueError`. Note : la docstring de `TextEmbedding` ne cite que `"none"`, `"static"`, `"dynamic"`.
+- `preferred_quantization=` : `None` par défaut ; accepte les mêmes noms, `"auto"` déclenche la sélection automatique.
+- `TextEmbedding` (et `TextEmbeddingPool`, `Reranker`) acceptent `quantization=`.
+- Si le modèle n'a pas de variante pour le mode demandé, la création échoue avec `LEMBED_ERROR_MODEL_NOT_FOUND`, soit `ModelNotFoundError` en Python.
+
+### C
+
+Le champ `quantization` de `lembed_text_options_v2_t` (type `lembed_quantization_t`) est lu par `lembed_text_embedding_create_v2()` (`include/libembedding/detail/text_embedding_onnx_impl.hpp`). Pour un mode explicite différent de celui de l'entrée demandée, la fonction résout la variante avant de créer le modèle ; sans variante, elle renvoie `LEMBED_ERROR_MODEL_NOT_FOUND`.
+
+## Que fait `auto`
+
+`lembed_quantization_auto_select()` (`include/libembedding/autotuner.h`) :
+
+1. **Candidats** : seules les variantes réellement présentes dans le registre pour ce modèle sont considérées (`NONE`, `STATIC`, `DYNAMIC`, `FP16`, au plus 4). FP32 est la référence (`detail/quantization_auto_impl.hpp`, `quant_auto_collect_variants`).
+2. **Un seul jeu de poids** : si la famille n'a qu'une entrée dans le registre, rien n'est mesuré et le modèle demandé est chargé tel quel.
+3. **Mesure** : première fois pour un triplet (modèle, machine, version de la bibliothèque), les variantes sont benchmarkées ; la décision est mise en cache, les appels suivants relisent le cache. Les variantes dont les poids sont absents sont **ignorées, jamais téléchargées**.
+4. **Paramètres** : `num_docs` est borné à [16, 256] (0 = 16 par défaut) ; `dry_run = 1` mesure sans écrire le cache.
+5. **Règle de décision** (`quant_auto_pick`) :
+   - FP32 reste choisi sauf si une variante est au moins **1,05x** plus rapide (`kQuantMinGain`) ;
+   - si INT8 dynamique a passé ce seuil, il reste le choix par défaut sauf si une autre variante est au moins **1,15x** plus rapide que lui (`kQuantDynamicPreference`) ;
+   - sans mesure de référence FP32 exploitable, FP32 est conservé.
+6. **Mémoire** : `file_mb` est la taille des poids sur disque (fichier annexe `_data` compris), pas la mémoire résidente, car le pic RSS est un maximum par processus et ne peut pas être attribué à une variante mesurée après une autre.
+7. **Échec** : si la sélection échoue à la création du modèle, l'entrée demandée est conservée ; `auto` est une optimisation, pas une raison de refuser le chargement.
+
+Le résultat (`lembed_quantization_choice_t`, `types.h`) contient le gagnant, l'index d'entrée à charger, le tableau `measured[4]` (débit docs/s, latence ms, `file_mb`), `from_cache` et une phrase `reason`. En Python, le mode retenu est mémorisé sur l'objet (`self._quantization`) et la raison dans `self._quantization_reason`.
+
+Pour le fichier de cache et le format du cache d'autotune, voir [C API — Cache Autotune](c_api/autotune_cache.html).
+
+## Runtime sparse GGUF : types de tenseurs
+
+Le runtime ggml maison pour le sparse GGUF (voir [Runtime sparse GGUF](gguf_sparse_runtime.html)) valide chaque tenseur requis au chargement (`include/libembedding/detail/gguf/gguf_weights.hpp`, `validate_tensors`) :
+
+| Règle | Détail |
+|---|---|
+| Types acceptés | `F32`, `F16`, `Q8_0` uniquement. Tout autre type est refusé par son nom : `tensor '<nom>' has type <type>; this runtime supports f32, f16 and q8_0`. |
+| Vecteurs (1-D) | Biais et poids de LayerNorm doivent être `F32` : `tensor '<nom>' is a vector of type <type>; vectors must be f32`. Les convertisseurs gardent les tenseurs 1-D en F32. |
+| `token_type_embd.weight` | Doit être `F32` (`token_type_embd.weight is not F32`). |
+| Forme | Vérifiée contre ce que le graphe attend ; sinon `tensor '<nom>' has shape [...], expected [...]`. Un tenseur absent donne `missing tensor '<nom>'`. |
+
+Ces refus sont remontés par `LEMBED_ERROR_UNSUPPORTED` avec le détail dans `lembed_last_error()` (`detail/sparse_text_embedding_gguf_impl.hpp`). Voir [Dépannage](troubleshooting.html).
+
+Cette liste concerne le **sparse GGUF**. Elle ne dit rien des quantifications acceptées par le backend dense llama.cpp, qui lit les GGUF via llama.cpp lui-même.
+
+## Mesurer
+
+Une quantification plus petite n'est pas forcément plus rapide : cela dépend du CPU, du modèle, du batch et de la longueur des séquences. Avant de choisir :
+
+- Mesurer vos propres variantes avec la même méthode (un sous-process par configuration, warmup séparé du run chronométré, médiane sur au moins 10 tours, écart inférieur à 5 % = bruit) : voir [Méthodologie benchmark](benchmark_methodology.html), qui impose aussi les métadonnées (machine, modèle, corpus, date).
+- Laisser `auto` mesurer pour vous (ci-dessus), ou utiliser les outils de [Performance](performance_tuning.html).
+- Ne pas réutiliser un chiffre mesuré sur une autre machine : le cache `auto` est d'ailleurs indexé par empreinte matérielle.
+
+---
+
+## DOCUMENT (FR): Dépannage
+Source: https://github.com/dorel14/libembedding/blob/main/docs/troubleshooting.md
+Rendu: https://dorel14.github.io/libembedding-ng/troubleshooting.html
+
+# Dépannage
+
+> **English:** [Troubleshooting](en/troubleshooting.html)
+
+Symptômes fréquents, cause, correction. Chaque entrée est tirée du code ; quand le code ne permet pas d'en dire plus, la page s'arrête là.
+
+## Lire l'erreur
+
+### C
+
+Toute fonction qui échoue renvoie un `lembed_status_t` (`include/libembedding/error.h`). Deux fonctions donnent le détail :
+
+- `lembed_status_message(status)` : libellé fixe du code (par exemple `"Unsupported operation"`).
+- `lembed_last_error()` : détail **thread-local** posé par le dernier appel en échec (tampon de 1024 octets). À lire dans le même thread, juste après l'échec.
+
+```c
+lembed_status_t s = lembed_text_embedding_create(&opts, &ctx);
+if (s != LEMBED_OK) {
+    fprintf(stderr, "%s: %s\n", lembed_status_message(s), lembed_last_error());
+}
+```
+
+Codes : `LEMBED_ERROR_INVALID_ARGUMENT`, `OUT_OF_MEMORY`, `ONNX_RUNTIME`, `TOKENIZER`, `DOWNLOAD`, `IO`, `MODEL_NOT_FOUND`, `UNSUPPORTED`, `BATCH_SIZE` (réservé, jamais renvoyé), `LLAMA`, `CACHE_MISS`, `GGUF`.
+
+### Python
+
+`check_status()` lève une sous-classe de `LembedError` avec `status_code`, `message` et `detail` (`python/src/libembedding/_status.py`, `exceptions.py`). Le message est `"<message>: <detail>"`.
+
+| Code C | Exception Python |
+|---|---|
+| `INVALID_ARGUMENT` | `InvalidArgumentError` |
+| `OUT_OF_MEMORY` | `OutOfMemoryError` |
+| `ONNX_RUNTIME` | `OnnxRuntimeError` |
+| `TOKENIZER` | `TokenizerError` |
+| `DOWNLOAD` | `DownloadError` |
+| `IO` | `IOError` (celle du package, pas la builtin) |
+| `MODEL_NOT_FOUND` | `ModelNotFoundError` |
+| `UNSUPPORTED` | `UnsupportedError` |
+| `BATCH_SIZE` | `BatchSizeError` |
+| `LLAMA` | `LlamaError` |
+| `CACHE_MISS`, `GGUF` | `LembedError` (pas de sous-classe dédiée dans `_STATUS_MAP`) ; lire `status_code` |
+
+```python
+from libembedding import LembedError
+try:
+    ...
+except LembedError as e:
+    print(e.status_code, e.message, e.detail)
+```
+
+Pour voir ce que la bibliothèque journalise, définir `LIBEMBEDDING_VERBOSE=1` (valeurs vraies : `1`, `true`, `yes`, `on`) **avant** de lancer le programme : la variable est lue une seule fois par processus et les lignes vont sur stderr (`detail/log.hpp`).
+
+## Windows
+
+### `ctest` affiche « Timeout », ou le programme meurt au démarrage avec `0xC0000135`
+
+- **Cause** : `STATUS_DLL_NOT_FOUND`. Une DLL d'exécution manque à côté de l'exécutable ; `ctest` rapporte le process mort comme un timeout.
+- **Correction** : lancer l'exécutable directement et lire son code de sortie (`$LASTEXITCODE` sous PowerShell) pour confirmer. Les DLL runtime (ONNX Runtime, libcurl, libembedding) sont copiées à côté des exécutables par `copy_runtime_dlls()` ; vérifier qu'elles y sont (`AGENTS.md` §3.5).
+
+### `ONNX Runtime API version N is not supported by the loaded onnxruntime library (version X)`
+
+- **Cause** : la bibliothèque a été compilée contre des en-têtes ONNX Runtime plus récents que le `onnxruntime.dll` effectivement chargé. Le commentaire du code cite le cas d'une copie de `System32` qui masque la nôtre (`detail/onnx_session_impl.hpp`, `ort_api()`).
+- **Correction** : faire charger le `onnxruntime.dll` fourni avec la bibliothèque (celui à côté de `libembedding.dll`) plutôt que celui du système. Le message indique les deux versions (`N` = version attendue, `X` = version chargée).
+- En Python, `_binding.py` précharge les DLL dépendantes (dont `onnxruntime.dll`) depuis les répertoires de la bibliothèque et enregistre ces répertoires pour la résolution des DLL. Si l'erreur apparaît quand même, vérifier quelle bibliothèque est chargée (`LIBEMBEDDING_LIBRARY`, ci-dessous).
+
+### Le CMake s'arrête avec `libcurl runtime DLL not found`
+
+- **Cause** : sous Windows, `libembedding.dll` est liée à libcurl et la DLL (`libcurl-x64.dll`) n'est jamais versionnée dans le dépôt.
+- **Correction** (message de `CMakeLists.txt`) : une des options suivantes.
+  - `pwsh -File scripts/fetch_windows_libcurl.ps1` (installe le runtime dans `third_party/curl/bin/`) ;
+  - `-DCURL_LIBRARY=<vcpkg>\installed\x64-windows\lib\libcurl.lib` ;
+  - `-DCURL_RUNTIME_DLL=<chemin>\libcurl-x64.dll` ;
+  - `-DLIBEMBEDDING_NO_DOWNLOAD=ON` (aucun code de téléchargement) ;
+  - `-DLIBEMBEDDING_CURL_STATIC=ON` (runtime géré par l'appelant).
+
+## Python : quelle bibliothèque native est chargée ?
+
+- `LIBEMBEDDING_LIBRARY=<chemin>` force le fichier à charger ; si le chemin n'existe pas, `OSError: LIBEMBEDDING_LIBRARY points to a missing file: ...` (`_binding.py`).
+- Dans un dépôt source qui contient plusieurs builds, un avertissement `Loading <lib>, which is older than the build output <lib2>` signale qu'une copie plus récente existe ; définir `LIBEMBEDDING_LIBRARY` ou supprimer la copie périmée.
+- Sous macOS, `_binding.py` ajoute les répertoires de la bibliothèque à `DYLD_LIBRARY_PATH` avant le `dlopen` (`LD_LIBRARY_PATH` sous Linux). Si le chargement de `libembedding.dylib` échoue, commencer par définir `LIBEMBEDDING_LIBRARY` vers le fichier voulu pour isoler le problème.
+
+## Modèles et réseau
+
+### `Model file not in cache (offline mode): <chemin>`
+
+- **Cause** : `offline=True` (Python) / `offline = 1` (C) interdit tout téléchargement et le fichier n'est pas dans le cache. Le statut est `LEMBED_ERROR_DOWNLOAD` (`DownloadError` en Python) (`detail/downloader_impl.hpp`, `downloader.h`).
+- **Correction** : charger le modèle une fois avec le réseau, ou pointer vers le bon cache. Ordre de résolution du répertoire de cache : argument `cache_dir` explicite, puis `LIBEMBEDDING_CACHE_DIR`, puis `FASTEMBED_CACHE_DIR`, puis `~/.cache/libembedding` (`detail/downloader_impl.hpp`, `get_cache_dir`). Une build avec `-DLIBEMBEDDING_NO_DOWNLOAD=ON` ne sait lire que le cache existant.
+- `LEMBED_ERROR_CACHE_MISS` n'a rien à voir avec ce cas : il concerne le **cache d'autotune** (`autotune_cache.h`).
+
+### `LEMBED_ERROR_UNSUPPORTED` et un message sur la licence
+
+- **Cause** : certains modèles du registre sont sous une licence non compatible MIT (`jinaai/jina-reranker-v2-base-multilingual`, `onnx-community/embeddinggemma-300m-ONNX`) ; leur chargement est refusé par défaut (`detail/download_manager.hpp`).
+- **Correction** : le message l'indique. Définir `LIBEMBEDDING_ALLOW_RESTRICTED_LICENSES=1` après avoir lu la licence, ou passer un chemin local de modèle.
+
+### `ModelNotFoundError` : `Unknown model: <nom>` (Python)
+
+- **Cause** : le nom n'est ni un chemin local, ni un fichier `.gguf`, ni un modèle du registre (`text_embedding.py`, branche ONNX). Côté Python, un identifiant inconnu est rejeté avant tout chargement.
+- **Correction** : vérifier le nom avec `list_text_models()` ; voir [Routage des modèles](model_routing.html).
+
+## Fournisseur d'exécution (GPU, etc.)
+
+### `Execution provider X was requested but is not available: ...` (`LEMBED_ERROR_UNSUPPORTED`)
+
+- **Cause** : un fournisseur autre que CPU a été demandé alors que cette build ne peut pas l'attacher (`detail/onnx_session_impl.hpp`, `provider_never_available`) :
+  - CUDA : build sans `USE_CUDA` ;
+  - CoreML : uniquement sur plateformes Apple ;
+  - DirectML : uniquement Windows avec `USE_DML` ;
+  - TensorRT : build sans `USE_TENSORRT` ;
+  - `llama` / `llamacpp` (valeur 5) : ce n'est pas un fournisseur ONNX Runtime ; pour le backend llama.cpp, charger un fichier `.gguf` ;
+  - toute autre valeur : `unknown lembed_execution_provider_t value`.
+- **Correction** : utiliser `LEMBED_PROVIDER_CPU` (`provider="cpu"`), comme le dit le message. La vérification se fait avant toute lecture de fichier, sans exception.
+- Un fournisseur compilé mais qui échoue à s'attacher à l'exécution lève une erreur au chargement (`apply_provider_config()`). Pour savoir ce qui tourne réellement, voir [Routage des modèles](model_routing.html).
+
+## GGUF refusé au chargement
+
+Le sparse GGUF passe par le runtime ggml maison, qui refuse un fichier avec une raison précise (`LEMBED_ERROR_UNSUPPORTED`, détail dans `lembed_last_error()` ; `UnsupportedError` en Python). Messages (`detail/gguf/gguf_weights.hpp`) :
+
+| Message | Cause | Correction |
+|---|---|---|
+| `missing tensor '<nom>'` | Un tenseur requis est absent du fichier (voir la [convention GGUF sparse](gguf_sparse_convention.html)) | Utiliser un GGUF qui suit la convention |
+| `tensor '<nom>' has type <t>; this runtime supports f32, f16 and q8_0` | Type de tenseur non testé, refusé par son nom | Reconvertir en F32, F16 ou Q8_0 |
+| `tensor '<nom>' is a vector of type <t>; vectors must be f32` | Biais / LayerNorm quantifiés | Garder les tenseurs 1-D en F32 |
+| `tensor '<nom>' has shape [...], expected [...]` | Forme incompatible avec le graphe | Fichier incorrect pour ce modèle |
+| `token_type_embd.weight is not F32` | Table de types de tokens quantifiée | La garder en F32 |
+
+Détails sur les types : [Quantification](quantization.html). Une exception levée pendant le chargement est rapportée en `LEMBED_ERROR_GGUF`.
+
+Autre cas : `lembed_sparse_text_embedding_set_max_batch_tokens()` appelée sur un contexte ONNX renvoie `LEMBED_ERROR_UNSUPPORTED` avec `max_batch_tokens applies to the GGUF runtime only` (`detail/sparse_text_embedding_gguf_impl.hpp`).
+
+En Python, un nom de modèle se terminant par `.gguf` qui n'est pas un fichier existant et ne contient pas de `/` lève `FileNotFoundError: GGUF model not found: '<nom>'` ; avec un `/`, il est interprété comme `<repo>/<fichier>` à télécharger (`text_embedding.py`).
 
 ---
 
