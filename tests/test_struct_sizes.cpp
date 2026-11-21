@@ -117,6 +117,34 @@ int main(void) {
         ASSERT_SIZE(lembed_quantization_measurement_t, 32);
         /* 4 ints + reason[192] = 208, + 4 x 32 */
         ASSERT_SIZE(lembed_quantization_choice_t, 336);
+
+        /* Field offsets that move with the 4-byte pointer / size_t. A size can
+         * match by luck while a field shifts, which corrupts cffi reads. */
+        ASSERT(offsetof(lembed_model_desc_t, dimension) == 4, "desc.dimension offset");
+        ASSERT(offsetof(lembed_model_desc_t, device_id) == 28, "desc.device_id offset");
+        ASSERT(offsetof(lembed_model_desc_v2_t, cache_size) == 36,
+               "desc_v2.cache_size offset");
+        ASSERT(offsetof(lembed_embeddings_t, num_embeddings) == 4,
+               "embeddings.num_embeddings offset");
+        ASSERT(offsetof(lembed_embeddings_t, dim) == 8, "embeddings.dim offset");
+        ASSERT(offsetof(lembed_sparse_embedding_t, values) == 4,
+               "sparse.values offset");
+        ASSERT(offsetof(lembed_sparse_embedding_t, length) == 8, "sparse.length offset");
+        ASSERT(offsetof(lembed_cache_config_t, current_size) == 4,
+               "cache_config.current_size offset");
+        ASSERT(offsetof(lembed_cache_config_t, ttl_seconds) == 8,
+               "cache_config.ttl_seconds offset");
+        ASSERT(offsetof(lembed_text_options_t, cache_dir) == 12,
+               "text_options.cache_dir offset");
+        ASSERT(offsetof(lembed_text_options_t, max_length) == 16,
+               "text_options.max_length offset");
+        ASSERT(offsetof(lembed_text_options_t, batch_strategy) == 72,
+               "text_options.batch_strategy offset");
+        ASSERT(offsetof(lembed_text_options_v2_t, quantization) == 76,
+               "text_options_v2.quantization offset");
+        ASSERT(offsetof(lembed_stats_v2_t, cache_hits) == 24, "stats_v2.cache_hits offset");
+        ASSERT(offsetof(lembed_quantization_measurement_t, docs_per_sec) == 8,
+               "measurement.docs_per_sec offset");
     } else {
         printf("32-bit ABI with 4-byte double alignment (i386): sizes not frozen\n");
     }
