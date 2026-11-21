@@ -544,7 +544,19 @@ endif()
 # Helper: copy runtime DLLs next to executables on Windows
 # =========================================================================
 if(WIN32)
+    # The DLLs sit next to the import library that was actually linked
+    # (ONNXRUNTIME_ROOT, ONNXRuntime_LIBRARY or third_party/). Without a copy,
+    # Windows resolves onnxruntime.dll from System32, an old WinML build
+    # (1.5.x on Windows Server 2022) that cannot serve our API version.
     set(_LEMBED_ONNX_DIR "${PROJECT_SOURCE_DIR}/third_party/onnxruntime/lib")
+    if(ONNXRuntime_LIBRARY)
+        file(TO_CMAKE_PATH "${ONNXRuntime_LIBRARY}" _lembed_ort_lib)
+        get_filename_component(_lembed_ort_libdir "${_lembed_ort_lib}" DIRECTORY)
+        if(EXISTS "${_lembed_ort_libdir}/onnxruntime.dll")
+            set(_LEMBED_ONNX_DIR "${_lembed_ort_libdir}")
+        endif()
+    endif()
+    message(STATUS "libembedding: ONNX Runtime DLLs from ${_LEMBED_ONNX_DIR}")
     function(copy_runtime_dlls target_name)
         set(_dlls "")
 
