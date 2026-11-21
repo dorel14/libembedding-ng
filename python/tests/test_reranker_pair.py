@@ -89,3 +89,39 @@ def test_reranker_matches_pair_reference(repo, onnx_name, quant):
     assert corr_refs < 0.99 or np.abs(ref - bad).max() > 0.05, "test cannot discriminate"
     assert corr >= 0.999, f"Pearson {corr:.4f} vs HF pair reference"
     assert list(np.argsort(-ours)) == list(np.argsort(-ref)), "ranking differs"
+
+
+@pytest.mark.network
+def test_gguf_reranker_matches_onnx_pair_reference():
+    """GGUF (llama.cpp) reranker must encode a real pair, like the ONNX/HF path.
+
+    Old behaviour: the text ``query [SEP] doc`` was classified through the LM
+    logits (scores ~0, Pearson ~0.2 vs ONNX on bge-reranker-base).
+    """
+    from libembedding import Reranker
+
+    onnx_dir = CACHE / "models--BAAI-bge-reranker-base"
+    gguf = (
+        CACHE
+        / "models--sinjab-bge-reranker-base-Q4_K_M-GGUF"
+        / "bge-reranker-base-Q4_K_M.gguf"
+    )
+    if not (onnx_dir / "onnx" / "model.onnx").exists() or not gguf.exists():
+        pytest.skip("bge-reranker-base ONNX + GGUF not cached")
+    try:
+        reranker = Reranker(str(gguf), offline=True, show_download_progress=False)
+    except Exception as exc:  # noqa: BLE001 - any load failure means "not available"
+        pytest.skip(f"GGUF reranker unavailable: {exc}")
+    try:
+        ours = np.zeros(len(DOCS))
+        for r in reranker.rerank(QUERY, DOCS):
+            ours[r.index] = r.score
+    finally:
+        reranker.close()
+
+    ref = _reference_scores(onnx_dir, "model.onnx")
+    corr = float(np.corrcoef(ours, ref)[0, 1])
+    print(f"\nGGUF~ONNX pair Pearson={corr:.4f}")
+    assert corr >= 0.95, f"Pearson {corr:.4f} vs ONNX pair reference"
+    # Relevant docs (0, 2) must outrank the unrelated ones (1, 3, 5, 7).
+    assert min(ours[[0, 2]]) > max(ours[[1, 3, 5, 7]]), "relevant docs not ranked first"

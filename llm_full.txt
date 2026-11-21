@@ -2052,7 +2052,7 @@ print(embeddings.shape)  # (2, 512)
 
 Scores and sorts documents by relevance to a query (cross-encoder).
 
-On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared.
+On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared. On GGUF (llama.cpp) the pair is built from the vocabulary's special tokens (BERT: `[CLS] q [SEP] d [SEP]`; XLM-R: `<s> q </s></s> d </s>`), same truncation.
 
 #### Constructor
 
@@ -2964,8 +2964,8 @@ Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999
 Reading: **every measured WordPiece model matches the reference** on the whole
 multilingual corpus (lowest min cosine 0.9999999999999984). Unigram (XLM-R) and
 byte-level BPE (CLIP, ModernBERT) are broken even in English: they need their own
-tokenizer (T38). The reranker also builds its pair as the text `query [SEP] document`,
-where HF encodes a real pair.
+tokenizer (T38). The reranker (ONNX and GGUF) now encodes a real pair, like HF
+(GGUF builds it from the vocabulary's special tokens).
 
 Not measured (not in the local cache or over 560 MB; the family comes from the
 architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,
@@ -4070,7 +4070,8 @@ Python nor the `tokenizers` package.
 | WordPiece, Chinese vocabulary | bge-*-zh | identical to HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identical to HF, 0/54 |
 | Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identical to HF, 0/54 (precompiled charsmap, WhitespaceSplit + Metaspace, Viterbi, unk fusion, byte fallback); embeddings at cosine 1.000 from the reference. Reranker pairs: not covered yet |
-| Byte-level BPE | CLIP text, ModernBERT | not implemented in the built-in tokenizer: measured, not covered |
+| Byte-level BPE (`Split` + `ByteLevel`, `</w>` suffix) | CLIP text | identical to HF, 0/54; embeddings at cosine 1.000 from the reference (before: min 0.29, mean 0.76). NFC limited to Latin (letters + U+0300-036F diacritics), Unicode 15.0 tables for `\p{L}`/`\p{N}` |
+| Byte-level BPE, others (ModernBERT, GPT-2) | ModernBERT | recognised when the JSON uses the same building blocks, otherwise falls back to the legacy path; not measured |
 
 Normalisation coverage (strip accents + lowercase), checked codepoint by codepoint up
 to U+2FFFF: Latin (Latin-1, Extended-A/B, Extended Additional including Vietnamese),
@@ -4093,8 +4094,8 @@ characters (zero-width space, etc.) are handled as HF does.
 `Sequence` normalizer is supported for `Lowercase`, `StripAccents` and `NFD`/`NFKD`;
 accents are stripped only when both `StripAccents` and a decomposition are present. The
 "lowercase only" and "strip accents only" modes are also checked codepoint by codepoint.
-Byte-level BPE keeps its legacy behaviour (not HF-faithful) until it is rewritten; its
-ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
+A byte-level BPE whose `tokenizer.json` is not fully understood keeps its legacy
+behaviour (not HF-faithful); its ids are pinned by `test_tokenizer`. The per-family id tests only run when the exact
 `tokenizer.json` is in the machine's model cache (the family is skipped otherwise).
 
 ## Model lookup by code
@@ -6231,7 +6232,7 @@ print(embeddings.shape)  # (2, 512)
 
 Score et trie des documents par pertinence par rapport à une requête (cross-encoder).
 
-Sur ONNX, requête et document sont encodés comme une vraie paire de séquences, selon le `post_processor` du `tokenizer.json` (gabarit de paire, tokens spéciaux, `token_type_ids`), avec troncature `longest_first` ; à défaut, style BERT `[CLS] q [SEP] d [SEP]`.
+Sur ONNX, requête et document sont encodés comme une vraie paire de séquences, selon le `post_processor` du `tokenizer.json` (gabarit de paire, tokens spéciaux, `token_type_ids`), avec troncature `longest_first` ; à défaut, style BERT `[CLS] q [SEP] d [SEP]`. Sur GGUF (llama.cpp), la paire est construite depuis les tokens spéciaux du vocabulaire (BERT : `[CLS] q [SEP] d [SEP]` ; XLM-R : `<s> q </s></s> d </s>`), même troncature.
 
 #### Constructeur
 
@@ -7132,8 +7133,8 @@ ligne.
 Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
 corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
 BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
-tokenizer (T38). Le reranker construit en outre sa paire comme le texte
-`query [SEP] document`, là où HF encode une vraie paire.
+tokenizer (T38). Le reranker (ONNX et GGUF) encode désormais une vraie paire,
+comme HF (le GGUF la construit depuis les tokens spéciaux du vocabulaire).
 
 Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de
 l'architecture, pas du `tokenizer.json`) : all-mpnet-base-v2, bge-large-en-v1.5,
@@ -8252,7 +8253,8 @@ ni de Python ni du paquet `tokenizers`.
 | WordPiece, vocabulaire chinois | bge-*-zh | identique à HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identique à HF, 0/54 |
 | Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identique à HF, 0/54 (charsmap précompilé, WhitespaceSplit + Metaspace, Viterbi, fusion des inconnus, byte fallback) ; embeddings à cosinus 1,000 de la référence. Paires du reranker : pas encore couvertes |
-| BPE byte-level | CLIP texte, ModernBERT | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+| BPE byte-level (`Split` + `ByteLevel`, suffixe `</w>`) | CLIP texte | identique à HF, 0/54 ; embeddings à cosinus 1,000 de la référence (avant : min 0,29, moyenne 0,76). NFC limité au latin (lettres + diacritiques U+0300-036F), tables Unicode 15.0 pour `\p{L}`/`\p{N}` |
+| BPE byte-level, autres (ModernBERT, GPT-2) | ModernBERT | reconnu si le JSON utilise les mêmes briques, sinon repli sur l'ancien chemin ; non mesuré |
 
 Couverture de la normalisation (strip accents + minuscules), vérifiée point de code par
 point de code jusqu'à U+2FFFF : Latin (Latin-1, Étendu-A/B, Étendu additionnel dont le
@@ -8277,9 +8279,9 @@ Les options du `BertNormalizer` sont lues indépendamment, comme dans HF : `lowe
 `handle_chinese_chars`. Un normaliseur `Sequence` est pris en charge pour `Lowercase`,
 `StripAccents` et `NFD`/`NFKD` ; les accents ne sont retirés que si `StripAccents` et une
 décomposition sont tous deux présents. Les modes « minuscules seules » et « accents
-seuls » sont aussi vérifiés point de code par point de code. Le BPE byte-level garde
-son comportement historique (non conforme à HF) jusqu'à sa réécriture ; ses ids sont
-figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
+seuls » sont aussi vérifiés point de code par point de code. Un BPE byte-level dont le
+`tokenizer.json` n'est pas entièrement compris garde son comportement historique (non
+conforme à HF) ; ses ids sont figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
 `tokenizer.json` exact est dans le cache du poste (sinon la famille est ignorée).
 
 ## Recherche de modèles par code

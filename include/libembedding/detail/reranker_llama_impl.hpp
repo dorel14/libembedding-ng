@@ -133,8 +133,10 @@ static inline float lembed__llama_classify_pair(
         lembed_reranker_t* ctx,
         const char* query,
         const char* document) {
-    std::string pair_text = std::string(query) + " [SEP] " + document;
-    return ctx->llama.session.classify(pair_text.c_str());
+    /* Real pair encoding from the vocab's special tokens, as HF does; a literal
+     * "[SEP]" string would be plain text on XLM-R vocabularies. */
+    auto toks = ctx->llama.session.pair_tokens(query, document, ctx->max_length);
+    return ctx->llama.session.classify_tokens(toks);
 }
 
 static inline void lembed__llama_rerank(
