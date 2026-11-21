@@ -145,10 +145,10 @@ const lembed_gguf_model_info_t* lembed_find_gguf_model(const char* name) {
     if (!name) return nullptr;
     std::string query(name);
     /* Case-insensitive partial match */
-    for (auto& c : query) c = (char)tolower(c);
+    for (auto& c : query) c = (char)tolower((unsigned char)c);
     for (int i = 0; i < lembed__gguf_model_count; i++) {
         std::string candidate(lembed__gguf_models[i].name);
-        for (auto& c : candidate) c = (char)tolower(c);
+        for (auto& c : candidate) c = (char)tolower((unsigned char)c);
         if (candidate.find(query) != std::string::npos)
             return &lembed__gguf_models[i];
     }

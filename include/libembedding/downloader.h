@@ -334,7 +334,7 @@ lembed_status_t lembed_resolve_gguf_path(
         /* Case 1: local .gguf file path */
         if (input.size() > 5) {
             std::string lower = input;
-            for (auto& c : lower) c = (char)tolower(c);
+            for (auto& c : lower) c = (char)tolower((unsigned char)c);
             if (lower.substr(lower.size() - 5) == ".gguf" && lembed::detail::file_exists(input)) {
                 *model_path_out = strdup(input.c_str());
                 return LEMBED_OK;
