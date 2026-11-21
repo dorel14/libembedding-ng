@@ -37,6 +37,7 @@ extern "C++" {
 #include "quantization_auto_entry.hpp"
 /* Returns std::vector: needs C++ linkage, like the helper above. */
 #include "sparse_batching.hpp"
+#include "gguf_lookup.hpp"
 #ifdef __cplusplus
 }
 extern "C" {
@@ -67,14 +68,6 @@ extern "C" {
  * ONNX backend: creation
  * ========================================================================= */
 
-static inline bool lembed__text_ieq(const char* a, const char* b) {
-    if (!a || !b) return false;
-    for (; *a && *b; ++a, ++b) {
-        if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b)) return false;
-    }
-    return *a == *b;
-}
-
 /* llama.cpp path for a registry text model: the GGUF registry entry matching
  * the model's name or code (same lookup as the reranker). `auto_fallback` is
  * true when backend AUTO switches here because the ONNX files are missing:
@@ -89,29 +82,8 @@ static lembed_status_t lembed__text_create_gguf_equivalent(
     lembed_status_t s = lembed_get_text_model_info(options->model, &info);
     if (s != LEMBED_OK) return s;
 
-    /* The GGUF registry records the original HuggingFace model of each file in
-     * model_code: an exact (case-insensitive) match on the text model's name is
-     * the reliable key. lembed_find_gguf_model() matches the GGUF *display*
-     * name by substring and is only the last resort, as for the reranker. */
-    const lembed_gguf_model_info_t* gguf = nullptr;
-    {
-        const lembed_gguf_model_info_t* list = nullptr;
-        int n = 0;
-        if (lembed_list_gguf_models(&list, &n) == LEMBED_OK && list) {
-            for (int i = 0; i < n && !gguf; i++) {
-                const char* code = list[i].model_code;
-                if (!code) continue;
-                if (lembed__text_ieq(code, info.model_name) ||
-                    lembed__text_ieq(code, info.model_code)) {
-                    gguf = &list[i];
-                }
-            }
-        }
-    }
-    if (!gguf) gguf = lembed_find_gguf_model(info.model_name);
-    if (!gguf) gguf = lembed_find_gguf_model(info.model_code);
-    /* A partial-name match must not silently change the embedding dimension. */
-    if (gguf && gguf->dim > 0 && info.dim > 0 && gguf->dim != info.dim) gguf = nullptr;
+    const lembed_gguf_model_info_t* gguf =
+        lembed__gguf_for_model(info.model_name, info.model_code, info.dim);
     if (!gguf || !gguf->gguf_url || !gguf->gguf_url[0]) {
         if (!auto_fallback) {
             lembed::detail::set_error(
