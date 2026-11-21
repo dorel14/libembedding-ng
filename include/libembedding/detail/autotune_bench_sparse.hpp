@@ -11,7 +11,7 @@
  * result reports the values the caller would get by default, unchanged.
  *
  * Auteur: David Orel
- * Version: 1.14.0
+ * Version: 1.15.0
  *
  * SPDX-License-Identifier: MIT
  */

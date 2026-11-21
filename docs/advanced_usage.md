@@ -246,7 +246,8 @@ ni de Python ni du paquet `tokenizers`.
 | WordPiece, vocabulaire chinois | bge-*-zh | identique à HF, 0/54 |
 | WordPiece, `<s>`/`</s>` | all-mpnet-base-v2 | identique à HF, 0/54 |
 | Unigram (SentencePiece, `nmt_nfkc`) | multilingual-e5, paraphrase-multilingual, bge-m3, bge-reranker | identique à HF, 0/54 (charsmap précompilé, WhitespaceSplit + Metaspace, Viterbi, fusion des inconnus, byte fallback) ; embeddings à cosinus 1,000 de la référence. Paires du reranker : pas encore couvertes |
-| BPE byte-level | CLIP texte, ModernBERT | non implémenté dans le tokenizer intégré : mesuré, non couvert |
+| BPE byte-level (`Split` + `ByteLevel`, suffixe `</w>`) | CLIP texte | identique à HF, 0/54 ; embeddings à cosinus 1,000 de la référence (avant : min 0,29, moyenne 0,76). NFC limité au latin (lettres + diacritiques U+0300-036F), tables Unicode 15.0 pour `\p{L}`/`\p{N}` |
+| BPE byte-level, autres (ModernBERT, GPT-2) | ModernBERT | reconnu si le JSON utilise les mêmes briques, sinon repli sur l'ancien chemin ; non mesuré |
 
 Couverture de la normalisation (strip accents + minuscules), vérifiée point de code par
 point de code jusqu'à U+2FFFF : Latin (Latin-1, Étendu-A/B, Étendu additionnel dont le
@@ -271,9 +272,9 @@ Les options du `BertNormalizer` sont lues indépendamment, comme dans HF : `lowe
 `handle_chinese_chars`. Un normaliseur `Sequence` est pris en charge pour `Lowercase`,
 `StripAccents` et `NFD`/`NFKD` ; les accents ne sont retirés que si `StripAccents` et une
 décomposition sont tous deux présents. Les modes « minuscules seules » et « accents
-seuls » sont aussi vérifiés point de code par point de code. Le BPE byte-level garde
-son comportement historique (non conforme à HF) jusqu'à sa réécriture ; ses ids sont
-figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
+seuls » sont aussi vérifiés point de code par point de code. Un BPE byte-level dont le
+`tokenizer.json` n'est pas entièrement compris garde son comportement historique (non
+conforme à HF) ; ses ids sont figés par `test_tokenizer`. Les tests d'ids par famille ne s'exécutent que si le
 `tokenizer.json` exact est dans le cache du poste (sinon la famille est ignorée).
 
 ## Recherche de modèles par code

@@ -9,7 +9,7 @@
  * - Unigram (XLM-R family: precompiled charsmap + Metaspace, see tokenizer_unigram.hpp)
  *
  * Auteur: David Orel
- * Version: 1.14.0
+ * Version: 1.15.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,6 +18,8 @@
 #define LIBEMBEDDING_DETAIL_TOKENIZER_IMPL_HPP
 
 #include "cJSON.h"
+#include "tokenizer_bytelevel.hpp"
+#include "tokenizer_nfc.hpp"
 #include "tokenizer_unicode.hpp"
 #include "tokenizer_unigram.hpp"
 
@@ -330,7 +332,10 @@ static inline std::vector<std::string> legacy_basic_tokenize(const std::string& 
 
 class TokenizerWrapper {
 public:
-    enum Type { WORDPIECE, BPE, UNIGRAM };
+    /* BPE is the legacy approximation; BPE_BYTELEVEL is the HF-exact byte-level
+     * path (CLIP, GPT-2 style), chosen only when tokenizer.json is fully
+     * understood (see parse_bytelevel). */
+    enum Type { WORDPIECE, BPE, UNIGRAM, BPE_BYTELEVEL };
 
     TokenizerWrapper()
         : max_length_(512), pad_token_id_(0), cls_token_id_(101),
@@ -467,15 +472,33 @@ public:
             }
         }
 
+        /* Byte-level BPE (CLIP, GPT-2): only when the JSON is fully understood,
+         * otherwise the legacy BPE path stays in charge. */
+        if (type_ == BPE && parse_bytelevel(root, model)) type_ = BPE_BYTELEVEL;
+
         /* Post-processor: detect special tokens to add */
         cJSON* post = cJSON_GetObjectItem(root, "post_processor");
+        if (type_ == BPE_BYTELEVEL) add_special_tokens_ = false;
         if (post) {
             cJSON* ptype = cJSON_GetObjectItem(post, "type");
             if (ptype && ptype->valuestring &&
                 strcmp(ptype->valuestring, "TemplateProcessing") == 0) {
                 /* Check for [CLS] and [SEP] in template */
                 add_special_tokens_ = true;
-                if (type_ == UNIGRAM) parse_single_template(post);
+                if (type_ == UNIGRAM || type_ == BPE_BYTELEVEL) parse_single_template(post);
+            } else if (type_ == BPE_BYTELEVEL && ptype && ptype->valuestring &&
+                       (strcmp(ptype->valuestring, "RobertaProcessing") == 0 ||
+                        strcmp(ptype->valuestring, "BertProcessing") == 0)) {
+                /* [cls] $A [sep], ids given as ["token", id] */
+                cJSON* cls = cJSON_GetObjectItem(post, "cls");
+                cJSON* sep = cJSON_GetObjectItem(post, "sep");
+                cJSON* cid = cls ? cJSON_GetArrayItem(cls, 1) : nullptr;
+                cJSON* sid = sep ? cJSON_GetArrayItem(sep, 1) : nullptr;
+                if (cid && sid && cJSON_IsNumber(cid) && cJSON_IsNumber(sid)) {
+                    cls_token_id_ = cid->valueint;
+                    sep_token_id_ = sid->valueint;
+                    add_special_tokens_ = true;
+                }
             }
             pair_tmpl_.clear();
             parse_pair_processor(post);
@@ -1083,6 +1106,10 @@ private:
             unigram_encode(text, ids);
             return;
         }
+        if (type_ == BPE_BYTELEVEL) {
+            tokenize_bytelevel(text, ids);
+            return;
+        }
         /* Normalise and pre-tokenize into words. WordPiece follows HF's
          * BertNormalizer switches; byte-level BPE keeps its legacy path. */
         std::vector<std::string> words;
@@ -1107,7 +1134,7 @@ private:
     std::vector<int> encode_single(const std::string& text) const {
         std::vector<int> ids;
 
-        if (type_ == UNIGRAM) {
+        if (type_ == UNIGRAM || type_ == BPE_BYTELEVEL) {
             /* <s> $A </s> (or whatever the single template says) */
             if (add_special_tokens_) {
                 if (single_template_) ids = single_prefix_;
@@ -1222,7 +1249,12 @@ private:
             symbols.push_back(word.substr(i, len));
             i += len;
         }
+        bpe_merge_symbols(symbols, ids);
+    }
 
+    /* Merge `symbols` by rank, then look each result up in the vocabulary
+     * (unknown symbols become the unk id, unfused, as HF with fuse_unk=false). */
+    void bpe_merge_symbols(std::vector<std::string>& symbols, std::vector<int>& ids) const {
         /* Iteratively merge the highest-priority pair */
         while (symbols.size() > 1) {
             int best_rank = INT_MAX;
@@ -1256,6 +1288,348 @@ private:
                 ids.push_back(unk_token_id_);
             }
         }
+    }
+
+    /* ---- Byte-level BPE (CLIP, GPT-2 style), HF `tokenizers` semantics ---- */
+
+    /* One alternative of the Split regex: a literal, `\p{L}+`, `\p{N}` (one
+     * character) or `[^\s\p{L}\p{N}]+`. */
+    enum BlKind { BL_LITERAL, BL_LETTERS, BL_NUMBER, BL_OTHER };
+    struct BlAlt { BlKind kind; std::string literal; };
+
+    std::vector<BlAlt> bl_alts_;       /* Split alternatives, in regex order */
+    bool bl_split_ = false;            /* a Split pre-tokenizer precedes ByteLevel */
+    bool bl_gpt2_regex_ = true;        /* ByteLevel use_regex */
+    bool bl_nfc_ = false;              /* normalizer NFC (Latin scope, see tokenizer_nfc.hpp) */
+    bool bl_lower_ = false;            /* normalizer Lowercase */
+    bool bl_collapse_ws_ = false;      /* normalizer Replace(\s+ -> " ") */
+    std::string bl_suffix_;            /* model end_of_word_suffix */
+    std::vector<std::pair<std::string, int>> bl_added_; /* special added tokens, longest first */
+
+    /* Split a top-level regex on `|`, honouring `\` escapes and `[...]` classes. */
+    static std::vector<std::string> bl_split_alternatives(const std::string& re) {
+        std::vector<std::string> out;
+        std::string cur;
+        bool in_class = false;
+        for (size_t i = 0; i < re.size(); i++) {
+            const char c = re[i];
+            if (c == '\\' && i + 1 < re.size()) { cur += c; cur += re[++i]; continue; }
+            if (c == '[') in_class = true;
+            else if (c == ']') in_class = false;
+            if (c == '|' && !in_class) { out.push_back(cur); cur.clear(); continue; }
+            cur += c;
+        }
+        out.push_back(cur);
+        return out;
+    }
+
+    /* Read one Split alternative; false when it is not one we implement. */
+    static bool bl_parse_alternative(const std::string& alt, BlAlt& out) {
+        if (alt == "[\\p{L}]+" || alt == "\\p{L}+") { out = {BL_LETTERS, ""}; return true; }
+        if (alt == "[\\p{N}]" || alt == "\\p{N}") { out = {BL_NUMBER, ""}; return true; }
+        if (alt == "[^\\s\\p{L}\\p{N}]+") { out = {BL_OTHER, ""}; return true; }
+        std::string lit;
+        for (size_t i = 0; i < alt.size(); i++) {
+            const char c = alt[i];
+            if (c == '\\') {
+                if (i + 1 >= alt.size() || !strchr("|.()[]{}*+?^$\\/-", alt[i + 1])) return false;
+                lit += alt[++i];
+            } else if (strchr(".()[]{}*+?^$", c)) {
+                return false;
+            } else {
+                lit += c;
+            }
+        }
+        if (lit.empty()) return false;
+        out = {BL_LITERAL, lit};
+        return true;
+    }
+
+    /* Recognise a CLIP / GPT-2 style tokenizer.json. NFC is accepted but not
+     * applied (no composition tables): text already in NFC, the usual case,
+     * is unaffected, and the fidelity corpus measures the rest. Anything else
+     * unknown returns false and leaves the legacy BPE path in place. */
+    bool parse_bytelevel(cJSON* root, cJSON* model) {
+        if (!model) return false;
+        cJSON* pre = cJSON_GetObjectItem(root, "pre_tokenizer");
+        if (!pre) return false;
+
+        std::vector<cJSON*> steps;
+        cJSON* ptype = cJSON_GetObjectItem(pre, "type");
+        if (ptype && ptype->valuestring && strcmp(ptype->valuestring, "Sequence") == 0) {
+            cJSON* arr = cJSON_GetObjectItem(pre, "pretokenizers");
+            if (!arr || !cJSON_IsArray(arr)) return false;
+            for (int i = 0; i < cJSON_GetArraySize(arr); i++) steps.push_back(cJSON_GetArrayItem(arr, i));
+        } else {
+            steps.push_back(pre);
+        }
+
+        std::vector<BlAlt> alts;
+        bool has_split = false, has_bytelevel = false, use_regex = true;
+        for (cJSON* st : steps) {
+            cJSON* t = cJSON_GetObjectItem(st, "type");
+            if (!t || !t->valuestring) return false;
+            const std::string name = t->valuestring;
+            if (name == "Split" && !has_split && !has_bytelevel) {
+                cJSON* pat = cJSON_GetObjectItem(st, "pattern");
+                cJSON* rx = pat ? cJSON_GetObjectItem(pat, "Regex") : nullptr;
+                cJSON* beh = cJSON_GetObjectItem(st, "behavior");
+                cJSON* inv = cJSON_GetObjectItem(st, "invert");
+                /* Keep the matches, drop what lies between them. */
+                if (!rx || !rx->valuestring || !beh || !beh->valuestring ||
+                    strcmp(beh->valuestring, "Removed") != 0 || !cJSON_IsTrue(inv))
+                    return false;
+                for (const std::string& a : bl_split_alternatives(rx->valuestring)) {
+                    BlAlt alt;
+                    if (!bl_parse_alternative(a, alt)) return false;
+                    alts.push_back(alt);
+                }
+                has_split = true;
+            } else if (name == "ByteLevel" && !has_bytelevel) {
+                cJSON* aps = cJSON_GetObjectItem(st, "add_prefix_space");
+                if (aps && cJSON_IsTrue(aps)) return false;
+                cJSON* ur = cJSON_GetObjectItem(st, "use_regex");
+                if (ur && cJSON_IsFalse(ur)) use_regex = false;
+                has_bytelevel = true;
+            } else {
+                return false;
+            }
+        }
+        if (!has_bytelevel) return false;
+
+        /* Normalizer: NFC (ignored), Lowercase, Replace(`\s+` -> " ") only. */
+        bool lower = false, collapse = false, nfc = false;
+        cJSON* norm = cJSON_GetObjectItem(root, "normalizer");
+        if (norm && !cJSON_IsNull(norm)) {
+            std::vector<cJSON*> ns;
+            cJSON* nt = cJSON_GetObjectItem(norm, "type");
+            if (nt && nt->valuestring && strcmp(nt->valuestring, "Sequence") == 0) {
+                cJSON* arr = cJSON_GetObjectItem(norm, "normalizers");
+                if (!arr || !cJSON_IsArray(arr)) return false;
+                for (int i = 0; i < cJSON_GetArraySize(arr); i++) ns.push_back(cJSON_GetArrayItem(arr, i));
+            } else {
+                ns.push_back(norm);
+            }
+            for (cJSON* n : ns) {
+                cJSON* t = cJSON_GetObjectItem(n, "type");
+                if (!t || !t->valuestring) return false;
+                const std::string name = t->valuestring;
+                if (name == "NFC") { nfc = true; continue; }
+                if (name == "Lowercase") { lower = true; continue; }
+                if (name == "Replace") {
+                    cJSON* pat = cJSON_GetObjectItem(n, "pattern");
+                    cJSON* rx = pat ? cJSON_GetObjectItem(pat, "Regex") : nullptr;
+                    cJSON* content = cJSON_GetObjectItem(n, "content");
+                    if (rx && rx->valuestring && strcmp(rx->valuestring, "\\s+") == 0 &&
+                        content && content->valuestring && strcmp(content->valuestring, " ") == 0) {
+                        collapse = true;
+                        continue;
+                    }
+                }
+                return false;
+            }
+        }
+
+        /* Model: a continuing-subword prefix is not implemented. */
+        cJSON* csp = cJSON_GetObjectItem(model, "continuing_subword_prefix");
+        if (csp && csp->valuestring && csp->valuestring[0]) return false;
+        cJSON* eow = cJSON_GetObjectItem(model, "end_of_word_suffix");
+
+        bl_alts_ = alts;
+        bl_split_ = has_split;
+        bl_gpt2_regex_ = use_regex;
+        bl_nfc_ = nfc;
+        bl_lower_ = lower;
+        bl_collapse_ws_ = collapse;
+        bl_suffix_ = (eow && eow->valuestring) ? eow->valuestring : "";
+
+        /* Special added tokens are cut out of the text before anything else. */
+        bl_added_.clear();
+        cJSON* added = cJSON_GetObjectItem(root, "added_tokens");
+        if (added && cJSON_IsArray(added)) {
+            for (int i = 0; i < cJSON_GetArraySize(added); i++) {
+                cJSON* at = cJSON_GetArrayItem(added, i);
+                cJSON* content = cJSON_GetObjectItem(at, "content");
+                cJSON* id = cJSON_GetObjectItem(at, "id");
+                cJSON* special = cJSON_GetObjectItem(at, "special");
+                if (content && content->valuestring && content->valuestring[0] &&
+                    id && cJSON_IsNumber(id) && special && cJSON_IsTrue(special))
+                    bl_added_.emplace_back(content->valuestring, id->valueint);
+            }
+            std::stable_sort(bl_added_.begin(), bl_added_.end(),
+                             [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+                                 return a.first.size() > b.first.size();
+                             });
+        }
+        return true;
+    }
+
+    /* NFC over the whole text; malformed UTF-8 is left untouched. */
+    static std::string bl_apply_nfc(const std::string& text) {
+        std::vector<uint32_t> cps;
+        cps.reserve(text.size());
+        for (size_t i = 0; i < text.size(); ) {
+            uint32_t cp;
+            i += utf8_next(text, i, cp);
+            if (cp == kInvalidCp) return text;
+            cps.push_back(cp);
+        }
+        unicode::nfc_compose(cps);
+        std::string out;
+        out.reserve(text.size());
+        for (uint32_t cp : cps) unicode::append_utf8(out, cp);
+        return out;
+    }
+
+    /* Normalizer: NFC, collapse whitespace runs to one space, lowercase. */
+    std::string bl_normalize(const std::string& raw) const {
+        const std::string text = bl_nfc_ ? bl_apply_nfc(raw) : raw;
+        std::string out;
+        out.reserve(text.size());
+        bool prev_space = false;
+        for (size_t i = 0; i < text.size(); ) {
+            uint32_t cp;
+            const size_t n = utf8_next(text, i, cp);
+            if (cp == kInvalidCp) {
+                out.append(text, i, n);
+                prev_space = false;
+            } else if (bl_collapse_ws_ && unicode::is_space(cp)) {
+                if (!prev_space) out += ' ';
+                prev_space = true;
+            } else if (bl_lower_ && cp == 0x130) {
+                /* The only multi-codepoint lowercase: i + combining dot above. */
+                out += 'i';
+                unicode::append_utf8(out, 0x307);
+                prev_space = false;
+            } else {
+                if (bl_lower_) cp = (cp >= 'A' && cp <= 'Z') ? cp + 0x20 : unicode::bert_lower(cp);
+                unicode::append_utf8(out, cp);
+                prev_space = false;
+            }
+            i += n;
+        }
+        return out;
+    }
+
+    /* Length in bytes of the codepoint at `i` and its class. */
+    enum BlClass { BLC_LETTER, BLC_NUMBER, BLC_SPACE, BLC_OTHER };
+    static BlClass bl_class(const std::string& s, size_t i, size_t& n) {
+        uint32_t cp;
+        n = utf8_next(s, i, cp);
+        if (cp == kInvalidCp) return BLC_OTHER;
+        if (unicode::is_letter(cp)) return BLC_LETTER;
+        if (unicode::is_number(cp)) return BLC_NUMBER;
+        if (unicode::is_space(cp)) return BLC_SPACE;
+        return BLC_OTHER;
+    }
+
+    /* Split regex of `pre_tokenizer`: byte spans of the matches in `s`. */
+    void bl_split_matches(const std::string& s, std::vector<std::pair<size_t, size_t>>& spans) const {
+        size_t i = 0;
+        while (i < s.size()) {
+            size_t n;
+            const BlClass c = bl_class(s, i, n);
+            size_t end = 0;
+            for (const BlAlt& a : bl_alts_) {
+                if (a.kind == BL_LITERAL) {
+                    if (s.compare(i, a.literal.size(), a.literal) == 0) end = i + a.literal.size();
+                } else if (a.kind == BL_NUMBER) {
+                    if (c == BLC_NUMBER) end = i + n;
+                } else {
+                    const BlClass want = a.kind == BL_LETTERS ? BLC_LETTER : BLC_OTHER;
+                    if (c == want) {
+                        end = i + n;
+                        size_t m;
+                        while (end < s.size() && bl_class(s, end, m) == want) end += m;
+                    }
+                }
+                if (end) break;
+            }
+            if (end) { spans.emplace_back(i, end); i = end; }
+            else i += n;     /* between matches: removed */
+        }
+    }
+
+    /* GPT-2 pre-tokenizer regex (ByteLevel use_regex) over s[a, b):
+     * 's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+ */
+    static void bl_gpt2_split(const std::string& s, size_t a, size_t b,
+                              std::vector<std::pair<size_t, size_t>>& spans) {
+        static const char* const kContractions[] = {"'s", "'t", "'re", "'ve", "'m", "'ll", "'d"};
+        size_t i = a;
+        while (i < b) {
+            size_t end = 0;
+            for (const char* c : kContractions) {
+                const size_t len = strlen(c);
+                if (i + len <= b && s.compare(i, len, c) == 0) { end = i + len; break; }
+            }
+            if (!end) {
+                size_t j = i;
+                if (s[j] == ' ') j++;
+                size_t n = 0;
+                if (j < b) {
+                    const BlClass c = bl_class(s, j, n);
+                    if (c != BLC_SPACE) {
+                        end = j + n;
+                        size_t m;
+                        while (end < b && bl_class(s, end, m) == c) end += m;
+                    }
+                }
+            }
+            if (!end) {
+                /* \s+(?!\S): leave the last whitespace for the next token when
+                 * a non-space follows; otherwise \s+ takes the whole run. */
+                size_t k = i, last = i, n;
+                while (k < b && bl_class(s, k, n) == BLC_SPACE) { last = k; k += n; }
+                end = (k == b || last == i) ? k : last;
+            }
+            spans.emplace_back(i, end);
+            i = end;
+        }
+    }
+
+    /* BPE of one pre-token: bytes -> GPT-2 characters, suffix on the last one. */
+    void bl_encode_piece(const std::string& s, size_t a, size_t b, std::vector<int>& ids) const {
+        std::vector<std::string> symbols;
+        symbols.reserve(b - a);
+        for (size_t i = a; i < b; i++) {
+            std::string sym;
+            unicode::append_utf8(sym, unicode::bytelevel_cp((unsigned char)s[i]));
+            symbols.push_back(sym);
+        }
+        if (symbols.empty()) return;
+        symbols.back() += bl_suffix_;
+        bpe_merge_symbols(symbols, ids);
+    }
+
+    void bl_encode_segment(const std::string& raw, std::vector<int>& ids) const {
+        const std::string s = bl_normalize(raw);
+        std::vector<std::pair<size_t, size_t>> pieces;
+        if (bl_split_) bl_split_matches(s, pieces);
+        else if (!s.empty()) pieces.emplace_back(0, s.size());
+        for (const auto& p : pieces) {
+            if (bl_gpt2_regex_) {
+                std::vector<std::pair<size_t, size_t>> sub;
+                bl_gpt2_split(s, p.first, p.second, sub);
+                for (const auto& q : sub) bl_encode_piece(s, q.first, q.second, ids);
+            } else {
+                bl_encode_piece(s, p.first, p.second, ids);
+            }
+        }
+    }
+
+    void tokenize_bytelevel(const std::string& text, std::vector<int>& ids) const {
+        size_t seg = 0, i = 0;
+        while (i < text.size() && !bl_added_.empty()) {
+            const std::pair<std::string, int>* hit = nullptr;
+            for (const auto& t : bl_added_)
+                if (text.compare(i, t.first.size(), t.first) == 0) { hit = &t; break; }
+            if (!hit) { i++; continue; }
+            if (i > seg) bl_encode_segment(text.substr(seg, i - seg), ids);
+            ids.push_back(hit->second);
+            i += hit->first.size();
+            seg = i;
+        }
+        if (seg < text.size()) bl_encode_segment(seg ? text.substr(seg) : text, ids);
     }
 };
 
