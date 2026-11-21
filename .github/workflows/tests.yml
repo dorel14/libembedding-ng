@@ -61,7 +61,7 @@ jobs:
             echo "CXX=g++-14" >> "$GITHUB_ENV"
           fi
           # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
-          ort_root="$(bash scripts/fetch_onnxruntime.sh "linux-${ort_arch}" "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          ort_root="$(bash scripts/fetch_onnxruntime.sh "linux-${ort_arch}" "${{ env.ONNXRUNTIME_VERSION }}")"; ort_root="${ort_root##*$'\n'}"
           echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (Windows)
@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           # GitHub release asset, NuGet fallback (scripts/fetch_onnxruntime.sh).
-          ort_root="$(bash scripts/fetch_onnxruntime.sh win-x64 "${{ env.ONNXRUNTIME_VERSION }}" | tail -n 1)"
+          ort_root="$(bash scripts/fetch_onnxruntime.sh win-x64 "${{ env.ONNXRUNTIME_VERSION }}")"; ort_root="${ort_root##*$'\n'}"
           echo "ONNXRUNTIME_ROOT=$(cygpath -w "$(cd "$ort_root" && pwd)")" >> "$GITHUB_ENV"
 
       - name: Configure CMake (Linux)

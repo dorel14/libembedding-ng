@@ -314,6 +314,18 @@ lembed_status_t lembed_text_embedding_create_from_path(
     std::string path_str(dir_path);
     bool is_gguf = (path_str.size() > 5 && path_str.compare(path_str.size() - 5, 5, ".gguf") == 0);
 
+    /* An explicit backend is honoured, never silently overridden by the path. */
+    if (is_gguf && options->backend == LEMBED_BACKEND_ONNX) {
+        lembed::detail::set_error(
+            "backend ONNX requested but the path is a .gguf file (llama.cpp only): " + path_str);
+        return LEMBED_ERROR_UNSUPPORTED;
+    }
+    if (!is_gguf && options->backend == LEMBED_BACKEND_LLAMACPP) {
+        lembed::detail::set_error(
+            "backend llama.cpp requested but the path is not a .gguf file: " + path_str);
+        return LEMBED_ERROR_UNSUPPORTED;
+    }
+
     if (is_gguf) {
         return lembed_text_embedding_create_from_gguf_path(dir_path, options, out);
     }

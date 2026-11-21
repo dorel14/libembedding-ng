@@ -778,7 +778,8 @@ typedef struct {
     int                         llama_n_batch;  // max tokens per llama_encode (0 = model default)
     int                         auto_workers;   // 1 = auto-detect optimal workers/sessions
     int                         cache_size;     // 0 = disabled, >0 = LRU cache capacity
-    /* Backend selection (ONNX, LLAMACPP, or AUTO) */
+    /* ONNX..AUTO. AUTO follows the file extension; ONNX / LLAMACPP force a
+       backend. Acted upon by the text and reranker options only. */
     lembed_backend_t            backend;        // default: LEMBED_BACKEND_AUTO
     /* ONNX batching strategy */
     int                         batch_strategy; // LEMBED_BATCH_LENGTH_BUCKET (ONNX only)

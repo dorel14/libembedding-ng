@@ -6,6 +6,8 @@ nav_exclude: true
 
 The `backend` module provides automatic backend (ONNX or llama.cpp) detection based on model name or file path.
 
+> `backend=` is a constructor option of `Reranker` and `TextEmbedding` (`"auto"`, `"onnx"`, `"llama"`, default `"auto"`). `SparseTextEmbedding` and `ImageEmbedding` have no such parameter: the backend follows the model extension. See [Model routing](../model_routing.html).
+
 ## Reference
 
 | Function | Returns | Description |

@@ -33,6 +33,8 @@
   url: quantization.html
 - title: Routage des modèles
   url: model_routing.html
+- title: Conventions de l'API
+  url: api_conventions.html
 - title: Dépannage
   url: troubleshooting.html
 - title: C API — Similarité

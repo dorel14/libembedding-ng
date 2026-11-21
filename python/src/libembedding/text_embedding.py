@@ -13,7 +13,8 @@ from ._binding import (  # pyright: ignore[reportAttributeAccessIssue,reportMiss
     lib,
 )
 from ._status import check_status
-from .exceptions import LembedError, ModelNotFoundError
+from .backend import _BACKEND_ENUM, _BACKEND_ONNX, backend_to_enum
+from .exceptions import LembedError, ModelNotFoundError, UnsupportedError
 from .models import (
     _POOLING_ENUM,
     _PROVIDER_MAP,
@@ -78,6 +79,14 @@ class TextEmbedding:
             mxbai-embed-large-v1, embeddinggemma-300m): on other models the
             prefix of a vector carries no guarantee. ``dim`` then reports the
             truncated size, ``native_dim`` the model's.
+        backend: Runtime to use ("auto", "onnx" or "llama"), same semantics
+            as :class:`Reranker`. "auto" (default) keeps the routing by model
+            (registry / directory -> ONNX Runtime, ``.gguf`` -> llama.cpp) and
+            only falls back to the registry's GGUF equivalent when the ONNX
+            files are missing and cannot be downloaded. "llama" serves a
+            registry model by its GGUF equivalent (error if none). "onnx"
+            refuses a ``.gguf`` model. ``backend`` (property) reports the
+            runtime really used.
         num_threads: Deprecated; use ``threads``.
     """
 
@@ -99,8 +108,15 @@ class TextEmbedding:
         quantization: str | None = None,
         preferred_quantization: str | None = None,
         truncate_dim: int | None = None,
+        backend: str = "auto",
         num_threads: int | None = None,
     ):
+        backend = backend.lower()
+        if backend not in _BACKEND_ENUM:
+            raise ValueError(
+                f"Unknown backend '{backend}'. Use: {list(_BACKEND_ENUM.keys())}"
+            )
+        backend_enum = backend_to_enum(backend)
         if truncate_dim is not None and (
             isinstance(truncate_dim, bool) or not isinstance(truncate_dim, int)
         ):
@@ -145,6 +161,10 @@ class TextEmbedding:
                     f"{list(_QUANTIZATION_ENUM.keys())}"
                 )
 
+        # Kept alive on the instance: the C options struct only borrows it.
+        self._cache_dir_buf = (
+            ffi.new("char[]", cache_dir.encode("utf-8")) if cache_dir else ffi.NULL
+        )
         self._ctx = None
         self._dim = 0
         self._native_dim = 0
@@ -175,6 +195,12 @@ class TextEmbedding:
         self._quantization = _QUANTIZATION_NAMES.get(resolved_quant, "none")
 
         if _is_gguf_model(model_name):
+            if backend_enum == _BACKEND_ONNX:
+                raise UnsupportedError(
+                    lib.LEMBED_ERROR_UNSUPPORTED,
+                    f"backend 'onnx' requested but '{model_name}' is a GGUF model "
+                    "(llama.cpp only)",
+                )
             # GGUF model: use llama.cpp backend
             # Try the local file first, like Reranker does. Order matters: the
             # downloader hands out mixed-separator absolute paths on Windows
@@ -225,34 +251,20 @@ class TextEmbedding:
                 )
                 self._ctx = ctx_ptr[0]
         else:
-            # ONNX backend (default)
-            if _is_local_path(model_name):
-                # Local ONNX model directory
-                model_dir = model_name
-            else:
-                # HuggingFace model code: ensure it is cached
+            # Registry / directory model: ONNX Runtime by default
+            if not _is_local_path(model_name):
+                # HuggingFace model code. The C core ensures the files are cached
+                # (and, for backend "auto", falls back to the GGUF equivalent when
+                # they cannot be obtained): no ONNX download is forced here, so
+                # backend="llama" never fetches the ONNX weights.
                 idx = resolve_text_model(model_name)
                 if idx < 0:
                     raise ModelNotFoundError(7, f"Unknown model: {model_name}")
-                info = ffi.new("lembed_model_info_t *")
-                lib.lembed_get_text_model_info(idx, info)
-
-                model_dir = ffi.new("char **")
-                check_status(
-                    lib.lembed_ensure_text_model(
-                        idx,
-                        cache_dir.encode("utf-8") if cache_dir else ffi.NULL,
-                        1 if show_download_progress else 0,
-                        1 if offline else 0,
-                        model_dir,
-                    )
-                )
-                model_dir_ptr = model_dir[0]
-                model_dir = ffi.string(model_dir_ptr).decode("utf-8")
-                lib.lembed_free_string(model_dir_ptr)
 
             if _is_local_path(model_name):
+                # Local ONNX model directory
                 opts = ffi.new("lembed_text_options_t *")
+                opts.backend = backend_enum
                 opts.provider = _PROVIDER_MAP[provider]
                 opts.num_threads = threads
                 opts.batch_size = batch_size
@@ -266,7 +278,7 @@ class TextEmbedding:
                 ctx_ptr = ffi.new("lembed_text_embedding_t **")
                 check_status(
                     lib.lembed_text_embedding_create_from_path(
-                        model_dir.encode("utf-8"), opts, ctx_ptr
+                        model_name.encode("utf-8"), opts, ctx_ptr
                     )
                 )
             else:
@@ -275,6 +287,8 @@ class TextEmbedding:
                 # zero-initialised struct points at entry 0, so every
                 # HuggingFace name silently loaded all-MiniLM-L6-v2.
                 opts.base.model = resolve_text_model(model_name)
+                opts.base.backend = backend_enum
+                opts.base.cache_dir = self._cache_dir_buf
                 opts.base.provider = _PROVIDER_MAP[provider]
                 opts.base.num_threads = threads
                 opts.base.batch_size = batch_size

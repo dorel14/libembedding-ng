@@ -16,7 +16,7 @@ Comment la bibliothèque choisit le backend (ONNX Runtime ou llama.cpp / GGUF) p
 - un fichier `.gguf` est servi par le backend GGUF ;
 - un fichier ou répertoire ONNX, un modèle du registre (identifiant HuggingFace) ou tout autre nom passe par ONNX Runtime.
 
-Il n'y a **pas de paramètre `backend=`** sur `TextEmbedding` ni sur `SparseTextEmbedding` en Python. Deux exceptions de surface, décrites plus bas : le reranker (`backend=`) et la fonction utilitaire `detect_backend()`.
+Il n'y a **pas de paramètre `backend=`** sur `SparseTextEmbedding` ni `ImageEmbedding` en Python. Exceptions de surface, décrites plus bas : le reranker et le texte dense (`backend=`) et la fonction utilitaire `detect_backend()`.
 
 ## Règles par point d'entrée
 
@@ -35,14 +35,23 @@ Il n'y a **pas de paramètre `backend=`** sur `TextEmbedding` ni sur `SparseText
 
 ### Reranker
 
-Le reranker est le seul à exposer un sélecteur : champ `backend` de `lembed_reranker_options_t` (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`, défaut `AUTO` dans `lembed_reranker_options_default()`) et argument `backend="auto"` de `Reranker` en Python (`"auto"`, `"onnx"`, `"llama"`).
+Le reranker expose un sélecteur (le texte dense a le même, voir plus bas) : champ `backend` de `lembed_reranker_options_t` (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`, défaut `AUTO` dans `lembed_reranker_options_default()`) et argument `backend="auto"` de `Reranker` en Python (`"auto"`, `"onnx"`, `"llama"`).
 
 - `LLAMACPP` : toujours GGUF.
 - `ONNX` : toujours ONNX Runtime.
 - `AUTO` : ONNX Runtime d'abord ; **seulement si les fichiers ONNX du modèle sont introuvables** (`LEMBED_ERROR_MODEL_NOT_FOUND`), le reranker bascule sur l'équivalent GGUF. Un fournisseur indisponible (`LEMBED_ERROR_UNSUPPORTED`) ou un modèle ONNX cassé reste une erreur : il ne provoque pas de bascule (`detail/reranker_impl.hpp`, `lembed_reranker_create`).
 - `lembed_reranker_create_from_path()` envoie un chemin finissant par `.gguf` (casse ignorée) vers GGUF, et accepte aussi un répertoire ONNX (`reranker.h`).
 
-Le champ `backend` existe aussi dans `lembed_text_options_t` ; `lembed_text_embedding_create()` n'y vérifie que la validité de la valeur (`detail/text_embedding_onnx_impl.hpp`). Pour le texte dense, choisir le format par le point d'entrée comme ci-dessus.
+### Texte dense
+
+`lembed_text_options_t.backend` (défaut `AUTO`) et `TextEmbedding(..., backend="auto" | "onnx" | "llama")` suivent la même logique (`detail/text_embedding_onnx_impl.hpp`) :
+
+- `AUTO` : routage inchangé (modèle du registre ou répertoire : ONNX Runtime ; `.gguf` : llama.cpp). Seule nouveauté : si les fichiers ONNX d'un modèle du registre sont introuvables et inobtenables (hors ligne, échec de téléchargement) et qu'un équivalent GGUF existe, il est utilisé. Sans équivalent, l'erreur ONNX est conservée.
+- `LLAMACPP` : un modèle du registre est servi par son équivalent GGUF (clé : `model_code` du registre GGUF = nom du modèle texte) ; sans équivalent, `LEMBED_ERROR_UNSUPPORTED` nommant le modèle. Un répertoire ONNX est refusé.
+- `ONNX` : un chemin `.gguf` est refusé (`LEMBED_ERROR_UNSUPPORTED`).
+- `backend_name()` / `TextEmbedding.backend` indiquent le backend réellement utilisé.
+
+`backend` est une option officielle du reranker **et du texte dense**. Sparse et image n'ont pas ce champ (ABI). Voir [Conventions de l'API](api_conventions.html).
 
 ### `detect_backend()` (Python)
 

@@ -54,12 +54,29 @@ unzip_to() {
     unzip -q -o "$1" -d "$2"
 }
 
+# curl --retry only covers timeouts and some HTTP codes: an HTTP/2 stream
+# reset (curl exit 92) is not retried, and --retry-all-errors is missing from
+# the curl of manylinux_2_28. Retry here, falling back to HTTP/1.1.
+download() {
+    local out="$1" url="$2" attempt
+    for attempt in 1 2 3; do
+        if [ "$attempt" = 1 ]; then
+            curl -fsSL --retry 3 -o "$out" "$url" && return 0
+        else
+            curl -fsSL --retry 3 --http1.1 -o "$out" "$url" && return 0
+        fi
+        echo "WARNING: download attempt $attempt failed: $url" >&2
+        sleep 5
+    done
+    return 1
+}
+
 fetch_github() {
     local ext=tgz
     [ "$plat" = win-x64 ] && ext=zip
     local url="https://github.com/microsoft/onnxruntime/releases/download/v$ver/onnxruntime-$plat-$ver.$ext"
     echo "ONNX Runtime $ver ($plat): GitHub $url" >&2
-    curl -fsSL --retry 3 -o "$tmp/ort.$ext" "$url" || return 1
+    download "$tmp/ort.$ext" "$url" || return 1
     if [ "$ext" = tgz ]; then
         tar xzf "$tmp/ort.$ext" -C "$dest"
     else
@@ -79,7 +96,7 @@ fetch_nuget() {
     esac
     local url="https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$ver/microsoft.ml.onnxruntime.$ver.nupkg"
     echo "ONNX Runtime $ver ($plat): NuGet fallback $url" >&2
-    curl -fsSL --retry 3 -o "$tmp/ort.nupkg" "$url" || return 1
+    download "$tmp/ort.nupkg" "$url" || return 1
     mkdir -p "$tmp/nupkg"
     unzip_to "$tmp/ort.nupkg" "$tmp/nupkg"
 

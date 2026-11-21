@@ -189,6 +189,73 @@ static void test_cpu_is_not_unsupported(const fs::path& dir) {
            "reranker CPU fake model: not UNSUPPORTED");
 }
 
+/* The text `backend` option is honoured like the reranker's. Hermetic: nothing
+ * is downloaded (offline + empty cache dir, or fake files). */
+static void test_text_backend_option(const fs::path& dir) {
+    const std::string path = dir.string();
+    const std::string gguf = (dir / "nothing.gguf").string();
+
+    /* ONNX forced: a .gguf path is refused, not silently run by llama.cpp. */
+    lembed_text_options_t o = lembed_text_options_default();
+    o.backend = LEMBED_BACKEND_ONNX;
+    o.dim = 8;
+    lembed_text_embedding_t* t = nullptr;
+    lembed_status_t s = lembed_text_embedding_create_from_path(gguf.c_str(), &o, &t);
+    ASSERT(s == LEMBED_ERROR_UNSUPPORTED && t == nullptr, "text ONNX + .gguf path -> UNSUPPORTED");
+    ASSERT(error_mentions(".gguf"), "text ONNX + .gguf: error names the .gguf file");
+
+    /* llama.cpp forced: a model directory is refused too. */
+    o.backend = LEMBED_BACKEND_LLAMACPP;
+    s = lembed_text_embedding_create_from_path(path.c_str(), &o, &t);
+    ASSERT(s == LEMBED_ERROR_UNSUPPORTED && t == nullptr, "text LLAMACPP + directory -> UNSUPPORTED");
+
+    /* AUTO unchanged: the .gguf path goes to llama.cpp (the file is missing, so
+     * a llama error, not a refusal); the fake directory goes to ONNX. */
+    o.backend = LEMBED_BACKEND_AUTO;
+    s = lembed_text_embedding_create_from_path(gguf.c_str(), &o, &t);
+    ASSERT(s != LEMBED_OK && s != LEMBED_ERROR_UNSUPPORTED, "text AUTO + .gguf: routed to llama.cpp");
+    s = lembed_text_embedding_create_from_path(path.c_str(), &o, &t);
+    ASSERT(s != LEMBED_OK && s != LEMBED_ERROR_UNSUPPORTED, "text AUTO + fake dir: routed to ONNX");
+    o.backend = LEMBED_BACKEND_ONNX;
+    s = lembed_text_embedding_create_from_path(path.c_str(), &o, &t);
+    ASSERT(s != LEMBED_OK && s != LEMBED_ERROR_UNSUPPORTED, "text ONNX + fake dir: routed to ONNX");
+
+    /* LLAMACPP on a registry model with no GGUF equivalent: clear error naming
+     * the model, before any download. */
+    const std::string empty_cache = (dir / "empty_cache").string();
+    lembed_text_options_t r = lembed_text_options_default();
+    r.model = LEMBED_TEXT_BGE_SMALL_EN_V15;
+    r.backend = LEMBED_BACKEND_LLAMACPP;
+    r.cache_dir = empty_cache.c_str();
+    r.offline = 1;
+    r.show_download_progress = 0;
+    s = lembed_text_embedding_create(&r, &t);
+    ASSERT(s == LEMBED_ERROR_UNSUPPORTED && t == nullptr, "text LLAMACPP, no GGUF equivalent -> UNSUPPORTED");
+    ASSERT(error_mentions("bge-small-en-v1.5"), "text LLAMACPP error names the model");
+
+    /* v2 takes the same route. */
+    lembed_text_options_v2_t r2;
+    std::memset(&r2, 0, sizeof(r2));
+    r2.base = r;
+    r2.quantization = LEMBED_QUANTIZATION_AUTO;
+    s = lembed_text_embedding_create_v2(&r2, &t);
+    ASSERT(s == LEMBED_ERROR_UNSUPPORTED && t == nullptr, "text v2 LLAMACPP, no GGUF equivalent -> UNSUPPORTED");
+
+    /* AUTO, ONNX files missing and no GGUF equivalent: the ONNX download error
+     * is the one reported (no behaviour change for models without GGUF). */
+    r.backend = LEMBED_BACKEND_AUTO;
+    s = lembed_text_embedding_create(&r, &t);
+    ASSERT(s == LEMBED_ERROR_DOWNLOAD && t == nullptr, "text AUTO offline, no GGUF equivalent -> DOWNLOAD");
+
+    /* LLAMACPP on a model that has a GGUF equivalent, offline, nothing cached:
+     * the failure is the missing GGUF file, never UNSUPPORTED. */
+    r.model = LEMBED_TEXT_SNOWFLAKE_ARCTIC_EMBED_XS;
+    r.backend = LEMBED_BACKEND_LLAMACPP;
+    s = lembed_text_embedding_create(&r, &t);
+    ASSERT(s != LEMBED_OK && s != LEMBED_ERROR_UNSUPPORTED && t == nullptr,
+           "text LLAMACPP with GGUF equivalent: resolved, fails only on the cache");
+}
+
 /* ---- Cache part: offline, skipped when the model is absent ---------------- */
 
 static void test_cached_onnx_text() {
@@ -274,6 +341,8 @@ int main(void) {
     test_explicit_provider_unavailable(dir);
     printf("stage: CPU is not unsupported\n");
     test_cpu_is_not_unsupported(dir);
+    printf("stage: text backend option\n");
+    test_text_backend_option(dir);
     std::error_code ec;
     fs::remove_all(dir, ec);
 

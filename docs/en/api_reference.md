@@ -226,7 +226,7 @@ print(embeddings.shape)  # (2, 512)
 
 Scores and sorts documents by relevance to a query (cross-encoder).
 
-On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared.
+On ONNX, query and document are encoded as a real sequence pair following the `tokenizer.json` `post_processor` (pair template, special tokens, `token_type_ids`) with `longest_first` truncation; BERT style `[CLS] q [SEP] d [SEP]` when none is declared. On GGUF (llama.cpp) the pair is built from the vocabulary's special tokens (BERT: `[CLS] q [SEP] d [SEP]`; XLM-R: `<s> q </s></s> d </s>`), same truncation.
 
 #### Constructor
 

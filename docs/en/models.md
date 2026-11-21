@@ -280,8 +280,8 @@ Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999
 Reading: **every measured WordPiece model matches the reference** on the whole
 multilingual corpus (lowest min cosine 0.9999999999999984). Unigram (XLM-R) and
 byte-level BPE (CLIP, ModernBERT) are broken even in English: they need their own
-tokenizer (T38). The reranker also builds its pair as the text `query [SEP] document`,
-where HF encodes a real pair.
+tokenizer (T38). The reranker (ONNX and GGUF) now encodes a real pair, like HF
+(GGUF builds it from the vocabulary's special tokens).
 
 Not measured (not in the local cache or over 560 MB; the family comes from the
 architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,

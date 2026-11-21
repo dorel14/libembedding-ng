@@ -48,6 +48,41 @@ inline void llama_ensure_log_callback() {
     });
 }
 
+/* Builds the cross-encoder input for a (query, document) pair from already
+ * tokenized segments, the way HF tokenizers do for a real text pair:
+ *   WordPiece / BERT : [CLS] q [SEP] d [SEP]
+ *   others (XLM-R)   : <s> q </s></s> d </s>
+ * Special ids come from the GGUF vocab (pass -1 for "absent"; absent ones are
+ * skipped). Truncation is HF "longest_first": drop one token at a time from
+ * the longer segment until the whole sequence fits max_len, specials kept. */
+inline std::vector<llama_token> build_rerank_pair_tokens(
+        std::vector<llama_token> q, std::vector<llama_token> d,
+        llama_token bos, llama_token sep, llama_token eos,
+        bool wordpiece, int max_len) {
+    std::vector<llama_token> head, mid, tail;
+    if (bos >= 0) head.push_back(bos);
+    if (wordpiece) {
+        llama_token s = (sep >= 0) ? sep : eos;
+        if (s >= 0) { mid.push_back(s); tail.push_back(s); }
+    } else if (eos >= 0) {
+        mid.push_back(eos); mid.push_back(eos); tail.push_back(eos);
+    }
+    size_t overhead = head.size() + mid.size() + tail.size();
+    size_t budget = (max_len > 0 && (size_t)max_len > overhead)
+                        ? (size_t)max_len - overhead : 0;
+    while (q.size() + d.size() > budget) {
+        if (q.size() > d.size()) q.pop_back(); else d.pop_back();
+    }
+    std::vector<llama_token> out;
+    out.reserve(overhead + q.size() + d.size());
+    out.insert(out.end(), head.begin(), head.end());
+    out.insert(out.end(), q.begin(), q.end());
+    out.insert(out.end(), mid.begin(), mid.end());
+    out.insert(out.end(), d.begin(), d.end());
+    out.insert(out.end(), tail.begin(), tail.end());
+    return out;
+}
+
 class LlamaSession {
 public:
     LlamaSession()
@@ -111,6 +146,11 @@ public:
         cparams.embeddings = true;
         cparams.type_k = GGML_TYPE_F16;
         cparams.type_v = GGML_TYPE_F16;
+        /* Cross-encoder GGUFs carry a classifier head but often no pooling_type
+         * key, so llama.cpp would default to NONE and expose no score. */
+        if (llama_model_n_cls_out(model_) > 0) {
+            cparams.pooling_type = LLAMA_POOLING_TYPE_RANK;
+        }
         if (n_batch > 0) {
             cparams.n_batch = (uint32_t)n_batch;
         }
@@ -194,16 +234,45 @@ public:
         return result;
     }
 
-    float classify(const char* text) {
-        if (!ctx_) throw std::runtime_error("LlamaSession: null context");
+    /* Tokenizes a segment without adding or parsing special tokens. */
+    std::vector<llama_token> tokenize_plain(const char* text) const {
+        std::vector<llama_token> toks;
+        if (!vocab_ || !text || !text[0]) return toks;
+        int len = (int)strlen(text);
+        int needed = -llama_tokenize(vocab_, text, len, nullptr, 0, false, false);
+        if (needed <= 0) return toks;
+        toks.resize((size_t)needed);
+        int n = llama_tokenize(vocab_, text, len, toks.data(),
+                               (int32_t)toks.size(), false, false);
+        toks.resize(n > 0 ? (size_t)n : 0);
+        return toks;
+    }
 
-        std::vector<llama_token> tokens;
-        tokenize(text, tokens);
+    /* Real sentence-pair encoding (see build_rerank_pair_tokens). Special
+     * ids and the template family come from the GGUF vocab. */
+    std::vector<llama_token> pair_tokens(const char* query, const char* document,
+                                         int max_len) const {
+        if (!vocab_) return {};
+        const bool wpm = llama_vocab_type(vocab_) == LLAMA_VOCAB_TYPE_WPM;
+        llama_token bos = llama_vocab_get_add_bos(vocab_) ? llama_vocab_bos(vocab_) : -1;
+        llama_token sep = llama_vocab_sep(vocab_);
+        llama_token eos = llama_vocab_eos(vocab_);
+        int cap = n_ctx_;
+        if (max_len > 0 && max_len < cap) cap = max_len;
+        if (cap > 512) cap = 512; /* default n_ubatch bounds one encode call */
+        return build_rerank_pair_tokens(tokenize_plain(query), tokenize_plain(document),
+                                        bos, sep, eos, wpm, cap);
+    }
+
+    /* Cross-encoder score from an already built token sequence. The GGUF
+     * classifier head uses RANK pooling: the score is the pooled output of
+     * sequence 0, not a vocabulary logit. */
+    float classify_tokens(const std::vector<llama_token>& tokens) {
+        if (!ctx_) throw std::runtime_error("LlamaSession: null context");
         if (tokens.empty()) return 0.0f;
 
         llama_batch batch = llama_batch_init((int32_t)tokens.size(), 0, 1);
         batch.n_tokens = 0;
-
         for (size_t i = 0; i < tokens.size(); i++) {
             batch.token[batch.n_tokens] = tokens[i];
             batch.pos[batch.n_tokens] = (llama_pos)i;
@@ -214,21 +283,23 @@ public:
         }
 
         llama_memory_clear(llama_get_memory(ctx_), false);
-
-        int ret = llama_decode(ctx_, batch);
+        int ret = llama_encode(ctx_, batch);
         llama_batch_free(batch);
         if (ret != 0) {
-            throw std::runtime_error("llama_decode failed for classification");
+            throw std::runtime_error("llama_encode failed for classification");
         }
 
-        const float* logits = llama_get_logits(ctx_);
-        if (!logits) {
-            throw std::runtime_error("Failed to retrieve logits from llama context");
+        const float* score = llama_get_embeddings_seq(ctx_, 0);
+        if (!score) {
+            throw std::runtime_error("Failed to retrieve rank score from llama context");
         }
+        return score[0];
+    }
 
-        int last_token = (int)tokens.size() - 1;
-        int n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model_));
-        return logits[last_token * n_vocab];
+    float classify(const char* text) {
+        std::vector<llama_token> tokens;
+        tokenize(text, tokens);
+        return classify_tokens(tokens);
     }
 
 private:
