@@ -10,10 +10,9 @@ file run by Python onnxruntime on HuggingFace ``tokenizers`` ids (see
 ``model_reference.py``). Nothing is downloaded: a model that is not cached, or a
 machine without onnxruntime/tokenizers, skips.
 
-The registry has a known tokenizer gap (byte-level BPE), so the assertions
-encode a baseline, not perfection:
+The assertions encode a baseline, not perfection:
 
-* WordPiece and Unigram models must match on the whole corpus
+* WordPiece, Unigram and byte-level BPE models must match on the whole corpus
   (min cosine >= 0.999);
 * no model may fall below its committed baseline (``data/model_baselines.json``)
   by more than ``SLACK``;
@@ -36,7 +35,11 @@ BASELINES = json.loads((DATA / "model_baselines.json").read_text(encoding="utf-8
 FIXTURES = json.loads((DATA / "reference_embeddings.json").read_text(encoding="utf-8"))["models"]
 
 SLACK = 0.02  # allowed drop of a baseline statistic
-EN_CORE_FLOOR = {ref.WORDPIECE: 0.999, ref.UNIGRAM: 0.999}  # families that must be exact
+EN_CORE_FLOOR = {  # families that must be exact
+    ref.WORDPIECE: 0.999,
+    ref.UNIGRAM: 0.999,
+    ref.BPE_BYTE: 0.999,
+}
 MAX_MB = 560  # same bound as the report
 
 

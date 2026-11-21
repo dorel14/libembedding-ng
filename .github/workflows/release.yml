@@ -95,7 +95,7 @@ jobs:
             -DLIBEMBEDDING_BUILD_SHARED=ON \
             -DLIBEMBEDDING_INTEGRATION_TESTS=OFF \
             -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
-          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection
+          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_tokenizer_bytelevel test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection
 
       - name: Run C++ unit tests
         run: |
