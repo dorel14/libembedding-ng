@@ -106,7 +106,8 @@ public:
     LlamaSession& operator=(LlamaSession&&) = delete;
 
     void load_from_file(const char* model_path, int num_threads = 0, int n_ctx = 0,
-                        int n_gpu_layers = 0, int n_batch = 0, bool verbose = false) {
+                        int n_gpu_layers = 0, int n_batch = 0, bool verbose = false,
+                        bool cross_encoder = false) {
         static std::once_flag backend_init;
         std::call_once(backend_init, [verbose]() {
             llama_ensure_log_callback();
@@ -147,8 +148,12 @@ public:
         cparams.type_k = GGML_TYPE_F16;
         cparams.type_v = GGML_TYPE_F16;
         /* Cross-encoder GGUFs carry a classifier head but often no pooling_type
-         * key, so llama.cpp would default to NONE and expose no score. */
-        if (llama_model_n_cls_out(model_) > 0) {
+         * key, so llama.cpp would default to NONE and expose no score. Only the
+         * reranker asks for it: llama_model_n_cls_out() is 1 for every model
+         * (hparams default), so it cannot tell a cross-encoder from a dense
+         * embedder. Forcing RANK on a dense model made llama_get_embeddings_seq()
+         * return one float and embed_tokens() read n_embd floats from it. */
+        if (cross_encoder && llama_model_n_cls_out(model_) > 0) {
             cparams.pooling_type = LLAMA_POOLING_TYPE_RANK;
         }
         if (n_batch > 0) {
@@ -200,6 +205,13 @@ public:
 
     std::vector<float> embed_tokens(const std::vector<llama_token>& tokens) {
         if (!ctx_ || tokens.empty()) return std::vector<float>((size_t)n_embd_, 0.0f);
+
+        /* The pooled sequence vector is n_embd floats only for MEAN/CLS/LAST;
+         * RANK yields n_cls_out floats, so reading n_embd would overrun it. */
+        const enum llama_pooling_type pooling = llama_pooling_type(ctx_);
+        if (pooling == LLAMA_POOLING_TYPE_RANK || pooling == LLAMA_POOLING_TYPE_NONE) {
+            throw std::runtime_error("GGUF model has no sequence pooling usable for dense embeddings");
+        }
 
         llama_batch batch = llama_batch_init((int32_t)tokens.size(), 0, 1);
         batch.n_tokens = 0;
