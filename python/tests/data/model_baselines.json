@@ -63,21 +63,21 @@
   },
   "text|sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2|onnx/model.onnx": {
    "family": "unigram",
-   "min": 0.0207,
-   "mean": 0.3474,
-   "en_core_min": 0.0335
+   "min": 0.9999,
+   "mean": 0.9999,
+   "en_core_min": 0.9999
   },
   "text|sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2|model_optimized.onnx": {
    "family": "unigram",
-   "min": 0.0206,
-   "mean": 0.3473,
-   "en_core_min": 0.0334
+   "min": 0.9999,
+   "mean": 0.9999,
+   "en_core_min": 0.9999
   },
   "text|intfloat/multilingual-e5-small|onnx/model.onnx": {
    "family": "unigram",
-   "min": 0.7675,
-   "mean": 0.8231,
-   "en_core_min": 0.7675
+   "min": 0.9999,
+   "mean": 0.9999,
+   "en_core_min": 0.9999
   },
   "text|mixedbread-ai/mxbai-embed-large-v1|onnx/model_quantized.onnx": {
    "family": "wordpiece",
