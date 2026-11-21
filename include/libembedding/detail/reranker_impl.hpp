@@ -33,6 +33,7 @@
 #include <vector>
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 
 /**
  * @brief Reranker context struct (ONNX + llama.cpp backends).
@@ -82,6 +83,14 @@ struct lembed_reranker {
 
     /* Embedding cache (for re-ranked query results) */
     lembed::detail::LRUCache* cache = nullptr;
+
+    /* Thread safety (docs/en/advanced_usage.md, "Thread safety"). The ONNX
+     * tokenizer writes per-instance scratch strings and the GGUF backend
+     * shares one llama_context, so calls on one context are serialised;
+     * stats_mutex guards the counters so the stats getters never wait for an
+     * inference. Lock order: call_mutex, then stats_mutex. */
+    std::mutex call_mutex;
+    mutable std::mutex stats_mutex;
 };
 
 #include "reranker_llama_impl.hpp"
@@ -380,6 +389,9 @@ lembed_status_t lembed_reranker_rerank(
 
     if (batch_size <= 0) batch_size = ctx->batch_size;
 
+    /* One call at a time per context: see call_mutex. */
+    std::lock_guard<std::mutex> call_lock(ctx->call_mutex);
+
     try {
         auto t_start = std::chrono::high_resolution_clock::now();
 
@@ -388,22 +400,26 @@ lembed_status_t lembed_reranker_rerank(
         miss_indices.reserve(num_documents);
 
         if (ctx->cache) {
+            uint64_t hits = 0;
             for (int i = 0; i < num_documents; i++) {
                 std::string key = std::string(query) + "\n" + documents[i];
                 std::vector<float> cached;
                 if (ctx->cache->get_copy(key, cached) && cached.size() == 1) {
                     all_scores[i] = cached[0];
-                    ctx->cache_hits++;
+                    hits++;
                 } else {
                     miss_indices.push_back(i);
-                    ctx->cache_misses++;
                 }
             }
+            std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
+            ctx->cache_hits += hits;
+            ctx->cache_misses += (uint64_t)miss_indices.size();
         } else {
             miss_indices.reserve(num_documents);
             for (int i = 0; i < num_documents; i++) {
                 miss_indices.push_back(i);
             }
+            std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
             ctx->cache_misses += num_documents;
         }
 
@@ -521,6 +537,7 @@ lembed_status_t lembed_reranker_rerank(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += num_documents;
         ctx->batches_run += (ctx->backend_type == LEMBED_BACKEND_LLAMACPP)
                                 ? (uint64_t)lembed::detail::batch_count((int)miss_indices.size(),
@@ -570,6 +587,7 @@ const char* lembed_reranker_effective_provider(const lembed_reranker_t* ctx) {
 void lembed_reranker_stats(const lembed_reranker_t* ctx, lembed_stats_t* out) {
     if (!out) return;
     if (!ctx) { memset(out, 0, sizeof(*out)); return; }
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->texts_embedded = ctx->texts_embedded;
     out->batches_run = ctx->batches_run;
     out->avg_latency_ms = ctx->stats_calls > 0
@@ -581,6 +599,7 @@ void lembed_reranker_stats_v2(const lembed_reranker_t* ctx, lembed_stats_v2_t* o
     if (!out) return;
     memset(out, 0, sizeof(*out));
     if (!ctx) return;
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->base.texts_embedded = ctx->texts_embedded;
     out->base.batches_run = ctx->batches_run;
     out->base.avg_latency_ms = ctx->stats_calls > 0

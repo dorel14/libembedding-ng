@@ -22,6 +22,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -78,11 +79,18 @@ static std::string read_file(const std::string& path) {
 
 static bool write_file(const std::string& path, const std::string& content) {
     std::filesystem::create_directories(std::filesystem::path(path).parent_path());
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) return false;
-    fwrite(content.data(), 1, content.size(), f);
-    fclose(f);
-    return true;
+    /* Atomic swap: a concurrent reader (another thread or process) never sees
+     * a half-written document. */
+    return write_file_atomic(path, content);
+}
+
+/* The legacy single-file cache is read-modify-written (load, add one key,
+ * save): two threads saving different keys lost one of the two updates.
+ * This process-wide mutex serialises load/save/clear within a process;
+ * several processes remain last-writer-wins (documented). */
+static std::mutex& tune_cache_mutex() {
+    static std::mutex m;
+    return m;
 }
 
 /* Hardware detection helpers. The fingerprint keys the tuning cache, so a
@@ -391,6 +399,7 @@ lembed_status_t lembed_tune_cache_load(
     if (!hw || !sw || !model || !backend || !entry) return LEMBED_ERROR_INVALID_ARGUMENT;
     char key[LEMBED_TUNE_CACHE_KEY_SIZE];
     lembed_tune_cache_key(hw, sw, model, backend, key);
+    std::lock_guard<std::mutex> cache_lock(lembed::detail::tune_cache_mutex());
     cJSON* root = lembed::detail::load_cache();
     cJSON* item = cJSON_GetObjectItem(root, key);
     if (!item) { cJSON_Delete(root); return LEMBED_ERROR_CACHE_MISS; }
@@ -427,6 +436,7 @@ lembed_status_t lembed_tune_cache_save(const lembed_tune_cache_entry_t* entry) {
     lembed_cache_model_info_t model = entry->model;
     char key[LEMBED_TUNE_CACHE_KEY_SIZE];
     lembed_tune_cache_key(&hw, &sw, &model, entry->backend, key);
+    std::lock_guard<std::mutex> cache_lock(lembed::detail::tune_cache_mutex());
     cJSON* root = lembed::detail::load_cache();
     cJSON* item = cJSON_CreateObject();
     cJSON_AddNumberToObject(item, "schema_version", LEMBED_TUNE_CACHE_SCHEMA_VERSION);
@@ -460,6 +470,7 @@ lembed_status_t lembed_tune_cache_save(const lembed_tune_cache_entry_t* entry) {
 }
 
 lembed_status_t lembed_tune_cache_clear(void) {
+    std::lock_guard<std::mutex> cache_lock(lembed::detail::tune_cache_mutex());
     std::filesystem::remove(lembed::detail::cache_file());
     return LEMBED_OK;
 }

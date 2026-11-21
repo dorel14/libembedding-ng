@@ -1,0 +1,101 @@
+# Auteur: David Orel
+# SPDX-License-Identifier: MIT
+#
+# Thread-safety checks (T24): the multi-thread contract test under clang
+# ThreadSanitizer, and the 10 000-call memory stability test. Models are small
+# and cached between runs (actions/cache on the libembedding cache directory).
+name: Concurrency
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "include/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/tsan.yml"
+  workflow_dispatch:
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+  # Models the tests may download (tags: see tests/conc_support.h). The sparse
+  # ONNX model (500 MB) is left out: its test skips when it is not cached.
+  LEMBED_TEST_ALLOW_DOWNLOAD: "text,text_gguf,reranker,sparse_gguf,image"
+
+jobs:
+  tsan:
+    name: tsan-linux-x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libcurl4-openssl-dev
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/libembedding
+          key: concurrency-models-v1
+
+      - name: Configure (clang, ThreadSanitizer)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_FLAGS="-fsanitize=thread" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=thread" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DLIBEMBEDDING_BUILD_TESTS=ON \
+            -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
+            -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
+            -DLIBEMBEDDING_BUILD_SHARED=OFF \
+            -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
+
+      - name: Build
+        run: cmake --build build --parallel 4 --target test_concurrency
+
+      - name: Run under ThreadSanitizer
+        env:
+          TSAN_OPTIONS: "suppressions=${{ github.workspace }}/tests/tsan.supp halt_on_error=0 exitcode=66 second_deadlock_stack=1"
+        run: ./build/tests/test_concurrency
+
+  repeated-calls:
+    name: repeated-calls-linux-x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libcurl4-openssl-dev
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION" | tail -n 1)"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/libembedding
+          key: concurrency-models-v1
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLIBEMBEDDING_BUILD_TESTS=ON \
+            -DLIBEMBEDDING_STABILITY_TESTS=ON \
+            -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
+            -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
+            -DLIBEMBEDDING_BUILD_SHARED=OFF \
+            -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
+          cmake --build build --parallel 4 --target test_repeated_calls
+
+      - name: Run 10 000 repeated calls
+        run: ./build/tests/test_repeated_calls

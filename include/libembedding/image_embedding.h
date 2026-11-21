@@ -107,6 +107,7 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -129,6 +130,12 @@ struct lembed_image_embedding {
     uint64_t batches_run = 0;
     double   total_latency_ms = 0.0;
     int      stats_calls = 0;
+
+    /* Thread safety (docs/en/advanced_usage.md, "Thread safety"). Image
+     * inference keeps no per-context scratch state (buffers are per call and
+     * OrtApi::Run is thread-safe), so concurrent calls on one context run in
+     * parallel. Only the counters are shared: stats_mutex guards them. */
+    mutable std::mutex stats_mutex;
 };
 
 #ifdef __cplusplus
@@ -329,6 +336,7 @@ lembed_status_t lembed_image_embedding_embed_files(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += (uint64_t)num_images;
         ctx->batches_run += (uint64_t)num_batches;
         ctx->total_latency_ms += elapsed_ms;
@@ -405,6 +413,7 @@ lembed_status_t lembed_image_embedding_embed_bytes(
 
         auto t_end = std::chrono::high_resolution_clock::now();
         double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += num_images;
         ctx->batches_run += num_batches;
         ctx->total_latency_ms += elapsed_ms;
@@ -445,6 +454,7 @@ const char* lembed_image_embedding_effective_provider(const lembed_image_embeddi
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out) {
     if (!out) return;
     if (!ctx) { memset(out, 0, sizeof(*out)); return; }
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->texts_embedded = ctx->texts_embedded;
     out->batches_run = ctx->batches_run;
     out->avg_latency_ms = ctx->stats_calls > 0
@@ -460,6 +470,7 @@ void lembed_image_embedding_stats_v2(const lembed_image_embedding_t* ctx, lembed
     if (!out) return;
     memset(out, 0, sizeof(*out));
     if (!ctx) return;
+    std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
     out->base.texts_embedded = ctx->texts_embedded;
     out->base.batches_run = ctx->batches_run;
     out->base.avg_latency_ms = ctx->stats_calls > 0

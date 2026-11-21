@@ -360,6 +360,33 @@ embeddings = model.embed(["Hello"])  # returns np.ndarray directly
 - No separate `passage_embed()` method — everything goes through `embed()`
 - Lighter classes, fewer Python dependencies
 
+## Thread safety
+
+The rule: **a context may be shared between threads, but calls on it are
+serialised** (text, sparse, reranker). Image contexts run calls in parallel.
+For parallelism, use one context per thread or `TextEmbeddingPool`. Never free
+a context while another thread still uses it, and never call back into a
+context from an `embed_stream` callback (it holds the context lock: deadlock).
+
+| Type | Shared between threads? | Why (source) |
+|---|---|---|
+| Text, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `detail/text_embedding_impl.hpp:125,169`; the tokenizer writes scratch strings and the GGUF backend has one `llama_context` |
+| Sparse, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `sparse_text_embedding.h:171,348`; GGUF workers reuse ggml graphs per call |
+| Reranker, ONNX and GGUF | Yes, calls serialised | `call_mutex` in `detail/reranker_impl.hpp:91,341` |
+| Image | Yes, calls run in parallel | no per-context scratch, `OrtApi::Run` is thread-safe; only the counters are locked (`image_embedding.h:116`) |
+| Stats getters (`*_stats`, `*_stats_v2`) | Yes, never wait for an inference | separate `stats_mutex` (same lines) |
+| `TextEmbeddingPool` | Yes | each worker owns a context (serialised), calls from several threads queue per worker (`cpp/embedding_pool.hpp`) |
+| LRU cache (`lembed_cache_*`) | Yes | one mutex (`detail/embedding_cache_impl.hpp:142`). Use `lembed_cache_get_copy()`: `lembed_cache_get()` returns a borrowed pointer (deprecated) |
+| Autotune cache entries | Yes in a process | unique temporary name then atomic rename (`detail/autotune_cache.hpp:392`); several processes: last writer wins |
+| Legacy tune cache (`lembed_tune_cache_*`) | Yes in a process | process-wide mutex (`detail/autotune_cache_impl.hpp:91`); several processes: last writer wins |
+| Model downloader | Yes | unique temporary file per download, atomic publish (`detail/downloader_impl.hpp:339`). Two threads may download the same file twice |
+| `lembed_last_error()` | Yes | thread-local buffer (`error.h:79`): read it on the thread that got the failure |
+| `create` / `free` | Create contexts from any thread; free from one thread once no call is in flight | |
+
+Tests: `tests/test_concurrency.cpp` (also built with ThreadSanitizer by the
+`tsan.yml` workflow) and `tests/test_repeated_calls.cpp` (10 000 repeated calls,
+bounded RSS growth, `-DLIBEMBEDDING_STABILITY_TESTS=ON`).
+
 ## Performance tips
 
 For optimal performance:

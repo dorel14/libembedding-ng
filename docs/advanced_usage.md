@@ -364,6 +364,34 @@ embeddings = model.embed(["Hello"])  # retourne np.ndarray directement
 - Pas de méthode `passage_embed()` séparée — tout passe par `embed()`
 - Classes plus légères, moins de dépendances Python
 
+## Thread safety
+
+La règle : **un contexte peut être partagé entre threads, mais les appels sur
+ce contexte sont sérialisés** (texte, sparse, reranker). Les contextes image
+exécutent les appels en parallèle. Pour du parallélisme, utiliser un contexte
+par thread ou `TextEmbeddingPool`. Ne jamais libérer un contexte pendant qu'un
+autre thread l'utilise, ni rappeler le même contexte depuis le callback de
+`embed_stream` (il tient le verrou du contexte : interblocage).
+
+| Type | Partageable entre threads ? | Pourquoi (source) |
+|---|---|---|
+| Texte, ONNX et GGUF | Oui, appels sérialisés | `call_mutex` dans `detail/text_embedding_impl.hpp:125,169` ; le tokenizer écrit des chaînes temporaires et le backend GGUF n'a qu'un `llama_context` |
+| Sparse, ONNX et GGUF | Oui, appels sérialisés | `call_mutex` dans `sparse_text_embedding.h:171,348` ; les workers GGUF réutilisent leurs graphes ggml |
+| Reranker, ONNX et GGUF | Oui, appels sérialisés | `call_mutex` dans `detail/reranker_impl.hpp:91,341` |
+| Image | Oui, appels en parallèle | pas d'état temporaire par contexte, `OrtApi::Run` est thread-safe ; seuls les compteurs sont verrouillés (`image_embedding.h:116`) |
+| Stats (`*_stats`, `*_stats_v2`) | Oui, n'attendent jamais une inférence | `stats_mutex` séparé (mêmes lignes) |
+| `TextEmbeddingPool` | Oui | chaque worker possède un contexte (sérialisé), les appels de plusieurs threads s'enfilent par worker (`cpp/embedding_pool.hpp`) |
+| Cache LRU (`lembed_cache_*`) | Oui | un seul mutex (`detail/embedding_cache_impl.hpp:142`). Utiliser `lembed_cache_get_copy()` : `lembed_cache_get()` rend un pointeur emprunté (déprécié) |
+| Entrées du cache d'autotune | Oui dans un process | nom temporaire unique puis renommage atomique (`detail/autotune_cache.hpp:392`) ; plusieurs process : le dernier écrivain gagne |
+| Ancien cache de tuning (`lembed_tune_cache_*`) | Oui dans un process | mutex global au process (`detail/autotune_cache_impl.hpp:91`) ; plusieurs process : le dernier écrivain gagne |
+| Téléchargeur de modèles | Oui | fichier temporaire unique par téléchargement, publication atomique (`detail/downloader_impl.hpp:339`). Deux threads peuvent télécharger deux fois le même fichier |
+| `lembed_last_error()` | Oui | tampon thread-local (`error.h:79`) : le lire sur le thread qui a reçu l'échec |
+| `create` / `free` | Créer depuis n'importe quel thread ; libérer depuis un seul thread, sans appel en cours | |
+
+Tests : `tests/test_concurrency.cpp` (aussi compilé sous ThreadSanitizer par le
+workflow `tsan.yml`) et `tests/test_repeated_calls.cpp` (10 000 appels répétés,
+croissance de RSS bornée, `-DLIBEMBEDDING_STABILITY_TESTS=ON`).
+
 ## Performance
 
 Pour des performances optimales :

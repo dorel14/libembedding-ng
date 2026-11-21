@@ -36,6 +36,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,8 @@ lembed_status_t lembed_sparse_text_embedding_embed_gguf(
         result->count = out_offset;
 
         const auto t_end = std::chrono::high_resolution_clock::now();
+        /* The caller, lembed_sparse_text_embedding_embed(), holds call_mutex. */
+        std::lock_guard<std::mutex> stats_lock(ctx->stats_mutex);
         ctx->texts_embedded += (uint64_t)out_offset;
         ctx->batches_run += (uint64_t)num_batches;
         ctx->total_latency_ms += std::chrono::duration<double, std::milli>(

@@ -129,7 +129,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           cd build
-          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection
+          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection
 
       - name: Build tests (Windows)
         if: runner.os == 'Windows'
@@ -138,7 +138,7 @@ jobs:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
         run: |
           Set-Location build
-          cmake --build . --parallel --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection --config Release
+          cmake --build . --parallel --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection --config Release
 
       - name: Run C++ unit tests (Linux)
         if: runner.os == 'Linux'
