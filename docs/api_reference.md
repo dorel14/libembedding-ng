@@ -220,6 +220,8 @@ print(embeddings.shape)  # (2, 512)
 
 Score et trie des documents par pertinence par rapport à une requête (cross-encoder).
 
+Sur ONNX, requête et document sont encodés comme une vraie paire de séquences, selon le `post_processor` du `tokenizer.json` (gabarit de paire, tokens spéciaux, `token_type_ids`), avec troncature `longest_first` ; à défaut, style BERT `[CLS] q [SEP] d [SEP]`.
+
 #### Constructeur
 
 ```python

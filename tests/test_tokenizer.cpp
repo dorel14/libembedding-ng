@@ -405,7 +405,89 @@ static void test_bpe_legacy_behaviour_is_pinned(void) {
           "a truncated multi-byte sequence is handled without reading past the end");
 }
 
+/* ==========================================================================
+ * Sequence pairs (reranker input)
+ * ========================================================================== */
+
+static std::string with_post_processor(const std::string& pp) {
+    std::string json = make_tokenizer_json();
+    const std::string old = "\"post_processor\":{\"type\":\"TemplateProcessing\"}";
+    json.replace(json.find(old), old.size(), "\"post_processor\":" + pp);
+    return json;
+}
+
+static const char* kBertTemplate =
+    "{\"type\":\"TemplateProcessing\","
+    "\"single\":[{\"SpecialToken\":{\"id\":\"[CLS]\",\"type_id\":0}},"
+        "{\"Sequence\":{\"id\":\"A\",\"type_id\":0}},"
+        "{\"SpecialToken\":{\"id\":\"[SEP]\",\"type_id\":0}}],"
+    "\"pair\":[{\"SpecialToken\":{\"id\":\"[CLS]\",\"type_id\":0}},"
+        "{\"Sequence\":{\"id\":\"A\",\"type_id\":0}},"
+        "{\"SpecialToken\":{\"id\":\"[SEP]\",\"type_id\":0}},"
+        "{\"Sequence\":{\"id\":\"B\",\"type_id\":1}},"
+        "{\"SpecialToken\":{\"id\":\"[SEP]\",\"type_id\":1}}],"
+    "\"special_tokens\":{\"[CLS]\":{\"id\":\"[CLS]\",\"ids\":[2],\"tokens\":[\"[CLS]\"]},"
+        "\"[SEP]\":{\"id\":\"[SEP]\",\"ids\":[3],\"tokens\":[\"[SEP]\"]}}}";
+
+static void check_pair(const lembed::detail::TokenizerWrapper& tok,
+                       const char* a, const char* b,
+                       const std::vector<int>& want_ids,
+                       const std::vector<int>& want_types, const char* msg) {
+    std::vector<int> i, t;
+    tok.encode_pair(a, b, i, t);
+    CHECK(i == want_ids, msg);
+    CHECK(t == want_types, msg);
+}
+
+static void test_pair_bert_template(void) {
+    lembed::detail::TokenizerWrapper tok;
+    tok.load_from_blob(with_post_processor(kBertTemplate), 512);
+    check_pair(tok, "the fox", "quick brown",
+               {2, 5, 8, 3, 6, 7, 3}, {0, 0, 0, 0, 1, 1, 1},
+               "[CLS] q [SEP] d [SEP], types 0..0 1..1");
+    /* Single sequence is unchanged by the pair support. */
+    CHECK(encode_one(tok, "the fox") == ids({2, 5, 8, 3}), "single encoding unchanged");
+}
+
+static void test_pair_fallback_without_template(void) {
+    lembed::detail::TokenizerWrapper tok;
+    tok.load_from_blob(make_tokenizer_json(), 512); /* post_processor has no pair */
+    check_pair(tok, "the fox", "brown",
+               {2, 5, 8, 3, 7, 3}, {0, 0, 0, 0, 1, 1}, "BERT fallback");
+}
+
+static void test_pair_bert_processing_and_roberta(void) {
+    lembed::detail::TokenizerWrapper bert;
+    bert.load_from_blob(with_post_processor(
+        "{\"type\":\"BertProcessing\",\"sep\":[\"[SEP]\",3],\"cls\":[\"[CLS]\",2]}"), 512);
+    check_pair(bert, "fox", "the", {2, 8, 3, 5, 3}, {0, 0, 0, 1, 1}, "BertProcessing");
+
+    /* RoBERTa / XLM-R: <s> A </s></s> B </s>, type ids all 0. Reuse ids 2/3. */
+    lembed::detail::TokenizerWrapper rob;
+    rob.load_from_blob(with_post_processor(
+        "{\"type\":\"Sequence\",\"processors\":[{\"type\":\"ByteLevel\"},"
+        "{\"type\":\"RobertaProcessing\",\"sep\":[\"</s>\",3],\"cls\":[\"<s>\",2]}]}"), 512);
+    check_pair(rob, "fox", "the", {2, 8, 3, 3, 5, 3}, {0, 0, 0, 0, 0, 0}, "RobertaProcessing");
+}
+
+static void test_pair_longest_first_truncation(void) {
+    lembed::detail::TokenizerWrapper tok;
+    tok.load_from_blob(with_post_processor(kBertTemplate), 8); /* 3 specials: 5 body */
+    /* a=2 tokens, b=6 tokens: the longer (b) is trimmed to 3. */
+    check_pair(tok, "fox the", "quick brown fox the quick brown",
+               {2, 8, 5, 3, 6, 7, 8, 3}, {0, 0, 0, 0, 1, 1, 1, 1},
+               "longest_first trims the longer segment");
+    /* a=4, b=4: tie trims b first, ends 3/... total 5 -> a=3,b=2 per HF loop */
+    check_pair(tok, "the quick brown fox", "the quick brown fox",
+               {2, 5, 6, 7, 3, 5, 6, 3}, {0, 0, 0, 0, 0, 1, 1, 1},
+               "equal lengths: result fits max_length with both specials kept");
+}
+
 int main(void) {
+    test_pair_bert_template();
+    test_pair_fallback_without_template();
+    test_pair_bert_processing_and_roberta();
+    test_pair_longest_first_truncation();
     test_plain_ascii();
     test_accents_are_stripped();
     test_sharp_s_and_long_s_differ();
