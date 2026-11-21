@@ -373,6 +373,29 @@ jobs:
           sys.exit(failed)
           EOF
 
+      # ── Model download cache ─────────────────────────────────────
+      # The network tests download models of several hundred MB (SPLADE,
+      # CLIP vision...). LIBEMBEDDING_CACHE_DIR (downloader_impl.hpp) pins
+      # one directory so the cache path is the same on every OS. Tests run
+      # on the host, not in the manylinux container, so no mount is needed.
+      # Fixed key: bump v1 to refresh; saved only when the job succeeds, so a
+      # partial download is never cached.
+      - name: Set model cache directory
+        shell: bash
+        run: echo "LIBEMBEDDING_CACHE_DIR=${{ runner.temp }}/libembedding-models" >> "$GITHUB_ENV"
+
+      # Restore and save are split so the models are saved even when the tests
+      # fail: a slow download that times out a test still lands in the cache,
+      # and the next run reuses it. Each run saves under its own key (cache
+      # keys are immutable); restore takes the most recent one by prefix.
+      - name: Restore downloaded models
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
+          restore-keys: |
+            models-${{ runner.os }}-${{ runner.arch }}-v1-
+
       # ── Install wheel and run tests ──────────────────────────────
       - name: Install wheel and run tests
         shell: bash
@@ -409,6 +432,13 @@ jobs:
           # 600 s: network tests download models of several hundred MB, and a
           # slow runner download is not a hang (it failed the 1.15.0 release).
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
+
+      - name: Save downloaded models
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
       - name: Upload repaired wheel artifact

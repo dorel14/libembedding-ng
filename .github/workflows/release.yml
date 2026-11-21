@@ -121,15 +121,33 @@ jobs:
           cp "${curl_lib_dir}/libcurl${ext}" python/src/libembedding/ || true
           ls -la python/src/libembedding/
 
+      # Same model cache as build-wheel.yml (shared key, same runner OS/arch).
+      - name: Restore downloaded models
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
+          restore-keys: |
+            models-${{ runner.os }}-${{ runner.arch }}-v1-
+
       - name: Run Python tests
         env:
           ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
+          LIBEMBEDDING_CACHE_DIR: ${{ runner.temp }}/libembedding-models
         run: |
           cd python
           pip install -e .[dev]
           pip install pytest-timeout
           # 600 s: network tests download models of several hundred MB.
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
+
+      # Saved even when the tests fail, so a slow download is not repeated.
+      - name: Save downloaded models
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
 
   # -----------------------------------------------------------------------
   # 3) Determine the next version and create the release (AFTER tests pass)
