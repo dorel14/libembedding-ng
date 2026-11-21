@@ -1,7 +1,7 @@
 """High-level document reranker API.
 
 Auteur: David Orel
-Version: 1.14.0
+Version: 1.15.0
 """
 
 from __future__ import annotations

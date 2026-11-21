@@ -25,7 +25,7 @@
  * ggml's defaults.
  *
  * Auteur: David Orel
- * Version: 1.14.0
+ * Version: 1.15.0
  *
  * SPDX-License-Identifier: MIT
  */
