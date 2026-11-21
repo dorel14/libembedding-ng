@@ -94,7 +94,22 @@ inline bool ort_telemetry_disabled() {
 inline const OrtApi* ort_api() {
     static const OrtApi* api = []() {
         (void)ort_telemetry_disabled();
-        return OrtGetApiBase()->GetApi(ORT_API_VERSION);
+        const OrtApiBase* base = OrtGetApiBase();
+        const OrtApi* a = base ? base->GetApi(ORT_API_VERSION) : nullptr;
+        if (!a) {
+            /* GetApi() returns NULL when the onnxruntime library that was
+             * actually loaded is older than the headers we were built with
+             * (e.g. the Windows System32 copy shadowing ours). Dereferencing
+             * it would crash on the first ORT call, so fail with the versions. */
+            const char* loaded = base && base->GetVersionString
+                                     ? base->GetVersionString() : "unknown";
+            throw std::runtime_error(
+                std::string("ONNX Runtime API version ") +
+                std::to_string(ORT_API_VERSION) +
+                " is not supported by the loaded onnxruntime library (version " +
+                (loaded ? loaded : "unknown") + ")");
+        }
+        return a;
     }();
     return api;
 }
