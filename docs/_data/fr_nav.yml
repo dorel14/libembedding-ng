@@ -29,6 +29,12 @@
   url: performance_tuning.html
 - title: Usage avancé
   url: advanced_usage.html
+- title: Quantification
+  url: quantization.html
+- title: Routage des modèles
+  url: model_routing.html
+- title: Dépannage
+  url: troubleshooting.html
 - title: C API — Similarité
   url: c_api/similarity.html
 - title: C API — Modes

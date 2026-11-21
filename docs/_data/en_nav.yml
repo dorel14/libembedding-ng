@@ -29,6 +29,12 @@
   url: en/gguf_sparse_runtime.html
 - title: Advanced usage
   url: en/advanced_usage.html
+- title: Quantization
+  url: en/quantization.html
+- title: Model routing
+  url: en/model_routing.html
+- title: Troubleshooting
+  url: en/troubleshooting.html
 - title: C API — Similarity
   url: en/c_api/similarity.html
 - title: C API — Embedding Modes
