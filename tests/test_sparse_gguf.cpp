@@ -366,6 +366,7 @@ enum ModelVariant {
     VARIANT_NO_HEAD,   /* dense encoder only: must be refused */
     VARIANT_NO_VOCAB,  /* head but no <arch>.vocab_size: must be refused */
     VARIANT_SPECIALS,  /* only the special tokens can score above zero */
+    VARIANT_F16_BIAS,  /* one bias stored F16: must be refused, not abort */
 };
 
 void build_model(std::vector<Kv>& kvs, std::vector<Tensor>& tensors,
@@ -456,7 +457,11 @@ void build_model(std::vector<Kv>& kvs, std::vector<Tensor>& tensors,
     Tensor mlm = rnd("mlm_transform.weight", {kHidden, kHidden}, rng);
     mlm.type = matrix_type;
     tensors.push_back(mlm);
-    tensors.push_back(filled("mlm_transform.bias", {kHidden}, 0.0f));
+    Tensor mlm_b = filled("mlm_transform.bias", {kHidden}, 0.0f);
+    /* ggml's CPU add has no F32 + F16 kernel and aborts the process (found
+     * by fuzz_gguf_loader); the loader must refuse the file instead. */
+    if (variant == VARIANT_F16_BIAS) mlm_b.type = kF16;
+    tensors.push_back(mlm_b);
     tensors.push_back(ones("mlm_ln.weight", {kHidden}));
     tensors.push_back(filled("mlm_ln.bias", {kHidden}, 0.0f));
 
@@ -567,6 +572,7 @@ int write_fuzz_seeds(const std::string& dir) {
         {"specials", VARIANT_SPECIALS},
         {"nohead",   VARIANT_NO_HEAD},
         {"novocab",  VARIANT_NO_VOCAB},
+        {"f16bias",  VARIANT_F16_BIAS},
     };
     int written = 0;
     for (const Seed& s : seeds) {
@@ -1089,6 +1095,23 @@ static void test_missing_vocab_size_is_refused(void) {
     if (ctx) lembed_sparse_text_embedding_free(ctx);
 }
 
+/* A vector (bias, layer-norm weight) that is not F32 is refused at load time:
+ * ggml_add would abort the whole process on it at the first embed. */
+static void test_non_f32_vector_is_refused(void) {
+    const std::string path = fixture("f16bias", VARIANT_F16_BIAS);
+    if (path.empty()) return;
+
+    lembed_sparse_options_t opts = lembed_sparse_options_default();
+    lembed_sparse_embedding_ctx_t* ctx = nullptr;
+    const lembed_status_t s =
+        lembed_sparse_text_embedding_create_from_gguf_path(path.c_str(), &opts, &ctx);
+    CHECK(s != LEMBED_OK && ctx == nullptr, "a file with an F16 bias is refused");
+    const char* err = lembed_last_error();
+    CHECK(err != nullptr && std::string(err).find("mlm_transform.bias") != std::string::npos,
+          "the refusal names the F16 bias");
+    if (ctx) lembed_sparse_text_embedding_free(ctx);
+}
+
 /* Loads `path`, expects a refusal whose message contains `needle`, and expects
  * it fast: every malformed header must be turned down before the runtime
  * allocates or loops on what the header claims. */
@@ -1499,6 +1522,7 @@ int main(int argc, char** argv) {
     test_special_tokens_are_removed();
     test_headless_file_is_refused();
     test_missing_vocab_size_is_refused();
+    test_non_f32_vector_is_refused();
     test_malformed_files_are_refused();
     test_bad_input();
     test_create_from_path_routes_gguf();

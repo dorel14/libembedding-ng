@@ -143,6 +143,25 @@ add_executable(test_matryoshka test_matryoshka.cpp)
 target_link_libraries(test_matryoshka PRIVATE libembedding)
 add_test(NAME test_matryoshka COMMAND test_matryoshka)
 
+# Error-path cleanup of every create entry point (no network, no model: the
+# session that loads is a hand-written ONNX graph). Leaks are only visible under
+# a sanitizer build; here the test pins status codes and the NULL out pointer.
+add_executable(test_lifecycle_memory test_lifecycle_memory.cpp)
+target_link_libraries(test_lifecycle_memory PRIVATE libembedding)
+if(WIN32)
+    target_link_libraries(test_lifecycle_memory PRIVATE Psapi)
+endif()
+add_test(NAME test_lifecycle_memory COMMAND test_lifecycle_memory)
+
+# 10 000 texts through the default text model and a bound on resident-set
+# growth. Labelled "memory;slow" so a fast run can exclude it (ctest -LE slow);
+# skips (exit 77) when the model is not in the local cache, and never downloads.
+add_test(NAME test_lifecycle_large_batch COMMAND test_lifecycle_memory --large-batch)
+set_tests_properties(test_lifecycle_large_batch PROPERTIES
+    LABELS "memory;slow"
+    SKIP_RETURN_CODE 77
+    TIMEOUT 300)
+
 # End-to-end GGUF profiler. It compiles the internal session with opt-in
 # instrumentation so the public API and normal DLL builds stay unchanged.
 # Invoke manually; this is a performance tool, not a pass/fail CTest.
@@ -171,13 +190,13 @@ add_test(NAME test_backend_introspection COMMAND test_backend_introspection)
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_backend_introspection)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_backend_introspection)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
