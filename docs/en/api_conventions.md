@@ -86,11 +86,12 @@ Deprecation is documentary (a comment in the header), with no compiler `deprecat
 
 The backend is chosen by file extension and entry point (`.gguf`: llama.cpp; `.onnx`, a HuggingFace identifier or an unknown name: ONNX Runtime). See [Model routing](model_routing.html).
 
-The `backend` field (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`) is an official option of the **reranker only**:
+The `backend` field (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`) is an official option of the **reranker and dense text**:
 
 - `lembed_reranker_options_t.backend` (default `AUTO`) forces a backend. In `AUTO`, the reranker tries ONNX Runtime, then falls back to the GGUF equivalent only when the ONNX files are not found (`LEMBED_ERROR_MODEL_NOT_FOUND`) (`detail/reranker_impl.hpp`, `lembed_reranker_create`).
-- Python: `Reranker(..., backend="auto" | "onnx" | "llama")`.
-- In `lembed_text_options_t` the field exists, but `lembed_text_embedding_create()` only checks that the value lies in `[ONNX, AUTO]` (otherwise `LEMBED_ERROR_INVALID_ARGUMENT`) and then ignores it (`detail/text_embedding_onnx_impl.hpp`). There is no `backend=` parameter on `TextEmbedding` or `SparseTextEmbedding`.
+- `lembed_text_options_t.backend` (default `AUTO`): same semantics (`detail/text_embedding_onnx_impl.hpp`). `AUTO` leaves today's routing unchanged, except that it falls back to the GGUF equivalent when the ONNX files of a registry model are missing and cannot be obtained (offline, download failure). `LLAMACPP` serves a registry model through its GGUF equivalent (`LEMBED_ERROR_UNSUPPORTED` if it has none). `ONNX` refuses a `.gguf` path (`LEMBED_ERROR_UNSUPPORTED`).
+- Python: `Reranker(..., backend="auto" | "onnx" | "llama")` and `TextEmbedding(..., backend=...)`.
+- `SparseTextEmbedding` and `ImageEmbedding` have no `backend` field: adding one changes the options struct (ABI break). Sparse would need a `lembed_sparse_options_v2`.
 
 ## Python mapping
 

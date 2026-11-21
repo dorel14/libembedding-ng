@@ -106,6 +106,65 @@ def test_cpu_provider_is_never_unsupported(fake_model_dir):
         TextEmbedding(fake_model_dir, provider="cpu", dim=8)
 
 
+# ---- Text `backend` option (same semantics as the reranker) ----------------
+
+
+def test_text_backend_unknown_value_raises(fake_model_dir):
+    with pytest.raises(ValueError, match="Unknown backend"):
+        TextEmbedding(fake_model_dir, backend="cuda", dim=8)
+
+
+def test_text_backend_onnx_refuses_gguf(tmp_path):
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"GGUF")
+    with pytest.raises(UnsupportedError) as exc:
+        TextEmbedding(str(gguf), backend="onnx")
+    assert "gguf" in str(exc.value).lower()
+
+
+def test_text_backend_llama_refuses_onnx_directory(fake_model_dir):
+    with pytest.raises(UnsupportedError):
+        TextEmbedding(fake_model_dir, backend="llama", dim=8)
+
+
+def test_text_backend_llama_without_gguf_equivalent_raises(tmp_path):
+    """bge-small has no GGUF equivalent: clear error naming the model."""
+    with pytest.raises(UnsupportedError) as exc:
+        TextEmbedding(
+            "BAAI/bge-small-en-v1.5",
+            backend="llama",
+            cache_dir=str(tmp_path),
+            offline=True,
+            show_download_progress=False,
+        )
+    assert "bge-small-en-v1.5" in str(exc.value)
+
+
+@pytest.mark.parametrize("backend", ["auto", "onnx"])
+def test_text_backend_default_routing_unchanged(fake_model_dir, backend):
+    """Fake directory: still ONNX (fails on the invalid model, not on routing)."""
+    with pytest.raises(OnnxRuntimeError):
+        TextEmbedding(fake_model_dir, backend=backend, dim=8)
+
+
+@download_test
+def test_text_backend_llama_serves_registry_model_with_gguf():
+    """snowflake-arctic-embed-xs has a GGUF equivalent: backend="llama" serves it
+    with llama.cpp. Skipped when that GGUF (~30 MB) is not already cached."""
+    try:
+        model = TextEmbedding(
+            "snowflake/snowflake-arctic-embed-xs",
+            backend="llama",
+            offline=True,
+            show_download_progress=False,
+        )
+    except DownloadError:
+        pytest.skip("Snowflake-XS GGUF not cached")
+    assert model.backend == "llama.cpp"
+    assert model.info().backend == "llama.cpp"
+    assert model.embed(["hello"]).shape[1] == model.dim
+
+
 # ---- Real models ----------------------------------------------------------
 
 

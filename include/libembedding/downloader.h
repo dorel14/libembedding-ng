@@ -275,11 +275,6 @@ lembed_status_t lembed_ensure_gguf_model(
         std::string cache = lembed::detail::get_cache_dir(cache_dir);
         std::string repo_dir = lembed::detail::repo_to_dirname(repo);
         std::string model_dir = cache + "/models--" + repo_dir;
-        if (!lembed::detail::mkdirs(model_dir)) {
-            lembed::detail::set_error("Cannot create GGUF cache directory: " + model_dir);
-            return LEMBED_ERROR_IO;
-        }
-
         std::string dest = (std::filesystem::path(model_dir) / relative).string();
 
         /* Check if already cached */
@@ -288,10 +283,17 @@ lembed_status_t lembed_ensure_gguf_model(
             return LEMBED_OK;
         }
 
-        /* In offline mode, never attempt download */
+        /* In offline mode, never attempt download. This comes before the
+         * directory is created: an offline miss (for instance the GGUF fallback
+         * of a text model with backend AUTO) must leave no models--* folder. */
         if (offline) {
             lembed::detail::set_error("GGUF model not in cache (offline mode): " + dest);
             return LEMBED_ERROR_DOWNLOAD;
+        }
+
+        if (!lembed::detail::mkdirs(model_dir)) {
+            lembed::detail::set_error("Cannot create GGUF cache directory: " + model_dir);
+            return LEMBED_ERROR_IO;
         }
 
 #ifndef LIBEMBEDDING_NO_DOWNLOAD

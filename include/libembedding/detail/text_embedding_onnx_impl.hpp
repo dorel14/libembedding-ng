@@ -45,6 +45,7 @@ extern "C" {
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #ifdef __cplusplus
@@ -66,6 +67,74 @@ extern "C" {
  * ONNX backend: creation
  * ========================================================================= */
 
+static inline bool lembed__text_ieq(const char* a, const char* b) {
+    if (!a || !b) return false;
+    for (; *a && *b; ++a, ++b) {
+        if (std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b)) return false;
+    }
+    return *a == *b;
+}
+
+/* llama.cpp path for a registry text model: the GGUF registry entry matching
+ * the model's name or code (same lookup as the reranker). `auto_fallback` is
+ * true when backend AUTO switches here because the ONNX files are missing:
+ * that switch is logged (LIBEMBEDDING_VERBOSE=1) and visible through
+ * lembed_text_embedding_backend_name(). On failure the caller's error is
+ * preserved for AUTO (the ONNX failure is the one worth reporting). */
+static lembed_status_t lembed__text_create_gguf_equivalent(
+        const lembed_text_options_t* options,
+        bool auto_fallback,
+        lembed_text_embedding_t** out) {
+    lembed_model_info_t info;
+    lembed_status_t s = lembed_get_text_model_info(options->model, &info);
+    if (s != LEMBED_OK) return s;
+
+    /* The GGUF registry records the original HuggingFace model of each file in
+     * model_code: an exact (case-insensitive) match on the text model's name is
+     * the reliable key. lembed_find_gguf_model() matches the GGUF *display*
+     * name by substring and is only the last resort, as for the reranker. */
+    const lembed_gguf_model_info_t* gguf = nullptr;
+    {
+        const lembed_gguf_model_info_t* list = nullptr;
+        int n = 0;
+        if (lembed_list_gguf_models(&list, &n) == LEMBED_OK && list) {
+            for (int i = 0; i < n && !gguf; i++) {
+                const char* code = list[i].model_code;
+                if (!code) continue;
+                if (lembed__text_ieq(code, info.model_name) ||
+                    lembed__text_ieq(code, info.model_code)) {
+                    gguf = &list[i];
+                }
+            }
+        }
+    }
+    if (!gguf) gguf = lembed_find_gguf_model(info.model_name);
+    if (!gguf) gguf = lembed_find_gguf_model(info.model_code);
+    /* A partial-name match must not silently change the embedding dimension. */
+    if (gguf && gguf->dim > 0 && info.dim > 0 && gguf->dim != info.dim) gguf = nullptr;
+    if (!gguf || !gguf->gguf_url || !gguf->gguf_url[0]) {
+        if (!auto_fallback) {
+            lembed::detail::set_error(
+                std::string("No GGUF equivalent found for text model '") +
+                info.model_name + "' and llama.cpp backend requested");
+        }
+        return auto_fallback ? LEMBED_ERROR_DOWNLOAD : LEMBED_ERROR_UNSUPPORTED;
+    }
+
+    char* path = nullptr;
+    s = lembed_resolve_gguf_path(gguf->gguf_url, options->cache_dir, options->offline, &path);
+    if (s != LEMBED_OK || !path) return s != LEMBED_OK ? s : LEMBED_ERROR_DOWNLOAD;
+    if (auto_fallback) {
+        lembed::detail::log_info(
+            "libembedding: text model '%s': ONNX model not found, "
+            "backend AUTO falls back to llama.cpp with GGUF '%s'\n",
+            info.model_name, gguf->name);
+    }
+    s = lembed_text_embedding_create_from_gguf_path(path, options, out);
+    lembed_free_string(path);
+    return s;
+}
+
 lembed_status_t lembed_text_embedding_create(
         const lembed_text_options_t* options,
         lembed_text_embedding_t** out) {
@@ -75,6 +144,11 @@ lembed_status_t lembed_text_embedding_create(
     if (options->backend < LEMBED_BACKEND_ONNX || options->backend > LEMBED_BACKEND_AUTO) {
         lembed::detail::set_error("Invalid backend value in text embedding options");
         return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* Explicit llama.cpp: the registry model is served by its GGUF equivalent. */
+    if (options->backend == LEMBED_BACKEND_LLAMACPP) {
+        return lembed__text_create_gguf_equivalent(options, false, out);
     }
 
     {
@@ -91,6 +165,18 @@ lembed_status_t lembed_text_embedding_create(
         s = lembed_ensure_text_model(options->model, options->cache_dir,
                                      options->show_download_progress,
                                      options->offline, &model_dir_cstr);
+        /* AUTO only: ONNX files missing and not obtainable (offline or download
+         * failure) -> GGUF equivalent if any. A refused model, a provider error
+         * or a broken file stays an error the caller must see. */
+        if (s == LEMBED_ERROR_DOWNLOAD && options->backend == LEMBED_BACKEND_AUTO) {
+            const std::string onnx_err = lembed_last_error() ? lembed_last_error() : "";
+            lembed_text_embedding_t* gctx = nullptr;
+            if (lembed__text_create_gguf_equivalent(options, true, &gctx) == LEMBED_OK) {
+                *out = gctx;
+                return LEMBED_OK;
+            }
+            lembed::detail::set_error(onnx_err);
+        }
         if (s != LEMBED_OK) return s;
         std::string model_dir(model_dir_cstr);
         lembed_free_string(model_dir_cstr);
@@ -156,6 +242,11 @@ lembed_status_t lembed_text_embedding_create_v2(
      * the model is created, otherwise the request silently loads the default
      * file and the override reaches only the ctx field, never the session. */
     lembed_text_options_t base = options->base;
+    /* Explicit llama.cpp: quantization variants are ONNX registry entries, the
+     * GGUF equivalent is resolved by lembed_text_embedding_create(). */
+    if (base.backend == LEMBED_BACKEND_LLAMACPP) {
+        return lembed_text_embedding_create(&base, out);
+    }
     int requested = (int)options->quantization;
     int resolved = requested;
 

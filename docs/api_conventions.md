@@ -87,11 +87,12 @@ La dépréciation est documentaire (commentaire dans l'en-tête), sans attribut 
 
 Le backend se choisit par l'extension et le point d'entrée (`.gguf` : llama.cpp ; `.onnx`, identifiant HuggingFace ou nom inconnu : ONNX Runtime). Voir [Routage des modèles](model_routing.html).
 
-Le champ `backend` (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`) est une option officielle **du reranker uniquement** :
+Le champ `backend` (`LEMBED_BACKEND_ONNX`, `LEMBED_BACKEND_LLAMACPP`, `LEMBED_BACKEND_AUTO`) est une option officielle **du reranker et du texte dense** :
 
 - `lembed_reranker_options_t.backend` (défaut `AUTO`) force un backend. En `AUTO`, le reranker essaie ONNX Runtime, puis bascule sur l'équivalent GGUF seulement si les fichiers ONNX sont introuvables (`LEMBED_ERROR_MODEL_NOT_FOUND`) (`detail/reranker_impl.hpp`, `lembed_reranker_create`).
-- Python : `Reranker(..., backend="auto" | "onnx" | "llama")`.
-- Dans `lembed_text_options_t`, le champ existe mais `lembed_text_embedding_create()` ne fait que vérifier que la valeur est dans `[ONNX, AUTO]` (sinon `LEMBED_ERROR_INVALID_ARGUMENT`), puis l'ignore (`detail/text_embedding_onnx_impl.hpp`). Il n'y a pas de paramètre `backend=` sur `TextEmbedding` ni `SparseTextEmbedding`.
+- `lembed_text_options_t.backend` (défaut `AUTO`) : même sémantique (`detail/text_embedding_onnx_impl.hpp`). `AUTO` ne change rien au routage actuel, sauf repli sur l'équivalent GGUF quand les fichiers ONNX d'un modèle du registre sont introuvables et inobtenables (hors ligne, échec de téléchargement). `LLAMACPP` sert un modèle du registre par son équivalent GGUF (`LEMBED_ERROR_UNSUPPORTED` s'il n'en a pas). `ONNX` refuse un chemin `.gguf` (`LEMBED_ERROR_UNSUPPORTED`).
+- Python : `Reranker(..., backend="auto" | "onnx" | "llama")` et `TextEmbedding(..., backend=...)`.
+- `SparseTextEmbedding` et `ImageEmbedding` n'ont pas de champ `backend` : en ajouter un change la struct d'options (rupture d'ABI). Pour le sparse, il faudrait un `lembed_sparse_options_v2`.
 
 ## Correspondance Python
 
