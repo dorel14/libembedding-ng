@@ -83,6 +83,7 @@ testpaths = ["tests"]
 markers = [
     "network: test requires network access (model download)",
     "download_smoke: minimal download check, selected on platforms that build their own libcurl (Android)",
+    "timeout: per-test timeout in seconds (pytest-timeout); registered so runs without the plugin do not warn",
 ]
 
 [tool.ruff]

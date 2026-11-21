@@ -34,6 +34,16 @@ UNAVAILABLE = ["cuda", "directml", "tensorrt"] + (
     [] if sys.platform == "darwin" else ["coreml"]
 )
 
+# These tests download whole models (the ONNX SPLADE and CLIP vision files are
+# several hundred MB). The suite-wide --timeout=120 is for compute, not for a
+# slow runner download, which made release wheel jobs fail at random.
+DOWNLOAD_TIMEOUT_S = 600
+
+
+def download_test(func):
+    """Marks a test as needing the network, with a download-sized timeout."""
+    return pytest.mark.network(pytest.mark.timeout(DOWNLOAD_TIMEOUT_S)(func))
+
 
 @pytest.fixture
 def fake_model_dir(tmp_path):
@@ -131,7 +141,7 @@ def test_onnx_text_reports_onnxruntime_cpu(bge_small):
     assert info.provider == "cpu"
 
 
-@pytest.mark.network
+@download_test
 def test_gguf_text_reports_llamacpp():
     model = TextEmbedding(_gguf_path("Snowflake-XS-Q4"), show_download_progress=False)
     assert model.backend == "llama.cpp"
@@ -143,7 +153,7 @@ def test_gguf_text_reports_llamacpp():
     assert info.provider == "llama"
 
 
-@pytest.mark.network
+@download_test
 def test_reranker_auto_falling_back_to_gguf_reports_llamacpp():
     """backend="auto" with a name the ONNX registry does not know: the
     reranker is served by llama.cpp, and says so."""
@@ -160,7 +170,7 @@ def test_reranker_auto_falling_back_to_gguf_reports_llamacpp():
     assert info.name  # desc_v2 is filled for GGUF rerankers too
 
 
-@pytest.mark.network
+@download_test
 def test_onnx_reranker_reports_onnxruntime():
     model = Reranker(
         "jinaai/jina-reranker-v1-turbo-en-quantized", show_download_progress=False
@@ -170,7 +180,7 @@ def test_onnx_reranker_reports_onnxruntime():
     assert model.info().backend == "onnxruntime"
 
 
-@pytest.mark.network
+@download_test
 def test_onnx_sparse_reports_onnxruntime():
     try:
         model = SparseTextEmbedding(
@@ -183,7 +193,7 @@ def test_onnx_sparse_reports_onnxruntime():
     assert model.info().backend == "onnxruntime"
 
 
-@pytest.mark.network
+@download_test
 def test_gguf_sparse_reports_ggml_sparse():
     info = lib.lembed_find_sparse_gguf_model(b"SPLADE-PP-En-v1-GGUF")
     assert info != ffi.NULL
@@ -194,7 +204,7 @@ def test_gguf_sparse_reports_ggml_sparse():
     assert model.info().backend == "ggml-sparse"
 
 
-@pytest.mark.network
+@download_test
 def test_image_reports_onnxruntime():
     try:
         model = ImageEmbedding(
