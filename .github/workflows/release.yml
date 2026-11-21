@@ -128,7 +128,8 @@ jobs:
           cd python
           pip install -e .[dev]
           pip install pytest-timeout
-          pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
+          # 600 s: network tests download models of several hundred MB.
+          pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
 
   # -----------------------------------------------------------------------
   # 3) Determine the next version and create the release (AFTER tests pass)

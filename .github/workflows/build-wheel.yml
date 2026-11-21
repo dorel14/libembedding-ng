@@ -406,7 +406,9 @@ jobs:
           fi
           export LIBEMBEDDING_TEST_INSTALLED=1
           (cd "$RUNNER_TEMP" && python -c "import libembedding, sys; print('Testing', libembedding.__file__); sys.exit('site-packages' not in libembedding.__file__)")
-          pytest tests/ -v --timeout=120 --cov=libembedding --cov-fail-under=40
+          # 600 s: network tests download models of several hundred MB, and a
+          # slow runner download is not a hang (it failed the 1.15.0 release).
+          pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
       - name: Upload repaired wheel artifact
