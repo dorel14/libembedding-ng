@@ -307,7 +307,8 @@ static void test_pretokenizer(const std::string& dir, const std::vector<CorpusTe
  * implements, and which must therefore match HF id for id. The others are
  * measured and reported so the gap has a number attached. */
 static bool family_supported(const std::string& family) {
-    return family.rfind("wordpiece-", 0) == 0 || family.rfind("unigram-", 0) == 0;
+    return family.rfind("wordpiece-", 0) == 0 || family.rfind("unigram-", 0) == 0 ||
+           family.rfind("bpe-bytelevel-", 0) == 0;
 }
 
 static std::string cache_root() {

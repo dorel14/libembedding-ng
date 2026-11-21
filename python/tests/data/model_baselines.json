@@ -105,9 +105,9 @@
   },
   "text|openai/clip-vit-base-patch32|model.onnx": {
    "family": "bpe-bytelevel",
-   "min": 0.2945,
-   "mean": 0.763,
-   "en_core_min": 0.3162
+   "min": 1.0,
+   "mean": 1.0,
+   "en_core_min": 1.0
   },
   "text|snowflake/snowflake-arctic-embed-xs|onnx/model.onnx": {
    "family": "wordpiece",
