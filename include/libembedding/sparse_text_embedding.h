@@ -41,6 +41,30 @@ const lembed_model_desc_t* lembed_sparse_text_embedding_desc(const lembed_sparse
 const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embedding_ctx_t* ctx);
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx);
 
+/**
+ * @brief Runtime that actually serves this context.
+ *
+ * "onnxruntime" (ONNX model) or "ggml-sparse" (GGUF model): the latter is this
+ * library's own ggml graph for SPLADE heads, not llama.cpp, whose loader
+ * cannot read these files.
+ *
+ * @param ctx Sparse embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_sparse_text_embedding_backend_name(const lembed_sparse_embedding_ctx_t* ctx);
+
+/**
+ * @brief Execution provider actually running the model.
+ *
+ * ONNX Runtime: "CPU", "CUDA", "CoreML", "DirectML" or "TensorRT" (spelling of
+ * lembed_execution_provider_name()); an unavailable provider other than CPU
+ * fails the create with LEMBED_ERROR_UNSUPPORTED. "ggml-sparse": always "CPU".
+ *
+ * @param ctx Sparse embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_sparse_text_embedding_effective_provider(const lembed_sparse_embedding_ctx_t* ctx);
+
 /* Runtime statistics */
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out);
 /* Versioned stats (cache fields present for API parity with the dense/rerank
@@ -201,6 +225,11 @@ lembed_status_t lembed_sparse_text_embedding_create(
         lembed_sparse_embedding_ctx_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_sparse_model_info(options->model, &info);
@@ -250,6 +279,9 @@ lembed_status_t lembed_sparse_text_embedding_create(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the sparse embedding");
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
@@ -266,6 +298,11 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
     if (ends_with_gguf(dir_path, strlen(dir_path))) {
         return lembed_sparse_text_embedding_create_from_gguf_path(dir_path, options,
                                                                    out);
+    }
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
     }
 
     try {
@@ -324,6 +361,9 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the sparse model");
         return LEMBED_ERROR_IO;
     }
 }
@@ -455,6 +495,17 @@ const char* lembed_sparse_text_embedding_model_name(const lembed_sparse_embeddin
 
 int lembed_sparse_text_embedding_max_length(const lembed_sparse_embedding_ctx_t* ctx) {
     return ctx ? ctx->max_length : 0;
+}
+
+const char* lembed_sparse_text_embedding_backend_name(const lembed_sparse_embedding_ctx_t* ctx) {
+    if (!ctx) return nullptr;
+    return ctx->gguf ? "ggml-sparse" : "onnxruntime";
+}
+
+const char* lembed_sparse_text_embedding_effective_provider(const lembed_sparse_embedding_ctx_t* ctx) {
+    if (!ctx) return nullptr;
+    /* The GGUF runtime is a CPU ggml graph (ctx->provider is CPU there too). */
+    return ctx->gguf ? "CPU" : lembed_execution_provider_name((int)ctx->provider);
 }
 
 void lembed_sparse_text_embedding_stats(const lembed_sparse_embedding_ctx_t* ctx, lembed_stats_t* out) {

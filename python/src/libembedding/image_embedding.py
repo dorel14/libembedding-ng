@@ -15,6 +15,7 @@ from ._status import check_status
 from .exceptions import ModelNotFoundError
 from .models import (
     _PROVIDER_MAP,
+    _c_string,
     _desc_from_c,
     _is_local_path,
     list_image_models,
@@ -113,7 +114,25 @@ class ImageEmbedding:
     def info(self) -> ModelDesc:
         """Return runtime model descriptor."""
         desc_ptr = lib.lembed_image_embedding_desc(self._ctx)
-        return _desc_from_c(desc_ptr)
+        return _desc_from_c(
+            desc_ptr, backend=self.backend, effective_provider=self.provider
+        )
+
+    @property
+    def backend(self) -> str:
+        """Runtime serving the model: always ``"onnxruntime"``."""
+        return _c_string(lib.lembed_image_embedding_backend_name(self._ctx))
+
+    @property
+    def provider(self) -> str:
+        """Execution provider in use, lowercase (``"cpu"``, ``"cuda"``...).
+
+        A provider other than ``"cpu"`` that cannot be attached raises
+        ``UnsupportedError`` at construction.
+        """
+        return _c_string(
+            lib.lembed_image_embedding_effective_provider(self._ctx)
+        ).lower()
 
     @property
     def name(self) -> str:
