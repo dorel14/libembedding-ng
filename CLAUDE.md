@@ -90,8 +90,11 @@ La CI wheel exige une couverture Python ≥ 40 % (`--cov-fail-under=40`).
 ## 5. Garde-fous de périmètre
 
 - **Pas de recherche vectorielle** : ni HNSW, IVF, PQ, sharding, top-K nearest neighbors.
-- **Pas de paramètre `backend=`** dans l'API C ni Python : le backend se choisit par extension
-  (`.gguf` → llama.cpp, `.onnx` / identifiant HF / inconnu → ONNX Runtime).
+- **Le backend se choisit par extension / point d'entrée** (`.gguf` → llama.cpp, `.onnx` /
+  identifiant HF / inconnu → ONNX Runtime). Exception actée (2026-11-21, option A) : le champ
+  `backend` (`ONNX` / `LLAMACPP` / `AUTO`) est une option officielle **du reranker seulement**
+  (forcer un backend, repli ONNX → GGUF en `AUTO`). Dans `lembed_text_options_t` il est validé
+  puis ignoré, et documenté comme tel. Ne pas étendre `backend=` à d'autres modalités.
 - Ne pas transformer la lib en framework ML généraliste.
 - **Modèles du registry** : licences compatibles MIT uniquement (pas de CC-BY-NC) ;
   ajouter peu de modèles, chacun validé (fidélité vs ONNX/PyTorch, Recall@K).
