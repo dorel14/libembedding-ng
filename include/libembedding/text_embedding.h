@@ -98,6 +98,32 @@ const lembed_model_desc_v2_t* lembed_text_embedding_desc_v2(const lembed_text_em
 const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx);
 int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx);
 
+/**
+ * @brief Runtime that actually serves this context.
+ *
+ * "onnxruntime" (ONNX model) or "llama.cpp" (GGUF model). The runtime follows
+ * the model format, never a parameter.
+ *
+ * @param ctx Text embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_text_embedding_backend_name(const lembed_text_embedding_t* ctx);
+
+/**
+ * @brief Execution provider actually running the model.
+ *
+ * ONNX Runtime: "CPU", "CUDA", "CoreML", "DirectML" or "TensorRT" (spelling of
+ * lembed_execution_provider_name()). A provider other than CPU that cannot be
+ * attached makes the create function fail with LEMBED_ERROR_UNSUPPORTED, so
+ * this never reports a provider that is not in use. llama.cpp: "CPU", or "GPU"
+ * when llama_n_gpu_layers != 0 and ggml has a GPU device (the shipped builds
+ * have none).
+ *
+ * @param ctx Text embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_text_embedding_effective_provider(const lembed_text_embedding_t* ctx);
+
 /* Runtime statistics */
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out);
 void lembed_text_embedding_stats_v2(const lembed_text_embedding_t* ctx, lembed_stats_v2_t* out);

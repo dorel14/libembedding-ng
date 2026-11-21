@@ -54,6 +54,28 @@ const lembed_model_desc_t* lembed_image_embedding_desc(const lembed_image_embedd
 const char* lembed_image_embedding_model_name(const lembed_image_embedding_t* ctx);
 int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx);
 
+/**
+ * @brief Runtime that actually serves this context: always "onnxruntime".
+ *
+ * Provided for parity with the text, sparse and reranker contexts.
+ *
+ * @param ctx Image embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_image_embedding_backend_name(const lembed_image_embedding_t* ctx);
+
+/**
+ * @brief Execution provider actually running the model.
+ *
+ * "CPU", "CUDA", "CoreML", "DirectML" or "TensorRT" (spelling of
+ * lembed_execution_provider_name()). A provider other than CPU that cannot be
+ * attached makes the create function fail with LEMBED_ERROR_UNSUPPORTED.
+ *
+ * @param ctx Image embedding context.
+ * @return Static string, never freed; NULL if @p ctx is NULL.
+ */
+const char* lembed_image_embedding_effective_provider(const lembed_image_embedding_t* ctx);
+
 /* Runtime statistics */
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out);
 /* Versioned stats (cache fields present for API parity with the dense/rerank
@@ -125,6 +147,11 @@ lembed_status_t lembed_image_embedding_create(
         lembed_image_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
+
     try {
         lembed_model_info_t info;
         lembed_status_t s = lembed_get_image_model_info(options->model, &info);
@@ -167,6 +194,9 @@ lembed_status_t lembed_image_embedding_create(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_ONNX_RUNTIME);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while creating the image embedding");
         return LEMBED_ERROR_ONNX_RUNTIME;
     }
 }
@@ -176,6 +206,11 @@ lembed_status_t lembed_image_embedding_create_from_path(
         const lembed_image_options_t* options,
         lembed_image_embedding_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
 
     try {
         /* Read model.onnx */
@@ -226,6 +261,9 @@ lembed_status_t lembed_image_embedding_create_from_path(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the image model");
         return LEMBED_ERROR_IO;
     }
 }
@@ -403,6 +441,14 @@ const char* lembed_image_embedding_model_name(const lembed_image_embedding_t* ct
 
 int lembed_image_embedding_max_length(const lembed_image_embedding_t* ctx) {
     return 0; /* N/A for image models */
+}
+
+const char* lembed_image_embedding_backend_name(const lembed_image_embedding_t* ctx) {
+    return ctx ? "onnxruntime" : nullptr;
+}
+
+const char* lembed_image_embedding_effective_provider(const lembed_image_embedding_t* ctx) {
+    return ctx ? lembed_execution_provider_name((int)ctx->provider) : nullptr;
 }
 
 void lembed_image_embedding_stats(const lembed_image_embedding_t* ctx, lembed_stats_t* out) {

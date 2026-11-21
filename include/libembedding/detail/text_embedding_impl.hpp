@@ -86,6 +86,9 @@ struct lembed_text_embedding {
     int batch_size;
     lembed_execution_provider_t provider;
     int device_id;
+    /* llama.cpp only: layers were offloaded to a ggml GPU device
+     * (llama_n_gpu_layers != 0 and such a device is registered). */
+    bool llama_gpu_offload = false;
     lembed_model_desc_t desc;
     lembed_model_desc_v2_t desc_v2;
 
@@ -315,7 +318,12 @@ lembed_status_t lembed_text_embedding_create_from_path(
         return lembed_text_embedding_create_from_gguf_path(dir_path, options, out);
     }
 
-    /* ONNX backend from local directory */
+    /* ONNX backend from local directory. An unavailable provider is answered
+     * with a status, before any file is read and without throwing. */
+    {
+        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        if (ps != LEMBED_OK) return ps;
+    }
     try {
         std::string onnx_path = std::string(dir_path) + "/model.onnx";
         std::string onnx_data = lembed::detail::read_file_to_string(onnx_path);
@@ -370,6 +378,9 @@ lembed_status_t lembed_text_embedding_create_from_path(
         return LEMBED_OK;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
+        return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
+    } catch (...) {
+        lembed::detail::set_error("unknown error while loading the model");
         return LEMBED_ERROR_IO;
     }
 }
@@ -395,6 +406,22 @@ const char* lembed_text_embedding_model_name(const lembed_text_embedding_t* ctx)
 
 int lembed_text_embedding_max_length(const lembed_text_embedding_t* ctx) {
     return ctx ? ctx->max_length : 0;
+}
+
+const char* lembed_text_embedding_backend_name(const lembed_text_embedding_t* ctx) {
+    if (!ctx) return nullptr;
+    return ctx->backend_type == LEMBED_BACKEND_LLAMACPP ? "llama.cpp" : "onnxruntime";
+}
+
+const char* lembed_text_embedding_effective_provider(const lembed_text_embedding_t* ctx) {
+    if (!ctx) return nullptr;
+    /* ctx->provider is LEMBED_PROVIDER_LLAMACPP on the llama.cpp path, which
+     * names the runtime, not the device: report where the layers run. An ONNX
+     * context exists only if its provider could be attached. */
+    if (ctx->backend_type == LEMBED_BACKEND_LLAMACPP) {
+        return ctx->llama_gpu_offload ? "GPU" : "CPU";
+    }
+    return lembed_execution_provider_name((int)ctx->provider);
 }
 
 void lembed_text_embedding_stats(const lembed_text_embedding_t* ctx, lembed_stats_t* out) {

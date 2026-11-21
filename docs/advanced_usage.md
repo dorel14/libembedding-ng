@@ -48,8 +48,9 @@ from libembedding import TextEmbedding
 # CPU (défaut, toujours disponible)
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="cpu")
 
-# Apple CoreML (macOS/iOS), repli sur le CPU s'il est indisponible
+# Apple CoreML (macOS/iOS) : UnsupportedError s'il ne peut pas être attaché
 model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
+print(model.backend, model.provider)  # onnxruntime coreml
 ```
 
 **Providers supportés :**
@@ -58,12 +59,15 @@ model = TextEmbedding("BAAI/bge-small-en-v1.5", provider="coreml")
 |----------|---------|-----------|
 | `cpu` | CPU | Toutes |
 | `coreml` | CoreML | macOS, iOS |
-| `llamacpp` | llama.cpp (CPU) | Toutes |
-| `cuda`, `directml`, `tensorrt` | réservés : exécution sur CPU | — |
+| `llamacpp` | llama.cpp (CPU), modèles GGUF uniquement | Toutes |
+| `cuda`, `directml`, `tensorrt` | réservés : `UnsupportedError` | — |
 
 L'accélération GPU est hors périmètre avant la 1.x. Les valeurs `cuda`,
-`directml` et `tensorrt` sont acceptées pour garder l'API stable, mais aucune
-build ne les active : le modèle tourne alors sur le CPU.
+`directml` et `tensorrt` existent pour garder l'API stable, mais aucune build ne
+les active. Un provider autre que `cpu` demandé mais indisponible lève
+`UnsupportedError` (`LEMBED_ERROR_UNSUPPORTED` en C) au lieu de tourner sur CPU
+sans le dire ; les propriétés `backend` et `provider` indiquent ce qui sert
+réellement le modèle (voir [Backend et provider effectifs](api_reference.html#backend-et-provider-effectifs)).
 
 ### Modèles GGUF (llama.cpp)
 
