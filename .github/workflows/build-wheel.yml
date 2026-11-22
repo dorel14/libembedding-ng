@@ -385,16 +385,17 @@ jobs:
         run: echo "LIBEMBEDDING_CACHE_DIR=${{ runner.temp }}/libembedding-models" >> "$GITHUB_ENV"
 
       # Restore and save are split so the models are saved even when the tests
-      # fail: a slow download that times out a test still lands in the cache,
-      # and the next run reuses it. Each run saves under its own key (cache
-      # keys are immutable); restore takes the most recent one by prefix.
+      # fail (a slow download that times out a test still lands in the cache).
+      # One fixed key per OS/arch, saved only on a miss: a per-run key (v1)
+      # filled the 10 GB repository quota in an evening (about 1.2 GB per entry)
+      # and evicted the irreplaceable armv7l ONNX Runtime build cache. Bump the
+      # suffix to refresh the models.
       - name: Restore downloaded models
+        id: models
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
-          restore-keys: |
-            models-${{ runner.os }}-${{ runner.arch }}-v1-
+          key: models-${{ runner.os }}-${{ runner.arch }}-v2
 
       # ── Install wheel and run tests ──────────────────────────────
       - name: Install wheel and run tests
@@ -434,11 +435,11 @@ jobs:
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
 
       - name: Save downloaded models
-        if: always()
+        if: always() && steps.models.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
+          key: models-${{ runner.os }}-${{ runner.arch }}-v2
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
       - name: Upload repaired wheel artifact
