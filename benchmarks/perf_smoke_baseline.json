@@ -1,1 +1,7 @@
-{}
+{
+  "linux-x86_64": {
+    "dense_b32_per_gflop": 0.5575,
+    "dense_b1_per_gflop": 0.5619,
+    "batch_gain": 0.9922
+  }
+}
