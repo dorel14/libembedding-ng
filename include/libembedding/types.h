@@ -214,6 +214,17 @@ typedef enum {
 #define LEMBED_RERANKER_MODEL_DEFAULT LEMBED_RERANKER_JINA_V1_TURBO_EN_QUANTIZED
 
 /* =========================================================================
+ * Multi-vector (late interaction, ColBERT) Models
+ * ========================================================================= */
+
+typedef enum {
+    LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1 = 0,   /* default */
+    LEMBED_MULTIVECTOR_MODEL_COUNT,
+} lembed_multivector_model_t;
+
+#define LEMBED_MULTIVECTOR_MODEL_DEFAULT LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1
+
+/* =========================================================================
  * Model Info (returned by registry queries)
  * ========================================================================= */
 
