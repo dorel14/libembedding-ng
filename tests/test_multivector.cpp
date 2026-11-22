@@ -99,7 +99,47 @@ static void test_without_model() {
         fs::remove_all(d, ec);
     }
 
+    /* Hostile / inconsistent configuration, rejected before the graph is read
+     * (the model.onnx here is a one-byte file). */
+    {
+        namespace fs = std::filesystem;
+        const char* tok = "{\"model\":{\"type\":\"WordPiece\",\"vocab\":{\"[PAD]\":0,\"[UNK]\":1,"
+                          "\"[CLS]\":2,\"[SEP]\":3,\"a\":4,\"[unused0]\":5,\"[unused1]\":6,\"[MASK]\":7}}}";
+        struct Case { const char* cfg; const char* expect; } cases[] = {
+            { "{\"query_length\":1e12}", "query_length" },
+            { "{\"query_length\":3.5}", "query_length" },
+            { "{\"document_length\":-4}", "document_length" },
+            { "{\"query_length\":\"32\"}", "query_length" },
+            { "{\"query_length\":100000}", "query_length" },
+            { "{\"query_prefix_id\":99999}", "outside the vocabulary" },
+            { "{\"mask_token_id\":99999}", "outside the vocabulary" },
+            { "{\"pad_token_id\":99999}", "outside the vocabulary" },
+        };
+        for (const Case& c : cases) {
+            const fs::path d = fs::temp_directory_path() / "lembed_mv_hostile";
+            std::error_code ec;
+            fs::remove_all(d, ec);
+            fs::create_directories(d, ec);
+            std::ofstream(d / "model.onnx", std::ios::binary) << "x";
+            std::ofstream(d / "tokenizer.json", std::ios::binary) << tok;
+            std::ofstream(d / "onnx_config.json", std::ios::binary) << c.cfg;
+            const std::string ds = d.string();
+            lembed_multivector_options_t oc = lembed_multivector_options_default();
+            oc.model_dir = ds.c_str();
+            lembed_multivector_t* h = nullptr;
+            const lembed_status_t st = lembed_multivector_create(&oc, &h);
+            ASSERT(st == LEMBED_ERROR_IO, c.cfg);
+            ASSERT(h == nullptr, "no handle for a hostile config");
+            const char* err = lembed_last_error();
+            ASSERT(err && strstr(err, c.expect) != nullptr, "error names the offending field");
+            fs::remove_all(d, ec);
+        }
+    }
+
     o.model_dir = "x";
+    o.query_maxlen = 100000;
+    ASSERT(lembed_multivector_create(&o, &mv) == LEMBED_ERROR_INVALID_ARGUMENT, "huge query_maxlen");
+    o.query_maxlen = 0;
     o.batch_size = -1;
     ASSERT(lembed_multivector_create(&o, &mv) == LEMBED_ERROR_INVALID_ARGUMENT, "negative batch_size");
 
@@ -254,6 +294,40 @@ static void test_with_model(const std::string& dir) {
         }
         lembed_multivector_free(mve);
         lembed_multivector_free(mvn);
+    }
+
+    /* A skiplist word absent from the vocabulary must not turn [UNK] into a
+     * skipped id: unknown tokens of a document are kept. Needs a copy of the
+     * model directory with its own config (hard link of the graph, else copy). */
+    {
+        namespace fs = std::filesystem;
+        const fs::path src(dir);
+        const fs::path d = fs::temp_directory_path() / "lembed_mv_unk";
+        std::error_code ec;
+        fs::remove_all(d, ec);
+        fs::create_directories(d, ec);
+        fs::copy_file(src / "tokenizer.json", d / "tokenizer.json", ec);
+        const fs::path onnx = src / "vespa_colbert.onnx";
+        fs::create_hard_link(onnx, d / "vespa_colbert.onnx", ec);
+        if (ec) { ec.clear(); fs::copy_file(onnx, d / "vespa_colbert.onnx", ec); }
+        std::ofstream(d / "onnx_config.json", std::ios::binary)
+            << "{\"query_prefix_id\":1,\"document_prefix_id\":2,\"mask_token_id\":103,"
+               "\"skiplist_words\":[\"\xE2\x98\x83\"]}";
+        const std::string ds = d.string();
+        lembed_multivector_options_t ou = lembed_multivector_options_default();
+        ou.model_dir = ds.c_str();
+        lembed_multivector_t* h = nullptr;
+        ASSERT(lembed_multivector_create(&ou, &h) == LEMBED_OK, "create with an out-of-vocabulary skiplist word");
+        if (h) {
+            const char* t[] = { "hello \xE2\x98\x83 world" };
+            lembed_multivectors_t r;
+            ASSERT(lembed_multivector_embed(h, t, 1, LEMBED_MV_DOCUMENT, &r) == LEMBED_OK, "embed unk doc");
+            /* [CLS] [D] hello [UNK] world [SEP] */
+            ASSERT(r.total_vectors == 6, "unknown tokens are kept, not skipped");
+            lembed_multivectors_free(&r);
+            lembed_multivector_free(h);
+        }
+        fs::remove_all(d, ec);
     }
 
     /* Batch size does not change the vectors of a text. */

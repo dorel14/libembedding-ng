@@ -63,6 +63,7 @@ struct MvModelConfig {
     int query_prefix_id = -1;
     int document_prefix_id = -1;
     int mask_token_id = -1;
+    int pad_token_id = -1;
     std::string query_prefix;       /* marker as a string, e.g. "[unused0]" or "[Q] " */
     std::string document_prefix;
     int query_length = 0;
@@ -86,10 +87,27 @@ inline std::string mv_trim(const std::string& s) {
     return s.substr(b, e - b);
 }
 
+/* Upper bound for any length or id read from a configuration or an option: it
+ * keeps a hostile file from asking for a multi-GB buffer. */
+constexpr int kMvMaxLength = 8192;
+
+/* Absent key: -1. Present but not a finite integer in [0, 1e9]: mv_config_error. */
 inline int mv_json_int(const cJSON* root, const char* key) {
     const cJSON* it = cJSON_GetObjectItemCaseSensitive(root, key);
-    return (it && cJSON_IsNumber(it)) ? it->valueint : -1;
+    if (!it || cJSON_IsNull(it)) return -1;
+    if (!cJSON_IsNumber(it))
+        throw mv_config_error(std::string("multivector: \"") + key + "\" must be an integer");
+    const double v = it->valuedouble;
+    if (!(v >= 0.0 && v <= 1e9) || v != std::floor(v))
+        throw mv_config_error(std::string("multivector: \"") + key +
+                              "\" is not an integer in the supported range");
+    return (int)v;
 }
+
+struct MvJsonGuard {
+    cJSON* p;
+    ~MvJsonGuard() { if (p) cJSON_Delete(p); }
+};
 
 inline int mv_json_bool(const cJSON* root, const char* key) {
     const cJSON* it = cJSON_GetObjectItemCaseSensitive(root, key);
@@ -106,11 +124,11 @@ inline std::string mv_json_string(const cJSON* root, const char* key) {
 /* Throws mv_config_error on malformed JSON. */
 inline MvModelConfig mv_parse_config(const std::string& json) {
     cJSON* root = cJSON_Parse(json.c_str());
-    if (!root || !cJSON_IsObject(root)) {
-        if (root) cJSON_Delete(root);
+    MvJsonGuard guard{root};
+    if (!root || !cJSON_IsObject(root))
         throw mv_config_error("multivector: the model configuration is not a valid JSON object");
-    }
     MvModelConfig c;
+    c.pad_token_id = mv_json_int(root, "pad_token_id");
     c.query_prefix_id = mv_json_int(root, "query_prefix_id");
     c.document_prefix_id = mv_json_int(root, "document_prefix_id");
     c.mask_token_id = mv_json_int(root, "mask_token_id");
@@ -129,9 +147,11 @@ inline MvModelConfig mv_parse_config(const std::string& json) {
             if (cJSON_IsString(w) && w->valuestring) c.skiplist_words.emplace_back(w->valuestring);
         }
     }
-    cJSON_Delete(root);
-    if (c.query_length < -1 || c.document_length < -1 || c.embedding_dim < -1)
-        throw mv_config_error("multivector: negative length or dimension in the model configuration");
+    if (c.query_length > kMvMaxLength || c.document_length > kMvMaxLength)
+        throw mv_config_error("multivector: query_length / document_length above " +
+                              std::to_string(kMvMaxLength));
+    if (c.embedding_dim > 65536)
+        throw mv_config_error("multivector: embedding_dim above 65536");
     return c;
 }
 
@@ -219,7 +239,9 @@ inline int mv_word_to_id(const TokenizerWrapper& tok, const std::string& w) {
     /* Not a vocabulary entry as such: encode it and take the single body
      * token, if the encoding has exactly one ([CLS] x [SEP]). */
     const std::vector<int> ids = tok.encode(w);
-    if (ids.size() == 3) return ids[1];
+    /* [UNK] means "not in the vocabulary", not "this word": skipping it would
+     * drop every unknown token of every document. */
+    if (ids.size() == 3 && ids[1] != tok.unk_token_id()) return ids[1];
     return -1;
 }
 
@@ -263,7 +285,8 @@ inline void mv_load(MvRuntime& rt, const std::string& dir, const lembed_multivec
     if (rt.query_maxlen < 3 || rt.doc_maxlen < 3)
         throw mv_config_error("multivector: query_maxlen / doc_maxlen must be at least 3");
 
-    rt.session.load_from_file(onnx_path.c_str(), o.num_threads, (int)o.provider);
+    /* Tokenizer and ids first: a bad configuration is reported before the
+     * (heavy) graph is loaded. */
     rt.tokenizer.load_from_file(tok_path, std::max(rt.query_maxlen, rt.doc_maxlen));
 
     rt.query_marker = mv_resolve_marker(rt.tokenizer, cfg.query_prefix_id, cfg.query_prefix, "[unused0]");
@@ -273,6 +296,23 @@ inline void mv_load(MvRuntime& rt, const std::string& dir, const lembed_multivec
                               "(declare query_prefix_id / document_prefix_id in onnx_config.json)");
 
     rt.mask_id = cfg.mask_token_id >= 0 ? cfg.mask_token_id : rt.tokenizer.token_to_id("[MASK]");
+
+    /* Declared ids index the embedding table: they must be inside the vocabulary. */
+    {
+        const int vs = rt.tokenizer.vocab_size();
+        const struct { const char* name; int id; } ids_to_check[] = {
+            { "query_prefix_id", rt.query_marker }, { "document_prefix_id", rt.doc_marker },
+            { "mask_token_id", rt.mask_id }, { "pad_token_id", cfg.pad_token_id },
+        };
+        for (const auto& c : ids_to_check) {
+            if (c.id >= 0 && vs > 0 && c.id >= vs)
+                throw mv_config_error(std::string("multivector: ") + c.name + " " +
+                                      std::to_string(c.id) + " is outside the vocabulary (" +
+                                      std::to_string(vs) + " entries)");
+        }
+    }
+
+    rt.session.load_from_file(onnx_path.c_str(), o.num_threads, (int)o.provider);
 
     /* Expansion: an explicit option wins, else ON (the ColBERT convention).
      * onnx_config.json's do_query_expansion is deliberately not consulted: the
@@ -371,7 +411,10 @@ lembed_multivector_options_t lembed_multivector_options_default(void) {
 
 lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* options,
                                           lembed_multivector_t** out) {
-    if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!options || !out) {
+        lembed::detail::set_error("multivector: create needs options and an output pointer");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
     *out = nullptr;
     if (!options->model_dir || !options->model_dir[0]) {
         lembed::detail::set_error("multivector: model_dir is empty");
@@ -380,6 +423,12 @@ lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* op
     if (options->batch_size < 0 || options->max_tokens_per_batch < 0 ||
         options->query_maxlen < 0 || options->doc_maxlen < 0 || options->num_threads < 0) {
         lembed::detail::set_error("multivector: negative option");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+    if (options->query_maxlen > lembed::detail::kMvMaxLength ||
+        options->doc_maxlen > lembed::detail::kMvMaxLength) {
+        lembed::detail::set_error("multivector: query_maxlen / doc_maxlen above " +
+                                  std::to_string(lembed::detail::kMvMaxLength));
         return LEMBED_ERROR_INVALID_ARGUMENT;
     }
     if (lembed::detail::mv_ends_with_gguf(options->model_dir)) {
@@ -401,8 +450,8 @@ lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* op
             return LEMBED_ERROR_IO;
         }
 
-        std::unique_ptr<lembed_multivector_t, decltype(&lembed_multivector_free)>
-            mv(new lembed_multivector(), &lembed_multivector_free);
+        struct Deleter { void operator()(lembed_multivector_t* p) const { delete p; } };
+        std::unique_ptr<lembed_multivector_t, Deleter> mv(new lembed_multivector());
         lembed::detail::mv_load(mv->rt, dir, *options);
         mv->model_name_str = dir;
         mv->num_threads = options->num_threads;
@@ -452,8 +501,14 @@ lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv,
                                          lembed_mv_mode_t mode,
                                          lembed_multivectors_t* out) {
     if (out) memset(out, 0, sizeof(*out));
-    if (!mv || !texts || n <= 0 || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
-    if (mode != LEMBED_MV_DOCUMENT && mode != LEMBED_MV_QUERY) return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!mv || !texts || n <= 0 || !out) {
+        lembed::detail::set_error("multivector: embed needs a handle, texts, n > 0 and an output");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
+    if (mode != LEMBED_MV_DOCUMENT && mode != LEMBED_MV_QUERY) {
+        lembed::detail::set_error("multivector: invalid mode");
+        return LEMBED_ERROR_INVALID_ARGUMENT;
+    }
 
     std::lock_guard<std::mutex> call_lock(mv->call_mutex);
     try {
@@ -475,8 +530,42 @@ lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv,
                                                               : kDenseMaxBatchTokens;
         const std::vector<size_t> order = sparse_batch_order(id_lists, batch_size);
 
-        std::vector<std::vector<float>> kept((size_t)n);
+        /* The number of vectors of every text is known before inference (it
+         * depends on the ids only), so the result is allocated once, exactly,
+         * and written in place: no per-text staging copy. */
         std::vector<int64_t> counts((size_t)n, 0);
+        int64_t total = 0;
+        for (int i = 0; i < n; i++) {
+            const MvPrepared& p = prep[(size_t)i];
+            const int limit = (query && rt.query_expansion) ? (int)p.ids.size() : p.real;
+            int64_t c = 0;
+            for (int j = 0; j < limit; j++) {
+                if (!query && rt.mask_punctuation && rt.skip_ids.count(p.ids[(size_t)j])) continue;
+                c++;
+            }
+            counts[(size_t)i] = c;
+            total += c;
+        }
+        {
+            const uint64_t row_bytes = (uint64_t)dim * sizeof(float);
+            const uint64_t cap = (uint64_t)SIZE_MAX / row_bytes;
+            if ((uint64_t)total > cap || (uint64_t)n > (uint64_t)SIZE_MAX / sizeof(int64_t) - 1) {
+                set_error("multivector: result too large");
+                return LEMBED_ERROR_OUT_OF_MEMORY;
+            }
+        }
+        out->offsets = (int64_t*)malloc(((size_t)n + 1) * sizeof(int64_t));
+        out->data = (float*)malloc((size_t)(total > 0 ? total : 1) * (size_t)dim * sizeof(float));
+        if (!out->offsets || !out->data) {
+            lembed_multivectors_free(out);
+            set_error("multivector: out of memory");
+            return LEMBED_ERROR_OUT_OF_MEMORY;
+        }
+        out->offsets[0] = 0;
+        for (int i = 0; i < n; i++) out->offsets[i + 1] = out->offsets[i] + counts[(size_t)i];
+        out->num_docs = n;
+        out->dim = dim;
+        out->total_vectors = total;
         int num_batches = 0;
 
         for (size_t start = 0; start < order.size();) {
@@ -501,10 +590,15 @@ lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv,
 
             auto outputs = mv->rt.session.run(ids_flat.data(), mask_flat.data(), type_flat.data(),
                                               bsz, seq, 0);
+            /* The graph's own output extent is the stride, and the buffer is
+             * checked against it before any row is read. */
             if (outputs.empty() || outputs[0].shape.size() != 3 ||
-                outputs[0].shape[2] != dim || outputs[0].shape[1] < seq)
+                outputs[0].shape[0] != bsz || outputs[0].shape[2] != dim ||
+                outputs[0].shape[1] < seq ||
+                outputs[0].data.size() < (size_t)bsz * (size_t)outputs[0].shape[1] * (size_t)dim)
                 throw std::runtime_error("multivector: unexpected output shape from the graph");
             const float* o = outputs[0].data.data();
+            const size_t stride = (size_t)outputs[0].shape[1];
 
             for (int b = 0; b < bsz; b++) {
                 const size_t slot = order[start + (size_t)b];
@@ -513,37 +607,16 @@ lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv,
                  * expanded (the [MASK] pads included), else its real tokens; a
                  * document keeps its real tokens minus the skiplist. */
                 const int limit = (query && rt.query_expansion) ? (int)p.ids.size() : p.real;
-                std::vector<float>& dst = kept[slot];
-                dst.reserve((size_t)limit * dim);
+                float* dst = out->data + (size_t)out->offsets[slot] * (size_t)dim;
                 for (int j = 0; j < limit; j++) {
                     if (!query && rt.mask_punctuation && rt.skip_ids.count(p.ids[(size_t)j])) continue;
-                    const float* row = o + ((size_t)b * seq + j) * dim;
-                    dst.insert(dst.end(), row, row + dim);
-                    counts[slot]++;
+                    const float* row = o + ((size_t)b * stride + (size_t)j) * dim;
+                    memcpy(dst, row, (size_t)dim * sizeof(float));
+                    dst += dim;
                 }
             }
             start = end;
         }
-
-        int64_t total = 0;
-        for (int i = 0; i < n; i++) total += counts[(size_t)i];
-
-        out->offsets = (int64_t*)malloc(((size_t)n + 1) * sizeof(int64_t));
-        out->data = (float*)malloc((size_t)(total > 0 ? total : 1) * (size_t)dim * sizeof(float));
-        if (!out->offsets || !out->data) {
-            lembed_multivectors_free(out);
-            return LEMBED_ERROR_OUT_OF_MEMORY;
-        }
-        out->offsets[0] = 0;
-        for (int i = 0; i < n; i++) {
-            out->offsets[i + 1] = out->offsets[i] + counts[(size_t)i];
-            const std::vector<float>& src = kept[(size_t)i];
-            if (!src.empty())
-                memcpy(out->data + (size_t)out->offsets[i] * dim, src.data(), src.size() * sizeof(float));
-        }
-        out->num_docs = n;
-        out->dim = dim;
-        out->total_vectors = total;
 
         if (rt.normalize) {
             for (int64_t v = 0; v < total; v++) mv_l2_normalize(out->data + (size_t)v * dim, dim);

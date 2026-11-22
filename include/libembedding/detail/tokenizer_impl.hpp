@@ -719,6 +719,10 @@ public:
     void set_pad_token_id(int id) { pad_token_id_ = id; }
     int cls_token_id() const { return cls_token_id_; }
     int sep_token_id() const { return sep_token_id_; }
+    int unk_token_id() const { return unk_token_id_; }
+    /* Number of vocabulary entries known by id (0 when the tokenizer type
+     * keeps no id table). */
+    int vocab_size() const { return (int)id_to_token_.size(); }
 
     /* Id of the vocabulary entry whose surface form is exactly `token`
      * (e.g. "[MASK]", "[unused0]", "!"), or -1 when the vocabulary has none.

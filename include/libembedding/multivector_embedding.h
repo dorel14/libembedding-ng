@@ -46,8 +46,8 @@ typedef struct {
     int num_threads;            /* 0 = auto */
     int batch_size;             /* 0 = 32 */
     int max_tokens_per_batch;   /* batch x padded length cap; 0 = library default (512) */
-    int query_maxlen;           /* > 0 overrides the model's query length (default 32) */
-    int doc_maxlen;             /* > 0 overrides the model's document length (default 300) */
+    int query_maxlen;           /* > 0 overrides the model's query length (default 32); max 8192 */
+    int doc_maxlen;             /* > 0 overrides the model's document length (default 300); max 8192 */
     int normalize;              /* 1 = L2-normalise every vector (idempotent, default) */
     int mask_punctuation;       /* documents only: 1 = drop skiplist tokens, 0 = keep,
                                  * -1 = follow the model (default) */
