@@ -85,3 +85,26 @@ Scripts already wired: `benchmarks/sparse/bench_sparse_backend_comparison.py`
   `third_party/README.md`.
 - A p95 over few iterations (5) interpolates between the two largest samples; it only
   becomes statistically meaningful from about twenty rounds.
+
+## 5. Performance smoke test in CI
+
+GitHub-hosted runners are shared machines whose absolute speed varies by tens of
+percent between runs, and no controlled runner is available yet. The CI therefore
+does not compare docs/s. After the wheels are built, the `perf-smoke.yml` job runs
+`benchmarks/perf_smoke.py` on the Linux x86_64 wheel and reports only ratios that
+cancel most of the machine out:
+
+| Metric | Definition |
+|---|---|
+| `dense_b32_per_gflop` | docs/s at batch 32 divided by the GFLOP/s of a 512×512 float32 matrix product measured in the same process |
+| `dense_b1_per_gflop` | the same at batch 1 |
+| `batch_gain` | docs/s at batch 32 over docs/s at batch 1 |
+
+Each value is compared with `benchmarks/perf_smoke_baseline.json`. A drop of more
+than 25 % (the run-to-run noise seen on these runners) produces a GitHub warning.
+The job never fails the run: a warning asks for a measurement on a quiet machine,
+following sections 1 to 3. The JSON report is kept as the `perf-smoke-linux-x86_64`
+artifact for 90 days.
+
+To update the baseline after an intended change, copy the three values printed by
+the job into `perf_smoke_baseline.json`, under the `linux-x86_64` key.

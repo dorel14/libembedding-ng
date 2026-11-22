@@ -46,3 +46,8 @@ jobs:
     name: Wheel checks
     needs: [python-tests]
     uses: ./.github/workflows/wheel-checks.yml
+
+  perf-smoke:
+    name: Perf smoke
+    needs: [python-tests]
+    uses: ./.github/workflows/perf-smoke.yml
