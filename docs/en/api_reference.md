@@ -222,6 +222,58 @@ print(embeddings.shape)  # (2, 512)
 
 ---
 
+### MultiVectorEmbedding
+
+Multi-vector (late interaction, ColBERT) embeddings: one float32 matrix
+`[n_tokens, dim]` per text. ONNX Runtime only, **local** model (a directory with
+`model.onnx` or `vespa_colbert.onnx`, `tokenizer.json`, and an optional
+`onnx_config.json`). The library embeds; it does not index or search: score with
+`maxsim` / `maxsim_batch`. Alias: `LateInteractionTextEmbedding` (FastEmbed
+naming). C API: `multivector_embedding.h` (`lembed_multivector_*`).
+
+#### Constructor
+
+```python
+MultiVectorEmbedding(
+    model_dir, *, provider="cpu", threads=0, batch_size=0,
+    query_maxlen=None, doc_maxlen=None, normalize=True,
+    query_expansion=None, attend_to_expansion=None,
+)
+```
+
+`query_maxlen` / `doc_maxlen`: length overrides (model defaults: 32 / 300).
+`query_expansion`: pad queries with `[MASK]` (`None` = on).
+`attend_to_expansion`: `None` = follow the model.
+
+#### Methods and properties
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `embed(texts, *, mode="document")` | `list[np.ndarray]` | One `[n_i, dim]` matrix per text; `mode` is `"document"` or `"query"` |
+| `query_embed(query)` | `Iterator[np.ndarray]` | Query or queries (`str` or list), `query` mode |
+| `passage_embed(texts)` | `Iterator[np.ndarray]` | Documents, `document` mode |
+| `dim` | `int` (property) | Vector dimension |
+| `backend` | `str` (property) | `"onnxruntime"` |
+| `info()` / `stats()` | `ModelDesc` / `Stats` | Descriptor and usage statistics |
+| `close()` | `None` | Release resources (idempotent); works with `with` |
+
+Errors are `LembedError` subclasses (missing directory or file: `IOError`;
+`.gguf` path: `UnsupportedError`).
+
+#### Example
+
+```python
+from libembedding import MultiVectorEmbedding, maxsim
+
+with MultiVectorEmbedding("/path/to/answerai-colbert-small-v1") as mv:
+    (q,) = mv.query_embed("what is the capital of France?")   # (32, 96)
+    docs = list(mv.passage_embed(["Paris is the capital of France.",
+                                  "Bananas grow in tropical climates."]))
+    scores = [maxsim(q, d) for d in docs]                      # first is highest
+```
+
+---
+
 ### Reranker
 
 Scores and sorts documents by relevance to a query (cross-encoder).

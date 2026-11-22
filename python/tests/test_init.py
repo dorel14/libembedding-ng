@@ -16,6 +16,8 @@ def test_public_api_exports():
         "SparseTextEmbedding",
         "ImageEmbedding",
         "Reranker",
+        "MultiVectorEmbedding",
+        "LateInteractionTextEmbedding",
         "Benchmark",
         "BenchmarkResult",
         "ComparisonResult",
