@@ -50,8 +50,9 @@ int main(void) {
     ASSERT_SIZE(lembed_embeddings_t, 16);
     ASSERT_SIZE(lembed_sparse_embedding_t, 24);
     ASSERT_SIZE(lembed_rerank_result_t, 8);
-    /* ptr + provider + device_id (16), 9 ints (36) = 52, padded to 56 */
-    ASSERT_SIZE(lembed_multivector_options_t, 56);
+    /* ptr + provider + device_id (16), 9 ints (36) = 52, padded to 56,
+     * cache_dir ptr (8) + 2 ints (8) = 72 */
+    ASSERT_SIZE(lembed_multivector_options_t, 72);
     /* 2 ptrs (16), 2 ints (8), int64 */
     ASSERT_SIZE(lembed_multivectors_t, 32);
     ASSERT_SIZE(lembed_mv_mode_t, 4);
@@ -92,8 +93,9 @@ int main(void) {
         /* 2 ptrs + int */
         ASSERT_SIZE(lembed_sparse_embedding_t, 12);
         ASSERT_SIZE(lembed_rerank_result_t, 8);
-        /* ptr + provider + device_id (12), 9 ints (36), no padding */
-        ASSERT_SIZE(lembed_multivector_options_t, 48);
+        /* ptr + provider + device_id (12), 9 ints (36) = 48, no padding,
+         * cache_dir ptr (4) + 2 ints (8) = 60 */
+        ASSERT_SIZE(lembed_multivector_options_t, 60);
         /* 2 ptrs (8), 2 ints (8) = 16, int64 @16 */
         ASSERT_SIZE(lembed_multivectors_t, 24);
         ASSERT_SIZE(lembed_mv_mode_t, 4);
@@ -144,6 +146,8 @@ int main(void) {
                "multivector_options.num_threads offset");
         ASSERT(offsetof(lembed_multivector_options_t, attend_to_expansion) == 44,
                "multivector_options.attend_to_expansion offset");
+        ASSERT(offsetof(lembed_multivector_options_t, cache_dir) == 48,
+               "multivector_options.cache_dir offset");
         ASSERT(offsetof(lembed_multivectors_t, num_docs) == 8, "multivectors.num_docs offset");
         ASSERT(offsetof(lembed_multivectors_t, total_vectors) == 16,
                "multivectors.total_vectors offset");

@@ -22,6 +22,7 @@ from libembedding import (
     MultiVectorEmbedding,
     maxsim,
 )
+from libembedding.exceptions import DownloadError
 
 MODEL_DIR = (
     Path.home() / ".cache" / "libembedding" / "models--answerdotai-answerai-colbert-small-v1"
@@ -79,6 +80,61 @@ def test_bad_arguments(kwargs: dict) -> None:
 def test_non_path_model_dir() -> None:
     with pytest.raises(TypeError):
         MultiVectorEmbedding(123)  # type: ignore[arg-type]
+
+
+REGISTRY_ID = "answerdotai/answerai-colbert-small-v1"
+
+
+def test_list_supported_models() -> None:
+    models = MultiVectorEmbedding.list_supported_models()
+    assert [m.model_code for m in models] == [REGISTRY_ID]
+    m = models[0]
+    assert m.model_name == REGISTRY_ID
+    assert m.model_file == "vespa_colbert.onnx"
+    assert m.dim == 96
+    assert m.max_tokens == 300
+    assert m.download_size_mb == 127
+    assert libembedding.list_multivector_models() == models
+
+
+def test_registry_id_offline_empty_cache(tmp_path: Path) -> None:
+    """A registry id with an empty cache and offline=True is a download error,
+    not a 'directory not found' one: the id was recognised."""
+    with pytest.raises(DownloadError):
+        MultiVectorEmbedding(REGISTRY_ID, cache_dir=str(tmp_path), offline=True)
+    assert not any(tmp_path.iterdir())  # offline never creates the model dir
+
+
+def test_unknown_id_is_not_a_registry_model(tmp_path: Path) -> None:
+    with pytest.raises(LembedError) as exc:
+        MultiVectorEmbedding("some-org/not-a-colbert", cache_dir=str(tmp_path), offline=True)
+    assert not isinstance(exc.value, DownloadError)
+
+
+def test_local_directory_shadows_registry(tmp_path: Path) -> None:
+    """An existing directory named like a registry id is loaded as a directory
+    (here an empty one, hence the I/O error, never a download)."""
+    local = tmp_path / "answerdotai" / "answerai-colbert-small-v1"
+    local.mkdir(parents=True)
+    with pytest.raises(LembedError) as exc:
+        MultiVectorEmbedding(str(local), cache_dir=str(tmp_path / "cache"), offline=True)
+    assert not isinstance(exc.value, DownloadError)
+
+
+@pytest.mark.network
+def test_registry_id_downloads_and_embeds() -> None:
+    try:
+        m = MultiVectorEmbedding(REGISTRY_ID)
+    except DownloadError:
+        pytest.skip("model download unavailable")
+    with m:
+        assert m.dim == 96
+        assert m.info().name == REGISTRY_ID
+        docs = m.embed(["ColBERT keeps one vector per token."], mode="document")
+        q = m.embed(["what does colbert keep?"], mode="query")
+        assert docs[0].shape[1] == 96 and docs[0].shape[0] > 3
+        assert q[0].shape == (32, 96)
+        assert maxsim(q[0], docs[0]) > 0
 
 
 # ------------------------------------------------------------------ model ----
