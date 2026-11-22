@@ -226,6 +226,21 @@ et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
 
 ---
 
+## Modèles multi-vecteurs (1 modèle)
+
+| HuggingFace name | Dim | Max tokens (document) | Taille | Description | Licence |
+|------------------|-----|-----------------------|--------|-------------|---------|
+| `answerdotai/answerai-colbert-small-v1` | 96 | 300 | 127 Mo | ColBERT (interaction tardive), anglais, ONNX FP32 (`vespa_colbert.onnx`) | Apache-2.0 |
+
+`MultiVectorEmbedding("answerdotai/answerai-colbert-small-v1")` télécharge
+`vespa_colbert.onnx`, `tokenizer.json` et `onnx_config.json` dans le cache au premier
+usage (mêmes options `cache_dir`, `offline`, `show_download_progress` que les autres
+modèles). Un répertoire local existant du même nom l'emporte sur le registre. Liste :
+`libembedding.list_multivector_models()` ou `MultiVectorEmbedding.list_supported_models()` ;
+en C : `lembed_list_multivector_models()`, `lembed_ensure_multivector_model()`.
+
+---
+
 ## Matrice de compatibilité (validation par référence)
 
 Un modèle n'est *validé* que lorsque libembedding reproduit une référence. La référence
@@ -287,6 +302,7 @@ text_models = libembedding.list_text_models()
 sparse_models = libembedding.list_sparse_models()
 image_models = libembedding.list_image_models()
 reranker_models = libembedding.list_reranker_models()
+multivector_models = libembedding.list_multivector_models()
 
 # Inspecter un modèle
 for m in text_models:
