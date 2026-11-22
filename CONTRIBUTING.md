@@ -69,8 +69,9 @@ export the symbol. Update `test_struct_sizes` when a struct changes.
 ## Scope guardrails
 
 - No vector search (no HNSW, IVF, PQ, sharding, global top-K).
-- No `backend=` parameter in new API: the backend is chosen by file extension
-  (see `docs/adr/ADR-001-routing-by-extension.md`).
+- The backend is chosen by file extension / entry point (see
+  `docs/adr/ADR-001-routing-by-extension.md`). The `backend` option exists only for
+  the reranker and dense text; do not add it to other modalities (sparse, image).
 - Registry models must be MIT-compatible and validated (fidelity vs ONNX/PyTorch,
   Recall@K).
 - Do not patch `third_party/`.

@@ -270,7 +270,7 @@ FULL) × `max_tokens` × batch. Sparse (ONNX) et image : threads × batch.
 la structure de résultat est inchangée ; `lembed_sparse_autotune_v2()` renvoie en
 plus `workers`, `max_batch_tokens` et `from_cache`) acceptent aussi le nom du registre GGUF sparse (`"SPLADE-PP-En-v1-GGUF"`, déjà en
 cache local : le tuner ne télécharge jamais) ou un chemin se terminant par
-`.gguf` ; le backend se choisit par le nom, il n'y a pas de paramètre `backend=`.
+`.gguf` ; le backend se choisit par le nom (l'option `backend` n'existe que pour le reranker et le texte dense, pas pour le sparse).
 La grille est threads × workers (graphes partageant les poids) × batch ×
 `max_batch_tokens` (budget de tokens par batch, 512 par défaut). `top_k` et
 `min_weight` ne sont jamais réglés. La configuration par défaut est le point 0 de

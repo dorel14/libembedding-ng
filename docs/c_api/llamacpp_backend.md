@@ -21,9 +21,11 @@ L'en-tête n'expose que deux fonctions :
 > pour détecter une version.
 >
 > Il n'existe **pas** de `lembed_llama_set_logging()` ni de
-> `lembed_llama_get_n_gpu_layers()` dans cette API. Le nombre de couches GPU se
-> règle via les options du modèle (`LEMBED_BACKEND_LLAMACPP` et
-> `n_gpu_layers`), et les logs via la configuration de llama.cpp elle-même.
+> `lembed_llama_get_n_gpu_layers()` dans cette API. Le champ
+> `llama_n_gpu_layers` de `lembed_text_options_t` existe (0 = CPU, -1 = toutes),
+> mais le GPU est hors périmètre : les builds livrés n'ont aucun périphérique GPU
+> ggml, et le reranker llama.cpp charge toujours avec 0 couche. Les logs se règlent
+> via `llama_verbose` ou la configuration de llama.cpp elle-même.
 
 ## Exemple
 

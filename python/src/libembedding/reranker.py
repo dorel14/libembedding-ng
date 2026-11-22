@@ -1,7 +1,7 @@
 """High-level document reranker API.
 
 Auteur: David Orel
-Version: 1.15.0
+Version: 1.16.0
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class Reranker:
             ONNX files are not found. This option exists on the reranker only.
         num_threads: Deprecated; use ``threads``.
         quantization: Override model quantization mode ("none", "static",
-            "dynamic"). If None, uses the model's default.
+            "dynamic", "auto", "fp16"). If None, uses the model's default.
         cache_size: Size of LRU cache for rerank scores (0 = disabled).
     """
 

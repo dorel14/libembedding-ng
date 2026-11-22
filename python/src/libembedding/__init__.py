@@ -32,7 +32,7 @@ from .benchmark import (
     detect_hardware,
 )
 from .cache import EmbeddingCache, cache_config_default
-from .exceptions import LembedError, LlamaError
+from .exceptions import CacheMissError, GgufError, LembedError, LlamaError
 from .gguf_inspect import (
     SPARSE_FORMULA_SCALAR,
     SPARSE_FORMULA_SPLADE,
@@ -154,11 +154,13 @@ __all__ = [
     "SPARSE_FORMULA_UNKNOWN",
     "Benchmark",
     "BenchmarkResult",
+    "CacheMissError",
     "ComparisonResult",
     "CorpusType",
     "EmbeddingCache",
     "GgufCapabilities",
     "GgufDesc",
+    "GgufError",
     "HardwareInfo",
     "ImageEmbedding",
     "ImageTuningResult",

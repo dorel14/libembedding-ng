@@ -123,12 +123,11 @@ jobs:
 
       # Same model cache as build-wheel.yml (shared key, same runner OS/arch).
       - name: Restore downloaded models
+        id: models
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
-          restore-keys: |
-            models-${{ runner.os }}-${{ runner.arch }}-v1-
+          key: models-${{ runner.os }}-${{ runner.arch }}-v2
 
       - name: Run Python tests
         env:
@@ -143,11 +142,11 @@ jobs:
 
       # Saved even when the tests fail, so a slow download is not repeated.
       - name: Save downloaded models
-        if: always()
+        if: always() && steps.models.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
+          key: models-${{ runner.os }}-${{ runner.arch }}-v2
 
   # -----------------------------------------------------------------------
   # 3) Determine the next version and create the release (AFTER tests pass)

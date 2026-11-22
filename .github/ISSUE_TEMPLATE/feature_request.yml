@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Out of scope: vector search (HNSW, IVF, PQ, top-K nearest neighbours), a `backend=`
-        parameter, GPU backends before 2.x. See CONTRIBUTING.md.
+        Out of scope: vector search (HNSW, IVF, PQ, top-K nearest neighbours), a `backend`
+        option on modalities other than reranker and dense text, GPU backends before 2.x. See CONTRIBUTING.md.
   - type: input
     id: version
     attributes:

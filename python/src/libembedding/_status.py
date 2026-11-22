@@ -1,13 +1,15 @@
 """Status code checking -- raises Python exceptions from C status codes.
 
 Auteur: David Orel
-Version: 1.15.0
+Version: 1.16.0
 """
 
 from ._binding import ffi, lib
 from .exceptions import (
     BatchSizeError,
+    CacheMissError,
     DownloadError,
+    GgufError,
     InvalidArgumentError,
     IOError,
     LembedError,
@@ -30,6 +32,8 @@ _STATUS_MAP = {
     8: UnsupportedError,
     9: BatchSizeError,
     10: LlamaError,
+    11: CacheMissError,
+    12: GgufError,
 }
 
 

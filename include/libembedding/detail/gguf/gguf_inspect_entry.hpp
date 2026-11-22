@@ -2,7 +2,7 @@
  * libembedding - gguf_inspect entry points
  *
  * Auteur: David Orel
- * Version: 1.15.0
+ * Version: 1.16.0
  *
  * SPDX-License-Identifier: MIT
  */
