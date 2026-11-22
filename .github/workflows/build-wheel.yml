@@ -397,6 +397,49 @@ jobs:
           path: ${{ runner.temp }}/libembedding-models
           key: models-${{ runner.os }}-${{ runner.arch }}-v2
 
+      # ── ggml CPU dispatch: the variants are dlopen()ed, so nothing in the
+      #    dynamic section of libembedding.so lists them. Check they are in the
+      #    wheel, that each finds libggml-base through the wheel's .libs
+      #    directory ($ORIGIN/../libembedding_ng.libs, set by auditwheel), and
+      #    log the wheel size.
+      - name: Check ggml CPU variants in the wheel (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd python/dist
+          WHEEL=$(ls *manylinux*.whl | head -1)
+          echo "Wheel size: $WHEEL $(stat -c %s "$WHEEL") bytes"
+          check_dir="$RUNNER_TEMP/wheel-check"
+          rm -rf "$check_dir"
+          mkdir "$check_dir"
+          unzip -q "$WHEEL" -d "$check_dir"
+          cd "$check_dir"
+          case "$(uname -m)" in
+            x86_64)  baseline=libggml-cpu-x64.so ;;
+            aarch64) baseline=libggml-cpu-armv8.0_1.so ;;
+          esac
+          variants=(libembedding/libggml-cpu-*.so)
+          echo "ggml CPU variants in the wheel: ${#variants[@]}"
+          if [ ! -f "libembedding/$baseline" ]; then
+            echo "ERROR: baseline variant $baseline is missing from the wheel"
+            exit 1
+          fi
+          for lib in "${variants[@]}"; do
+            echo "== $lib ($(stat -c %s "$lib") bytes)"
+            dyn=$(readelf -d "$lib")
+            echo "$dyn" | grep -E "NEEDED|RUNPATH|RPATH"
+            if ! echo "$dyn" | grep -E "RUNPATH|RPATH" | grep -q 'libembedding_ng.libs'; then
+              echo "ERROR: $lib has no RUNPATH into libembedding_ng.libs"
+              exit 1
+            fi
+            # auditwheel renames the grafted libggml-base with a hash.
+            if echo "$dyn" | grep -E "NEEDED.*libggml-base\.so\.[0-9]+\]"; then
+              echo "ERROR: $lib still needs the unhashed libggml-base (not grafted)"
+              exit 1
+            fi
+          done
+          rm -rf "$check_dir"
+
       # ── Install wheel and run tests ──────────────────────────────
       - name: Install wheel and run tests
         shell: bash
@@ -430,6 +473,9 @@ jobs:
           fi
           export LIBEMBEDDING_TEST_INSTALLED=1
           (cd "$RUNNER_TEMP" && python -c "import libembedding, sys; print('Testing', libembedding.__file__); sys.exit('site-packages' not in libembedding.__file__)")
+          # CPU dispatch: ggml must have loaded a variant from the installed
+          # wheel (not from python's directory, where there is none).
+          (cd "$RUNNER_TEMP" && python -c "import libembedding, sys; f = libembedding.ggml_cpu_features(); print('ggml CPU features:', ' '.join(f)); sys.exit(0 if f else 'no ggml CPU variant loaded')")
           # 600 s: network tests download models of several hundred MB, and a
           # slow runner download is not a hang (it failed the 1.15.0 release).
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
