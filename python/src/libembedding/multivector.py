@@ -19,8 +19,8 @@ import numpy as np
 
 from ._binding import ffi, lib
 from ._status import check_status
-from .models import _PROVIDER_MAP, _c_string, _desc_from_c
-from .types import ModelDesc, Stats
+from .models import _PROVIDER_MAP, _c_string, _desc_from_c, list_multivector_models
+from .types import ModelDesc, ModelInfo, Stats
 
 _MODES = {
     "document": lib.LEMBED_MV_DOCUMENT,
@@ -39,7 +39,13 @@ class MultiVectorEmbedding:
     Args:
         model_dir: Local directory with the ONNX file (``model.onnx``,
             ``vespa_colbert.onnx`` or ``onnx/model.onnx``), ``tokenizer.json``
-            and optionally ``onnx_config.json`` / ``colbert_config.json``.
+            and optionally ``onnx_config.json`` / ``colbert_config.json``; or
+            a registry model (HuggingFace repo or registry name, e.g.
+            ``"answerdotai/answerai-colbert-small-v1"``), downloaded into the
+            cache on first use. An existing directory always wins.
+        cache_dir: Model cache directory (registry models only).
+        offline: Use the cache only, never download (registry models only).
+        show_download_progress: Print a progress bar while downloading.
         provider: Execution provider (``"cpu"``).
         threads: Number of threads (0 = auto).
         batch_size: Internal batch size (0 = 32).
@@ -64,6 +70,9 @@ class MultiVectorEmbedding:
         normalize: bool = True,
         query_expansion: bool | None = None,
         attend_to_expansion: bool | None = None,
+        cache_dir: str | None = None,
+        offline: bool = False,
+        show_download_progress: bool = False,
     ):
         self._mv = None
         if not isinstance(model_dir, (str, bytes)) and not hasattr(model_dir, "__fspath__"):
@@ -93,10 +102,21 @@ class MultiVectorEmbedding:
         opts.normalize = int(bool(normalize))
         opts.query_expansion = _tri_state(query_expansion)
         opts.attend_to_expansion = _tri_state(attend_to_expansion)
+        cache_buf = (
+            ffi.new("char[]", str(cache_dir).encode("utf-8")) if cache_dir else ffi.NULL
+        )
+        opts.cache_dir = cache_buf
+        opts.offline = int(bool(offline))
+        opts.show_download_progress = int(bool(show_download_progress))
 
         mv_ptr = ffi.new("lembed_multivector_t **")
         check_status(lib.lembed_multivector_create(ffi.addressof(opts), mv_ptr))
         self._mv = mv_ptr[0]
+
+    @staticmethod
+    def list_supported_models() -> list[ModelInfo]:
+        """Return the multi-vector models of the registry."""
+        return list_multivector_models()
 
     def _require_open(self):
         if self._mv is None:

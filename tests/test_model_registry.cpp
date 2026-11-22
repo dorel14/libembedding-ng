@@ -99,6 +99,69 @@ int main(void) {
         ASSERT(count == LEMBED_RERANKER_MODEL_COUNT, "reranker count matches");
     }
 
+    /* Test: multivector (ColBERT) models. No network: the cache lookups are
+     * offline and point at a directory that does not exist. */
+    {
+        const lembed_model_info_t* models = nullptr;
+        int count = 0;
+        lembed_status_t s = lembed_list_multivector_models(&models, &count);
+        ASSERT(s == LEMBED_OK, "list multivector models OK");
+        ASSERT(count == LEMBED_MULTIVECTOR_MODEL_COUNT, "multivector count matches enum");
+        ASSERT(count == 1, "1 multivector model");
+        ASSERT(lembed_list_multivector_models(nullptr, &count) == LEMBED_ERROR_INVALID_ARGUMENT,
+               "list multivector rejects NULL out");
+
+        lembed_model_info_t info;
+        s = lembed_get_multivector_model_info(LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1, &info);
+        ASSERT(s == LEMBED_OK, "answerai-colbert-small-v1 info OK");
+        ASSERT(strcmp(info.model_code, "answerdotai/answerai-colbert-small-v1") == 0, "colbert model_code");
+        ASSERT(strcmp(info.model_name, "answerdotai/answerai-colbert-small-v1") == 0, "colbert model_name");
+        ASSERT(strcmp(info.model_file, "vespa_colbert.onnx") == 0, "colbert model_file");
+        ASSERT(info.dim == 96, "colbert dim is 96");
+        ASSERT(info.max_tokens == 300, "colbert document length is 300");
+        ASSERT(info.quantization == LEMBED_QUANTIZATION_NONE, "colbert is fp32");
+        ASSERT(LEMBED_MULTIVECTOR_MODEL_DEFAULT == LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1,
+               "colbert is the default multivector model");
+
+        ASSERT(lembed_get_multivector_model_info((lembed_multivector_model_t)999, &info)
+                   == LEMBED_ERROR_INVALID_ARGUMENT, "invalid multivector enum rejected");
+        ASSERT(lembed_get_multivector_model_info((lembed_multivector_model_t)-1, &info)
+                   == LEMBED_ERROR_INVALID_ARGUMENT, "negative multivector enum rejected");
+        ASSERT(lembed_get_multivector_model_info(LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1, nullptr)
+                   == LEMBED_ERROR_INVALID_ARGUMENT, "NULL multivector out rejected");
+
+        ASSERT(lembed_find_multivector_model_by_code("answerdotai/answerai-colbert-small-v1") == 0,
+               "find multivector by code");
+        ASSERT(lembed_find_multivector_model_by_code("no/such-model") == -1, "unknown multivector code");
+        ASSERT(lembed_find_multivector_model_by_code(nullptr) == -1, "NULL multivector code");
+        ASSERT(lembed_resolve_multivector_model("answerdotai/answerai-colbert-small-v1") == 0,
+               "resolve multivector by name");
+        ASSERT(lembed_resolve_multivector_model("no/such-model") == -1, "resolve unknown multivector");
+        const char* err = lembed_last_error();
+        ASSERT(err && strstr(err, "multivector"), "resolve error names the kind");
+
+        /* Registry name, cache only, empty cache: a download error, not a
+         * missing-directory error. */
+        char* dir = nullptr;
+        s = lembed_ensure_multivector_model(LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1,
+                                            "lembed_no_such_cache_dir", 0, 1, &dir);
+        ASSERT(s == LEMBED_ERROR_DOWNLOAD && dir == nullptr, "ensure multivector offline, empty cache");
+        ASSERT(lembed_ensure_multivector_model(LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1,
+                                               nullptr, 0, 1, nullptr) == LEMBED_ERROR_INVALID_ARGUMENT,
+               "ensure multivector needs an output");
+
+        lembed_multivector_options_t opts = lembed_multivector_options_default();
+        lembed_multivector_t* mv = nullptr;
+        opts.model_dir = "answerdotai/answerai-colbert-small-v1";
+        opts.cache_dir = "lembed_no_such_cache_dir";
+        opts.offline = 1;
+        ASSERT(lembed_multivector_create(&opts, &mv) == LEMBED_ERROR_DOWNLOAD && mv == nullptr,
+               "create by registry id, offline, empty cache -> DOWNLOAD");
+        opts.model_dir = "no/such-model";
+        ASSERT(lembed_multivector_create(&opts, &mv) == LEMBED_ERROR_IO && mv == nullptr,
+               "create by unknown id -> IO (directory not found)");
+    }
+
     /* Test: find model by code */
     {
         int idx = lembed_find_text_model_by_code("Xenova/bge-small-en-v1.5");
@@ -312,6 +375,7 @@ int main(void) {
             lembed_list_image_models,
 #endif
             lembed_list_reranker_models,
+            lembed_list_multivector_models,
         };
         int missing = 0;
         for (list_fn fn : lists) {

@@ -44,6 +44,7 @@ from .gguf_inspect import (
 from .image_embedding import ImageEmbedding, image_autotune
 from .models import (
     list_image_models,
+    list_multivector_models,
     list_reranker_models,
     list_sparse_models,
     list_text_models,
@@ -211,6 +212,7 @@ __all__ = [
     "image_autotune",
     "inspect_gguf",
     "list_image_models",
+    "list_multivector_models",
     "list_reranker_models",
     "list_sparse_models",
     "list_text_models",

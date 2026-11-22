@@ -225,9 +225,11 @@ print(embeddings.shape)  # (2, 512)
 ### MultiVectorEmbedding
 
 Multi-vector (late interaction, ColBERT) embeddings: one float32 matrix
-`[n_tokens, dim]` per text. ONNX Runtime only, **local** model (a directory with
-`model.onnx` or `vespa_colbert.onnx`, `tokenizer.json`, and an optional
-`onnx_config.json`). The library embeds; it does not index or search: score with
+`[n_tokens, dim]` per text. ONNX Runtime only. The model is either a **local
+directory** (`model.onnx` or `vespa_colbert.onnx`, `tokenizer.json`, and an optional
+`onnx_config.json`) or a **registry entry**
+(`"answerdotai/answerai-colbert-small-v1"`, downloaded into the cache on first use;
+an existing directory wins). The library embeds; it does not index or search: score with
 `maxsim` / `maxsim_batch`. Alias: `LateInteractionTextEmbedding` (FastEmbed
 naming). C API: `multivector_embedding.h` (`lembed_multivector_*`).
 
@@ -238,9 +240,12 @@ MultiVectorEmbedding(
     model_dir, *, provider="cpu", threads=0, batch_size=0,
     query_maxlen=None, doc_maxlen=None, normalize=True,
     query_expansion=None, attend_to_expansion=None,
+    cache_dir=None, offline=False, show_download_progress=False,
 )
 ```
 
+`cache_dir` / `offline` / `show_download_progress`: registry models only.
+`MultiVectorEmbedding.list_supported_models()` lists the registry.
 `query_maxlen` / `doc_maxlen`: length overrides (model defaults: 32 / 300).
 `query_expansion`: pad queries with `[MASK]` (`None` = on).
 `attend_to_expansion`: `None` = follow the model.
@@ -258,7 +263,7 @@ MultiVectorEmbedding(
 | `close()` | `None` | Release resources (idempotent); works with `with` |
 
 Errors are `LembedError` subclasses (missing directory or file: `IOError`;
-`.gguf` path: `UnsupportedError`).
+`.gguf` path: `UnsupportedError`; registry download failure: `DownloadError`).
 
 #### Example
 

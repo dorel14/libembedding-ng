@@ -129,6 +129,7 @@ with minimal overhead (~13%).
 | Sparse text | ONNX | SPLADE++, BGE-M3 |
 | Image | ONNX | CLIP ViT-B-32, ResNet-50, Nomic Vision, Unicom |
 | Reranking | ONNX | BGE Reranker, Jina Reranker (FP32 + INT8 quantized) |
+| Multi-vector (ColBERT) | ONNX | answerai-colbert-small-v1 |
 
 ### Production-grade tooling
 

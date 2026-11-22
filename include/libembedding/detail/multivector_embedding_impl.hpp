@@ -23,6 +23,8 @@
 
 #include "../error.h"
 #include "../types.h"
+#include "../model_registry.h"
+#include "download_manager.hpp"
 #include "model_loader_impl.hpp"
 #include "onnx_session_impl.hpp"
 #include "tokenizer_impl.hpp"
@@ -35,6 +37,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -50,6 +53,12 @@ namespace detail {
 class mv_config_error : public std::runtime_error {
 public:
     explicit mv_config_error(const std::string& what) : std::runtime_error(what) {}
+};
+
+/* A registry model that cannot be fetched: LEMBED_ERROR_DOWNLOAD. */
+class mv_download_error : public std::runtime_error {
+public:
+    explicit mv_download_error(const std::string& what) : std::runtime_error(what) {}
 };
 
 /* The graph cannot serve this API (no projection): LEMBED_ERROR_UNSUPPORTED. */
@@ -441,7 +450,40 @@ lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* op
     }
 
     try {
-        const std::string dir(options->model_dir);
+        std::string dir(options->model_dir);
+        std::string display_name;
+        {
+            /* A string that is not an existing directory but names a registry
+             * model is fetched into the cache. An existing directory always
+             * wins, so a local copy can shadow the registry. */
+            std::error_code ec;
+            if (!std::filesystem::is_directory(std::filesystem::path(dir), ec)) {
+                const int idx = lembed_find_multivector_model_by_code(dir.c_str());
+                int model_idx = idx;
+                if (model_idx < 0) {
+                    const lembed_model_info_t* models = nullptr;
+                    int count = 0;
+                    lembed_list_multivector_models(&models, &count);
+                    for (int i = 0; i < count; i++) {
+                        if (dir == models[i].model_name) { model_idx = i; break; }
+                    }
+                }
+                if (model_idx >= 0) {
+                    lembed_model_info_t info;
+                    lembed_get_multivector_model_info((lembed_multivector_model_t)model_idx, &info);
+                    display_name = info.model_code;
+                    try {
+                        dir = lembed::detail::ensure_model_by_kind(
+                            model_idx, LEMBED__MODEL_TYPE_MULTIVECTOR, options->cache_dir,
+                            options->show_download_progress != 0, options->offline != 0);
+                    } catch (const lembed::detail::model_refused_error&) {
+                        throw;
+                    } catch (const std::exception& e) {
+                        throw lembed::detail::mv_download_error(e.what());
+                    }
+                }
+            }
+        }
         if (!lembed::detail::file_exists(dir + "/tokenizer.json") &&
             !lembed::detail::file_exists(dir + "/model.onnx") &&
             !lembed::detail::file_exists(dir + "/vespa_colbert.onnx") &&
@@ -453,7 +495,7 @@ lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* op
         struct Deleter { void operator()(lembed_multivector_t* p) const { delete p; } };
         std::unique_ptr<lembed_multivector_t, Deleter> mv(new lembed_multivector());
         lembed::detail::mv_load(mv->rt, dir, *options);
-        mv->model_name_str = dir;
+        mv->model_name_str = display_name.empty() ? dir : display_name;
         mv->num_threads = options->num_threads;
         mv->batch_size = options->batch_size > 0 ? options->batch_size
                                                  : lembed::detail::kMvDefaultBatchSize;
@@ -476,6 +518,12 @@ lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* op
     } catch (const lembed::detail::mv_unsupported_error& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_UNSUPPORTED;
+    } catch (const lembed::detail::model_refused_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
+    } catch (const lembed::detail::mv_download_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_DOWNLOAD;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return lembed::detail::onnx_create_status(e, LEMBED_ERROR_IO);
