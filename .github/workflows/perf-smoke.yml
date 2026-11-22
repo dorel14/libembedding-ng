@@ -14,8 +14,6 @@ jobs:
     name: Perf smoke (linux-x86_64)
     runs-on: ubuntu-22.04
     continue-on-error: true
-    env:
-      LIBEMBEDDING_CACHE_DIR: ${{ runner.temp }}/libembedding-models
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +39,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install dist/*manylinux*.whl
 
+      # Step-level env: the runner context is not available in job-level env.
       - name: Run perf smoke
+        env:
+          LIBEMBEDDING_CACHE_DIR: ${{ runner.temp }}/libembedding-models
         run: |
           python benchmarks/perf_smoke.py --platform linux-x86_64 --out perf-smoke.json
 
