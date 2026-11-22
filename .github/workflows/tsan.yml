@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -38,7 +38,7 @@ jobs:
           echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Cache models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/libembedding
           key: concurrency-models-v1
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -80,7 +80,7 @@ jobs:
           echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
 
       - name: Cache models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/libembedding
           key: concurrency-models-v1

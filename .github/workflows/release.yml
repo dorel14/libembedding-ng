@@ -38,7 +38,7 @@ jobs:
     name: Static checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Encoding check
         run: |
@@ -71,7 +71,7 @@ jobs:
     env:
       ONNXRUNTIME_VERSION: "1.31.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -124,7 +124,7 @@ jobs:
       # Same model cache as build-wheel.yml (shared key, same runner OS/arch).
       - name: Restore downloaded models
         id: models
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/libembedding-models
           key: models-${{ runner.os }}-${{ runner.arch }}-v2
@@ -143,7 +143,7 @@ jobs:
       # Saved even when the tests fail, so a slow download is not repeated.
       - name: Save downloaded models
         if: always() && steps.models.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/libembedding-models
           key: models-${{ runner.os }}-${{ runner.arch }}-v2
@@ -160,13 +160,13 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       released: ${{ steps.resolve.outputs.released }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -329,7 +329,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wheel-*
           merge-multiple: true
