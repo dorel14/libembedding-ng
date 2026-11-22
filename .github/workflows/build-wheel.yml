@@ -432,8 +432,10 @@ jobs:
               echo "ERROR: $lib has no RUNPATH into libembedding_ng.libs"
               exit 1
             fi
-            # auditwheel renames the grafted libggml-base with a hash.
-            if echo "$dyn" | grep -E "NEEDED.*libggml-base\.so\.[0-9]+\]"; then
+            # auditwheel renames the grafted libggml-base with a hash
+            # (libggml-base-<hash>.so.*): any NEEDED starting with
+            # "libggml-base.so" was not grafted.
+            if echo "$dyn" | grep -E "NEEDED.*\[libggml-base\.so"; then
               echo "ERROR: $lib still needs the unhashed libggml-base (not grafted)"
               exit 1
             fi
