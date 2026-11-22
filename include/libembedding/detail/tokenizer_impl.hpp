@@ -475,6 +475,7 @@ public:
         /* Byte-level BPE (CLIP, GPT-2): only when the JSON is fully understood,
          * otherwise the legacy BPE path stays in charge. */
         if (type_ == BPE && parse_bytelevel(root, model)) type_ = BPE_BYTELEVEL;
+        if (type_ == BPE) parse_whitespace_bpe(root, model);
 
         /* Post-processor: detect special tokens to add */
         cJSON* post = cJSON_GetObjectItem(root, "post_processor");
@@ -1110,6 +1111,10 @@ private:
             tokenize_bytelevel(text, ids);
             return;
         }
+        if (type_ == BPE && ws_bpe_) {
+            ws_bpe_tokenize(text, ids);
+            return;
+        }
         /* Normalise and pre-tokenize into words. WordPiece follows HF's
          * BertNormalizer switches; byte-level BPE keeps its legacy path. */
         std::vector<std::string> words;
@@ -1509,6 +1514,90 @@ private:
             i += n;
         }
         return out;
+    }
+
+    /* ---- Non byte-level BPE with the `Whitespace` pre-tokenizer ----
+     * (jina-reranker-v1-turbo-en style: normalizer NFC + Lowercase, characters
+     * are vocabulary symbols). HF splits on `\w+|[^\w\s]+` and lowercases with
+     * full Unicode rules; the legacy path made every non-ASCII character a word
+     * of its own, which diverged on Cyrillic, CJK and other non-Latin text. */
+    bool ws_bpe_ = false;
+    bool ws_nfc_ = false;
+
+    /* Enable the path only when pre_tokenizer and normalizer are fully understood. */
+    void parse_whitespace_bpe(cJSON* root, cJSON* model) {
+        ws_bpe_ = false;
+        cJSON* pre = cJSON_GetObjectItem(root, "pre_tokenizer");
+        cJSON* pt = pre ? cJSON_GetObjectItem(pre, "type") : nullptr;
+        if (!pt || !pt->valuestring || strcmp(pt->valuestring, "Whitespace") != 0) return;
+        cJSON* csp = model ? cJSON_GetObjectItem(model, "continuing_subword_prefix") : nullptr;
+        cJSON* eow = model ? cJSON_GetObjectItem(model, "end_of_word_suffix") : nullptr;
+        if ((csp && csp->valuestring && csp->valuestring[0]) ||
+            (eow && eow->valuestring && eow->valuestring[0])) return;
+
+        bool lower = false, nfc = false;
+        cJSON* norm = cJSON_GetObjectItem(root, "normalizer");
+        if (norm && !cJSON_IsNull(norm)) {
+            std::vector<cJSON*> ns;
+            cJSON* nt = cJSON_GetObjectItem(norm, "type");
+            if (nt && nt->valuestring && strcmp(nt->valuestring, "Sequence") == 0) {
+                cJSON* arr = cJSON_GetObjectItem(norm, "normalizers");
+                if (!arr || !cJSON_IsArray(arr)) return;
+                for (int i = 0; i < cJSON_GetArraySize(arr); i++) ns.push_back(cJSON_GetArrayItem(arr, i));
+            } else {
+                ns.push_back(norm);
+            }
+            for (cJSON* n : ns) {
+                cJSON* t = cJSON_GetObjectItem(n, "type");
+                if (!t || !t->valuestring) return;
+                if (strcmp(t->valuestring, "NFC") == 0) nfc = true;
+                else if (strcmp(t->valuestring, "Lowercase") == 0) lower = true;
+                else return;
+            }
+        }
+        ws_bpe_ = true;
+        ws_nfc_ = nfc;
+        bl_lower_ = lower;   /* reused by bl_normalize */
+    }
+
+    /* Regex `\w`: letter, number, underscore, combining mark (Mn approximation). */
+    static bool ws_is_word(uint32_t cp) {
+        return cp == '_' || unicode::is_letter(cp) || unicode::is_number(cp) ||
+               unicode::bert_is_stripped(cp);
+    }
+
+    /* NFC + Lowercase, then `\w+|[^\w\s]+` words. */
+    void ws_bpe_tokenize(const std::string& raw, std::vector<int>& ids) const {
+        const std::string s = (ws_nfc_ ? bl_apply_nfc(raw) : raw);
+        std::string text;
+        text.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ) {
+            uint32_t cp;
+            const size_t n = utf8_next(s, i, cp);
+            if (cp == kInvalidCp) { text.append(s, i, n); }
+            else if (bl_lower_ && cp == 0x130) { text += 'i'; unicode::append_utf8(text, 0x307); }
+            else {
+                if (bl_lower_) cp = (cp >= 'A' && cp <= 'Z') ? cp + 0x20 : unicode::bert_lower(cp);
+                unicode::append_utf8(text, cp);
+            }
+            i += n;
+        }
+        size_t i = 0;
+        while (i < text.size()) {
+            uint32_t cp;
+            size_t n = utf8_next(text, i, cp);
+            if (cp != kInvalidCp && unicode::is_space(cp)) { i += n; continue; }
+            const bool word = cp != kInvalidCp && ws_is_word(cp);
+            size_t end = i + n;
+            while (end < text.size()) {
+                uint32_t c2;
+                const size_t m = utf8_next(text, end, c2);
+                if (c2 == kInvalidCp || unicode::is_space(c2) || ws_is_word(c2) != word) break;
+                end += m;
+            }
+            bpe_tokenize(text.substr(i, end - i), ids);
+            i = end;
+        }
     }
 
     /* Length in bytes of the codepoint at `i` and its class. */

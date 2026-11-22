@@ -261,7 +261,8 @@ Truncation is set to 512 on both sides. Measured with the WordPiece normalisatio
 of PR #62 (0 id mismatches against HF on the corpus).
 
 Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999,
-**broken** < 0.99. Measured on 2026-11-17, quantized siblings in the same row.
+**broken** < 0.99. Measured on 2026-11-22, after the Unigram (PR #68), byte-level BPE
+(PR #79) and `Whitespace` BPE (PR #97) tokenizers; quantized siblings in the same row.
 
 | Model | Tokenizer family | Min / mean cosine (all) | English min | Status |
 |---|---|---|---|---|
@@ -272,16 +273,16 @@ Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999
 | gte-base-en-v1.5, gte-large-en-v1.5 (quantized) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
 | snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1.000 / 1.000 | 1.000 | validated |
 | Splade_PP_en_v1 (sparse, cosine of the vectors) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
-| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0.021 / 0.347 | 0.034 | broken |
-| multilingual-e5-small | Unigram (SentencePiece) | 0.768 / 0.823 | 0.768 | broken |
-| clip-vit-base-patch32 (text) | BPE byte-level | 0.295 / 0.763 | 0.316 | broken |
-| jina-reranker-v1-turbo-en (reranker, Pearson of the scores) | BPE (not byte-level) | 0.42-0.46 | n/a | broken |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 1.000 / 1.000 | 1.000 | validated |
+| multilingual-e5-small | Unigram (SentencePiece) | 1.000 / 1.000 | 1.000 | validated |
+| clip-vit-base-patch32 (text) | BPE byte-level | 1.000 / 1.000 | 1.000 | validated |
+| jina-reranker-v1-turbo-en (reranker, Pearson of the scores; quantized 0.99996) | BPE (not byte-level, `Whitespace`) | 1.000 | n/a | validated |
 
-Reading: **every measured WordPiece model matches the reference** on the whole
-multilingual corpus (lowest min cosine 0.9999999999999984). Unigram (XLM-R) and
-byte-level BPE (CLIP, ModernBERT) are broken even in English: they need their own
-tokenizer (T38). The reranker (ONNX and GGUF) now encodes a real pair, like HF
-(GGUF builds it from the vocabulary's special tokens).
+Reading: **every measured model matches the reference** on the whole multilingual
+corpus, whatever the tokenizer family (WordPiece, Unigram, byte-level BPE, `Whitespace`
+BPE). The reranker (ONNX and GGUF) encodes a real pair, like HF (GGUF builds it from
+the vocabulary's special tokens); its reference is the raw logit over 8 pairs,
+Russian and Chinese included.
 
 Not measured (not in the local cache or over 560 MB; the family comes from the
 architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,
