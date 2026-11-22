@@ -13,6 +13,19 @@ This module provides native similarity functions operating on raw float arrays.
 | `lembed_cosine_similarity(a, b, dim)` | `float` | Cosine similarity |
 | `lembed_dot_product(a, b, dim)` | `float` | Dot product |
 | `lembed_euclidean_distance(a, b, dim)` | `float` | Euclidean (L2) distance |
+| `lembed_maxsim(q, nq, d, nd, dim, out_score)` | `lembed_status_t` | MaxSim (ColBERT) score of a query against one document |
+| `lembed_maxsim_batch(q, nq, docs, offsets, num_docs, dim, out_scores)` | `lembed_status_t` | One MaxSim score per document, in input order |
+
+## MaxSim (late interaction)
+
+`lembed_maxsim` returns the sum, over the `nq` query vectors, of the maximum dot product with the `nd` document vectors. Matrices are row-major (`dim` floats per row); L2-normalised inputs give the cosine MaxSim. `nq == 0` or `nd == 0` gives a score of 0. No allocation, no state, re-entrant.
+
+`lembed_maxsim_batch` scores one query against several concatenated documents: document `i` is rows `offsets[i]` to `offsets[i+1]-1` of `docs` (`offsets` has `num_docs + 1` entries, `offsets[0] == 0`, non-decreasing). No sorting, no top-K, no index. Returns `LEMBED_ERROR_INVALID_ARGUMENT` for a NULL output pointer, NULL `q`/`d` with a non-zero count, a negative count, `dim <= 0` or invalid offsets.
+
+```c
+float score;
+lembed_status_t st = lembed_maxsim(q, nq, d, nd, dim, &score);
+```
 
 ## Example
 

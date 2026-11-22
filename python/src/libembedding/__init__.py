@@ -58,7 +58,13 @@ from .reranker import (
     reranker_autotune_constrained,
     reranker_autotune_custom,
 )
-from .similarity import cosine_similarity, dot_product, euclidean_distance
+from .similarity import (
+    cosine_similarity,
+    dot_product,
+    euclidean_distance,
+    maxsim,
+    maxsim_batch,
+)
 from .sparse_text_embedding import (
     SparseTextEmbedding,
     sparse_autotune,
@@ -205,6 +211,8 @@ __all__ = [
     "list_reranker_models",
     "list_sparse_models",
     "list_text_models",
+    "maxsim",
+    "maxsim_batch",
     "mobile_model_limit_mb",
     "reranker_auto_config",
     "reranker_auto_config_profile",

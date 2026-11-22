@@ -460,6 +460,11 @@ lembed_status_t lembed_cleanup_model_cache_except(
 float lembed_cosine_similarity(const float* a, const float* b, int dim);
 float lembed_dot_product(const float* a, const float* b, int dim);
 float lembed_euclidean_distance(const float* a, const float* b, int dim);
+lembed_status_t lembed_maxsim(const float* q, int nq, const float* d, int nd,
+                              int dim, float* out_score);
+lembed_status_t lembed_maxsim_batch(const float* q, int nq, const float* docs,
+                                    const int64_t* offsets, int num_docs,
+                                    int dim, float* out_scores);
 
 /* ═══ Functions: Memory free ══════════════════════════════════════ */
 
