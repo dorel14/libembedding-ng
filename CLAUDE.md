@@ -103,7 +103,7 @@ La CI wheel exige une couverture Python ≥ 40 % (`--cov-fail-under=40`).
 - GPU (CUDA, DirectML, CoreML, TensorRT, Vulkan, Metal) : hors périmètre jusqu'après 1.x.
 - Ne jamais présumer qu'une quantification est plus rapide : mesurer.
 
-## 6. État de la roadmap (au 2026-11-01)
+## 6. État de la roadmap (au 2026-11-22)
 
 Fait : API C/C++/Python stable, autotune (texte, reranker, sparse, quantization auto),
 cache LRU, backend llama.cpp dense + reranker, sparse ONNX avec `top_k`/`min_weight`,
@@ -118,12 +118,17 @@ En cours / ouvert :
   x86-64-v1 / armv7 NEON-VFPv4 / aarch64 ARMv8.0 / macOS M1, ordre Windows → Linux →
   macOS/ARM. Pas de matériel Apple Silicon / AMD : validation par la CI (runners, Intel
   SDE pour la correction par ISA, QEMU armv7l) ; la perf hors runners se corrige sur
-  retours utilisateurs. Suivant : phase 1, mesure Windows (créneau machine calme).
+  retours utilisateurs. Phase 1 close le 2026-11-22 (5 tours entrelacés, i7-1065G7) :
+  le build dispatch égale `build-vnni` à moins de 1,5 % (requête, docs courts et longs),
+  le natif reste 7 à 9 % derrière ; +22 ms au chargement, avantage ×12,7 sur ONNX.
+  Suivant : phase 2 (Linux x64), validée par la CI.
 - **Fix chargement `libembedding.dylib` sur macOS** : implémenté, validation sur runner
   `macos-14` et doc `python/README.md` restantes.
-- **ONNX Runtime 1.20.1 → 1.31.0** : planifié (3 workflows, `third_party/onnxruntime/`,
-  adaptation éventuelle de `onnx_session_impl.hpp`).
-- **LE-9.4 sparse GGUF** : P1.5b→P1.5e (représentation des têtes, runtime ggml,
-  post-traitement SPLADE, validation ONNX ↔ GGUF), puis 1 entrée registry `SPLADE-PP-En-v1`.
-- **LE-8.8 / LE-1.11** : wheels multi-plateformes complètes ; **LE-1.10** : tests Linux CI.
+- **LE-8.8 / LE-1.11** : wheels multi-plateformes complètes.
 - **LE-11** : benchmarks concurrentiels vs SentenceTransformers et FastEmbed.
+- **T14 ColBERT** : RFC `.kilo/plans/rfc-colbert.md`, décisions en attente.
+
+Fait depuis le 2026-11-01 : ONNX Runtime 1.31.0, sparse GGUF (LE-9.4) avec entrée
+registry, tests Linux en CI (LE-1.10), tokenizers HF-exacts (WordPiece, Unigram, BPE
+byte-level et `Whitespace`), matrice de compatibilité entièrement validée sur les
+modèles en cache, smoke-test de perf en CI (ratios, non bloquant).
