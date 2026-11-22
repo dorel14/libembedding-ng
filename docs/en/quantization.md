@@ -93,6 +93,28 @@ These refusals are reported as `LEMBED_ERROR_UNSUPPORTED` with the detail in `le
 
 This list applies to **sparse GGUF** only. It says nothing about the quantizations accepted by the dense llama.cpp backend, which reads GGUF files through llama.cpp itself.
 
+## Quality by variant
+
+Retrieval quality measured on BEIR SciFact (test: 5183 documents, 300 queries), brute-force cosine, no timing. "Cosine vs FP32" is the mean cosine between a document embedding and the FP32 registry entry's embedding of the same document.
+
+| Model | Registry entry | Quantization | nDCG@10 | MRR@10 | Recall@100 | Cosine vs FP32 |
+|---|---|---|---:|---:|---:|---:|
+| bge-small-en-v1.5 | Xenova/bge-small-en-v1.5 | none | 0.7127 | 0.6822 | 0.9417 | 1.00000 |
+| bge-small-en-v1.5 | onnx-community/bge-small-en-v1.5-ONNX | dynamic | 0.7077 | 0.6766 | 0.9467 | 0.99831 |
+| bge-small-en-v1.5 | Qdrant/bge-small-en-v1.5-onnx-Q | fp16 | 0.7127 | 0.6822 | 0.9417 | 1.00000 |
+| all-MiniLM-L6-v2 | Qdrant/all-MiniLM-L6-v2-onnx | none | 0.6541 | 0.6071 | 0.9317 | 1.00000 |
+| all-MiniLM-L6-v2 | Xenova/all-MiniLM-L6-v2 | dynamic | 0.6519 | 0.6077 | 0.9367 | 0.99336 |
+
+A registry variant is a different repository, so possibly a different export of the model: the table measures the entry a user gets, not the quantizer alone. Measured on an i7-1065G7 with ONNX Runtime 1.31.0, single run (no confidence interval: differences around 0.005 over 300 queries are not significant).
+
+Reproduce:
+
+```powershell
+python benchmarks/quantization/bench_quality.py --models BAAI/bge-small-en-v1.5 sentence-transformers/all-MiniLM-L6-v2
+```
+
+The script writes `quality_results.json` and `quality_results.md` to `benchmarks/quantization/` (option `--out`), with machine metadata.
+
 ## Measuring
 
 A smaller quantization is not necessarily faster: it depends on the CPU, the model, the batch and the sequence length. Before choosing:

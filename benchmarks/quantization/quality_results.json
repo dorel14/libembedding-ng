@@ -1,0 +1,79 @@
+{
+  "machine": {
+    "cpu_features": "AVX,FMA,AVX2,AVX512F",
+    "cpu_model": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+    "ggml_cpu_features": "SSE3 SSSE3 AVX AVX2 F16C FMA BMI2 AVX512 AVX512_VNNI LLAMAFILE OPENMP REPACK",
+    "git_commit": "81492b1",
+    "git_dirty": true,
+    "libembedding_version": "1.11.2",
+    "llama_cpp_build": "llama.cpp enabled",
+    "logical_cores": 8,
+    "machine": "AMD64",
+    "onnxruntime_version": "1.31.0",
+    "os": "Windows-11-10.0.26300-SP0",
+    "physical_cores": 4,
+    "python": "3.12.10",
+    "ram_mb": 16124,
+    "timestamp": "2026-11-22T12:35:17Z"
+  },
+  "results": {
+    "variants": [
+      {
+        "cosine_vs_fp32": 1.0,
+        "model": "BAAI/bge-small-en-v1.5",
+        "model_code": "Xenova/bge-small-en-v1.5",
+        "mrr@10": 0.6821931216931216,
+        "ndcg@10": 0.7127069247605036,
+        "quantization": "none",
+        "recall@100": 0.9416666666666667
+      },
+      {
+        "cosine_vs_fp32": 0.9983052015304565,
+        "model": "BAAI/bge-small-en-v1.5",
+        "model_code": "onnx-community/bge-small-en-v1.5-ONNX",
+        "mrr@10": 0.67655291005291,
+        "ndcg@10": 0.7077000909250936,
+        "quantization": "dynamic",
+        "recall@100": 0.9466666666666667
+      },
+      {
+        "cosine_vs_fp32": 0.9999992251396179,
+        "model": "BAAI/bge-small-en-v1.5",
+        "model_code": "Qdrant/bge-small-en-v1.5-onnx-Q",
+        "mrr@10": 0.6821931216931216,
+        "ndcg@10": 0.7127069247605036,
+        "quantization": "fp16",
+        "recall@100": 0.9416666666666667
+      },
+      {
+        "cosine_vs_fp32": 1.0,
+        "model": "sentence-transformers/all-MiniLM-L6-v2",
+        "model_code": "Qdrant/all-MiniLM-L6-v2-onnx",
+        "mrr@10": 0.6070634920634921,
+        "ndcg@10": 0.6540837346606109,
+        "quantization": "none",
+        "recall@100": 0.9316666666666666
+      },
+      {
+        "cosine_vs_fp32": 0.9933555126190186,
+        "model": "sentence-transformers/all-MiniLM-L6-v2",
+        "model_code": "Xenova/all-MiniLM-L6-v2",
+        "mrr@10": 0.6077116402116401,
+        "ndcg@10": 0.6519155518130199,
+        "quantization": "dynamic",
+        "recall@100": 0.9366666666666666
+      }
+    ]
+  },
+  "run": {
+    "batch": 32,
+    "dataset": "BEIR SciFact test (5183 docs, 300 queries)",
+    "format": "onnx",
+    "iterations": 1,
+    "quantization": "all registry variants",
+    "threads": 0,
+    "warmup": 0
+  },
+  "schema_version": 1,
+  "title": "Retrieval quality by quantization variant"
+}
