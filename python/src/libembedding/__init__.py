@@ -49,6 +49,7 @@ from .models import (
     list_text_models,
     mobile_model_limit_mb,
 )
+from .multivector import LateInteractionTextEmbedding, MultiVectorEmbedding
 from .reranker import (
     Reranker,
     clear_reranker_autotune_cache,
@@ -170,12 +171,14 @@ __all__ = [
     "HardwareInfo",
     "ImageEmbedding",
     "ImageTuningResult",
+    "LateInteractionTextEmbedding",
     "LembedError",
     "LlamaError",
     "Metrics",
     "ModelDesc",
     "ModelInfo",
     "ModelSelectionResult",
+    "MultiVectorEmbedding",
     "Objective",
     "RerankResult",
     "Reranker",

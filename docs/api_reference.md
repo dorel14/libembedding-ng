@@ -303,6 +303,59 @@ for r in ranked:
 
 ---
 
+### MultiVectorEmbedding
+
+Embeddings multi-vecteurs (interaction tardive, ColBERT) : une matrice float32
+`[n_tokens, dim]` par texte. Backend ONNX Runtime uniquement, modèle **local**
+(répertoire avec `model.onnx` ou `vespa_colbert.onnx`, `tokenizer.json`, et
+`onnx_config.json` optionnel). La lib embarque ; elle n'indexe ni ne recherche :
+le scoring se fait avec `maxsim` / `maxsim_batch`. Alias :
+`LateInteractionTextEmbedding` (nommage FastEmbed). API C :
+`multivector_embedding.h` (`lembed_multivector_*`).
+
+#### Constructeur
+
+```python
+MultiVectorEmbedding(
+    model_dir, *, provider="cpu", threads=0, batch_size=0,
+    query_maxlen=None, doc_maxlen=None, normalize=True,
+    query_expansion=None, attend_to_expansion=None,
+)
+```
+
+`query_maxlen` / `doc_maxlen` : surcharge des longueurs (défaut modèle : 32 / 300).
+`query_expansion` : padding des requêtes avec `[MASK]` (`None` = activé).
+`attend_to_expansion` : `None` = suit le modèle.
+
+#### Méthodes et propriétés
+
+| Membre | Type | Description |
+|--------|------|-------------|
+| `embed(texts, *, mode="document")` | `list[np.ndarray]` | Une matrice `[n_i, dim]` par texte ; `mode` = `"document"` ou `"query"` |
+| `query_embed(query)` | `Iterator[np.ndarray]` | Requête(s) (`str` ou liste), mode `query` |
+| `passage_embed(texts)` | `Iterator[np.ndarray]` | Documents, mode `document` |
+| `dim` | `int` (property) | Dimension des vecteurs |
+| `backend` | `str` (property) | `"onnxruntime"` |
+| `info()` / `stats()` | `ModelDesc` / `Stats` | Descripteur et statistiques |
+| `close()` | `None` | Libère les ressources (idempotent) ; utilisable avec `with` |
+
+Les erreurs sont des sous-classes de `LembedError` (répertoire ou fichier
+manquant : `IOError` ; chemin `.gguf` : `UnsupportedError`).
+
+#### Exemple
+
+```python
+from libembedding import MultiVectorEmbedding, maxsim
+
+with MultiVectorEmbedding("/chemin/vers/answerai-colbert-small-v1") as mv:
+    (q,) = mv.query_embed("what is the capital of France?")   # (32, 96)
+    docs = list(mv.passage_embed(["Paris is the capital of France.",
+                                  "Bananas grow in tropical climates."]))
+    scores = [maxsim(q, d) for d in docs]                      # le 1er est le plus haut
+```
+
+---
+
 ## Types de données
 
 ### TextEmbeddingPool
