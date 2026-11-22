@@ -140,6 +140,8 @@ lembed_resolve_sparse_model
     lembed_cosine_similarity
     lembed_dot_product
     lembed_euclidean_distance
+    lembed_maxsim
+    lembed_maxsim_batch
 
     ; ---- Memory free ----
     lembed_embeddings_free

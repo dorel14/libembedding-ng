@@ -430,6 +430,8 @@ cache.clear()
 | `cosine_similarity(a, b)` | Cosine similarity between two vectors |
 | `dot_product(a, b)` | Dot product between two vectors |
 | `euclidean_distance(a, b)` | L2 distance between two vectors |
+| `maxsim(query, doc)` | MaxSim (ColBERT) score: sum over `query` rows of the max dot product with `doc` rows (2-D float32 matrices) |
+| `maxsim_batch(query, docs)` | One MaxSim score per document (`docs`: sequence of float32 matrices), in input order |
 | `detect_backend(model_name, backend="auto")` | Detect which backend to use |
 
 ---

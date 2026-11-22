@@ -639,6 +639,8 @@ Comparaison native de vecteurs d'embedding.
 | `cosine_similarity(a, b)` | Similarité cosinus |
 | `dot_product(a, b)` | Produit scalaire |
 | `euclidean_distance(a, b)` | Distance euclidienne (L2) |
+| `maxsim(query, doc)` | Score MaxSim (ColBERT) : somme sur les lignes de `query` du produit scalaire max avec les lignes de `doc` (matrices float32 2-D) |
+| `maxsim_batch(query, docs)` | Un score MaxSim par document (`docs` : séquence de matrices float32), dans l'ordre d'entrée |
 
 ```python
 from libembedding import cosine_similarity, dot_product, euclidean_distance
