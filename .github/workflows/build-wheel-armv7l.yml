@@ -56,17 +56,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends g++-arm-linux-gnueabihf ninja-build
 
+      # microsoft/onnxruntime answered "Repository not found" on 2026-11-22.
+      # When the clone fails, ort-out is rebuilt from the ORT bundled in our
+      # published armv7l wheel (scripts/fetch_onnxruntime_armv7l_fallback.sh).
       - name: Fetch ONNX Runtime sources and a host protoc
+        id: sources
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 --branch "v$ONNXRUNTIME_VERSION" \
-            https://github.com/microsoft/onnxruntime.git "$RUNNER_TEMP/ort"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/protoc.zip" \
-            "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-linux-x86_64.zip"
-          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          if git clone --depth 1 --branch "v$ONNXRUNTIME_VERSION" \
+              https://github.com/microsoft/onnxruntime.git "$RUNNER_TEMP/ort"; then
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/protoc.zip" \
+              "https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-linux-x86_64.zip"
+            unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+            echo "fallback=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ONNX Runtime sources unreachable, using the ORT bundled in the published libembedding-ng armv7l wheel"
+            sudo apt-get install -y --no-install-recommends patchelf
+            bash scripts/fetch_onnxruntime_armv7l_fallback.sh "$ONNXRUNTIME_VERSION" ort-out
+            echo "fallback=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Cross-compile ONNX Runtime
-        if: steps.cache.outputs.cache-hit != 'true'
+        if: steps.cache.outputs.cache-hit != 'true' && steps.sources.outputs.fallback != 'true'
         run: |
           python3 "$RUNNER_TEMP/ort/tools/ci_build/build.py" \
             --build_dir "$RUNNER_TEMP/ort-build" --config Release \
