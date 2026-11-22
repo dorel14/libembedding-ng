@@ -24,6 +24,10 @@ EXPECTED_SIZES_64 = {
     "lembed_embeddings_t": 16,
     "lembed_sparse_embedding_t": 24,
     "lembed_rerank_result_t": 8,
+    # ptr + provider + device_id (16) + 9 ints (36) = 52, padded to 8.
+    "lembed_multivector_options_t": 56,
+    # 2 ptrs (16) + 2 ints (8) + int64.
+    "lembed_multivectors_t": 32,
     "lembed_cache_config_t": 24,
     "lembed_text_options_t": 88,
     "lembed_text_options_v2_t": 96,
@@ -51,6 +55,8 @@ EXPECTED_SIZES_32 = {
     "lembed_model_desc_v2_t": 40,  # 32 + 2 ints
     "lembed_embeddings_t": 12,  # ptr + 2 ints
     "lembed_sparse_embedding_t": 12,  # 2 ptrs + int
+    "lembed_multivector_options_t": 48,  # ptr + 2 enums/ints (12) + 9 ints
+    "lembed_multivectors_t": 24,  # 2 ptrs + 2 ints (16), int64 @16
     "lembed_cache_config_t": 12,  # 2 size_t + int
     "lembed_text_options_t": 76,  # 12 + ptr 4 + 15 ints (60)
     "lembed_text_options_v2_t": 80,
@@ -100,6 +106,10 @@ EXPECTED_OFFSETS_32 = [
     ("lembed_embeddings_t", "dim", 8),
     ("lembed_sparse_embedding_t", "values", 4),
     ("lembed_sparse_embedding_t", "length", 8),
+    ("lembed_multivector_options_t", "num_threads", 12),
+    ("lembed_multivector_options_t", "attend_to_expansion", 44),
+    ("lembed_multivectors_t", "num_docs", 8),
+    ("lembed_multivectors_t", "total_vectors", 16),
     ("lembed_cache_config_t", "current_size", 4),
     ("lembed_cache_config_t", "ttl_seconds", 8),
     ("lembed_text_options_t", "cache_dir", 12),

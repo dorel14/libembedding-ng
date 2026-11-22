@@ -70,6 +70,17 @@ lembed_ggml_cpu_features
     lembed_sparse_text_embedding_effective_provider
     lembed_sparse_text_embedding_set_max_batch_tokens
 
+    ; ---- Multi-vector (ColBERT) embedding ----
+    lembed_multivector_options_default
+    lembed_multivector_create
+    lembed_multivector_embed
+    lembed_multivectors_free
+    lembed_multivector_dim
+    lembed_multivector_desc
+    lembed_multivector_backend_name
+    lembed_multivector_stats
+    lembed_multivector_free
+
     ;@IF NOT LIBEMBEDDING_NO_IMAGE
     ; ---- Image embedding ----
     lembed_image_embedding_create

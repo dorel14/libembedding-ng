@@ -717,6 +717,21 @@ public:
 
     int max_length() const { return max_length_; }
     void set_pad_token_id(int id) { pad_token_id_ = id; }
+    int cls_token_id() const { return cls_token_id_; }
+    int sep_token_id() const { return sep_token_id_; }
+    int unk_token_id() const { return unk_token_id_; }
+    /* Number of vocabulary entries known by id (0 when the tokenizer type
+     * keeps no id table). */
+    int vocab_size() const { return (int)id_to_token_.size(); }
+
+    /* Id of the vocabulary entry whose surface form is exactly `token`
+     * (e.g. "[MASK]", "[unused0]", "!"), or -1 when the vocabulary has none.
+     * Added tokens that are not part of model.vocab are not seen. Used by the
+     * multivector runtime to resolve the markers and the skiplist by string. */
+    int token_to_id(const std::string& token) const {
+        auto it = vocab_.find(token);
+        return it == vocab_.end() ? -1 : it->second;
+    }
 
 private:
     /* An explicit id wins over the surface form: the metadata is what the model

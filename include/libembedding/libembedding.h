@@ -27,6 +27,7 @@
 #include "text_embedding.h"          // Must come before benchmark (defines lembed_text_embedding_t)
 #include "sparse_text_embedding.h"
 #include "autotuner.h"
+#include "multivector_embedding.h"
 
 #ifndef LIBEMBEDDING_NO_IMAGE
 #include "image_embedding.h"

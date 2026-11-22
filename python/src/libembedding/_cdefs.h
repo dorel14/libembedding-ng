@@ -369,6 +369,48 @@ void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_backend_name(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_effective_provider(const lembed_sparse_embedding_ctx_t* ctx);
 
+/* ═══ Functions: Multi-vector (ColBERT) embedding ═══════════════════ */
+
+typedef struct lembed_multivector lembed_multivector_t;
+
+typedef enum {
+    LEMBED_MV_DOCUMENT = 0,
+    LEMBED_MV_QUERY = 1
+} lembed_mv_mode_t;
+
+typedef struct {
+    const char* model_dir;
+    lembed_execution_provider_t provider;
+    int device_id;
+    int num_threads;
+    int batch_size;
+    int max_tokens_per_batch;
+    int query_maxlen;
+    int doc_maxlen;
+    int normalize;
+    int mask_punctuation;
+    int query_expansion;
+    int attend_to_expansion;
+} lembed_multivector_options_t;
+
+typedef struct {
+    float*   data;
+    int64_t* offsets;
+    int      num_docs;
+    int      dim;
+    int64_t  total_vectors;
+} lembed_multivectors_t;
+
+lembed_multivector_options_t lembed_multivector_options_default(void);
+lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* options, lembed_multivector_t** out);
+lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv, const char* const* texts, int n, lembed_mv_mode_t mode, lembed_multivectors_t* out);
+void lembed_multivectors_free(lembed_multivectors_t* result);
+int lembed_multivector_dim(const lembed_multivector_t* mv);
+const lembed_model_desc_t* lembed_multivector_desc(const lembed_multivector_t* mv);
+const char* lembed_multivector_backend_name(const lembed_multivector_t* mv);
+void lembed_multivector_stats(const lembed_multivector_t* mv, lembed_stats_t* out);
+void lembed_multivector_free(lembed_multivector_t* mv);
+
 /* ═══ Functions: Image embedding ════════════════════════════════════ */
 
 lembed_status_t lembed_image_embedding_create(const lembed_image_options_t* options, lembed_image_embedding_t** out);

@@ -39,6 +39,8 @@
   url: troubleshooting.html
 - title: C API — Similarité
   url: c_api/similarity.html
+- title: C API — Multi-vecteurs (ColBERT)
+  url: c_api/multivector_embedding.html
 - title: C API — Modes
   url: c_api/embedding_mode.html
 - title: C API — Cache

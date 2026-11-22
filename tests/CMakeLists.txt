@@ -26,6 +26,21 @@ add_executable(test_maxsim test_maxsim.cpp)
 target_link_libraries(test_maxsim PRIVATE libembedding)
 add_test(NAME test_maxsim COMMAND test_maxsim)
 
+# Multi-vector (ColBERT) handle: argument / layout / error-path tests, plus a
+# run against the local answerai-colbert-small-v1 directory when it is present
+# (skipped otherwise, no network). The fidelity test compares against golden
+# vectors generated with pylate (tests/data/colbert/answerai_small_golden.json).
+add_executable(test_multivector test_multivector.cpp)
+target_link_libraries(test_multivector PRIVATE libembedding)
+target_compile_definitions(test_multivector PRIVATE LIBEMBEDDING_NO_DOWNLOAD)
+add_test(NAME test_multivector COMMAND test_multivector)
+
+add_executable(test_multivector_fidelity test_multivector_fidelity.cpp)
+target_link_libraries(test_multivector_fidelity PRIVATE libembedding)
+target_compile_definitions(test_multivector_fidelity PRIVATE LIBEMBEDDING_NO_DOWNLOAD
+    LEMBED_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+add_test(NAME test_multivector_fidelity COMMAND test_multivector_fidelity)
+
 # Test local loading (no network required — tests error paths)
 add_executable(test_local_loading test_local_loading.cpp)
 target_link_libraries(test_local_loading PRIVATE libembedding)
@@ -207,13 +222,13 @@ add_test(NAME test_backend_introspection COMMAND test_backend_introspection)
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
+    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
+    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
