@@ -20,6 +20,7 @@
 // The real C API headers: single source of truth for every type and prototype.
 #include <libembedding/text_embedding.h>
 #include <libembedding/error.h>
+#include <libembedding/reranker.h>
 #include <libembedding/llamacpp_backend.h>
 
 #define ASSERT(cond, msg) do { \
@@ -290,6 +291,42 @@ static void test_decoder_only_refused(const char* path) {
     fprintf(stderr, "  Decoder-only: %d passed, %d failed\n\n", passes, failures);
 }
 
+/* GGUF reranker: ranks the relevant doc first, and a long query+document pair
+ * is truncated, not fatal. The decoder-only refusal is dense-only, so the
+ * reranker create path never returns UNSUPPORTED. Use a BERT cross-encoder
+ * fixture (e.g. bge-reranker-base-Q4_K_M.gguf): Qwen3-Reranker creates but
+ * crashes in llama_encode() on 1.16.0 too (pre-existing, tracked for 1.17). */
+static void test_reranker_causal(const char* path) {
+    fprintf(stderr, "--- Test 7: Causal GGUF reranker ---\n");
+
+    lembed_reranker_options_t opts = lembed_reranker_options_default();
+    opts.num_threads = 4;
+    opts.show_download_progress = 0;
+    lembed_reranker_t* rr = nullptr;
+    lembed_status_t s = lembed_reranker_create_from_gguf_path(path, &opts, &rr);
+    ASSERT(s == LEMBED_OK, "create causal GGUF reranker");
+    if (s != LEMBED_OK) return;
+
+    std::string long_doc;
+    for (int i = 0; i < 3000; i++) long_doc += "filler" + std::to_string(i % 89) + " ";
+    const char* docs[] = {
+        "Paris is the capital and largest city of France.",
+        "Bananas are rich in potassium and grow in tropical climates.",
+        "The stock market closed slightly lower on Tuesday.",
+        long_doc.c_str(),
+    };
+    lembed_rerank_results_t res = {0};
+    s = lembed_reranker_rerank(rr, "What is the capital of France?", docs, 4, 0, &res);
+    ASSERT(s == LEMBED_OK, "rerank 3 docs + 1 long doc without aborting");
+    if (s == LEMBED_OK) {
+        ASSERT(res.count == 4, "4 rerank results");
+        ASSERT(res.count > 0 && res.items[0].index == 0, "relevant doc ranked first");
+        lembed_rerank_results_free(&res);
+    }
+    lembed_reranker_free(rr);
+    fprintf(stderr, "  Causal reranker: %d passed, %d failed\n\n", passes, failures);
+}
+
 /* The GGUF fixture is not vendored. Resolve it from argv, then the environment,
  * then a relative default, so the test is not tied to one machine's home
  * directory. */
@@ -335,6 +372,14 @@ int main(int argc, char** argv) {
         test_decoder_only_refused(dec_path);
     } else {
         fprintf(stderr, "SKIP: decoder-only test (set LEMBED_TEST_DECODER_GGUF)\n");
+    }
+
+    /* Optional causal reranker fixture (e.g. Qwen3-Reranker-0.6B-Q4_K_M.gguf). */
+    const char* rr_path = getenv("LEMBED_TEST_RERANKER_GGUF");
+    if (rr_path && rr_path[0] && file_readable(rr_path)) {
+        test_reranker_causal(rr_path);
+    } else {
+        fprintf(stderr, "SKIP: causal reranker test (set LEMBED_TEST_RERANKER_GGUF)\n");
     }
 
     fprintf(stderr, "=== TOTAL: %d passed, %d failed ===\n", passes, failures);

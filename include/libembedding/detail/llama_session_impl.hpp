@@ -214,14 +214,18 @@ public:
             model_ = nullptr;
             throw std::runtime_error("Failed to create llama context for embeddings");
         }
-        try {
-            llama_require_encoder(model_, ctx_, model_path);
-        } catch (...) {
-            llama_free(ctx_);
-            ctx_ = nullptr;
-            llama_model_free(model_);
-            model_ = nullptr;
-            throw;
+        /* Dense embedding only: causal rerankers (Qwen3-Reranker) keep their
+         * 1.16.0 behaviour. */
+        if (!cross_encoder) {
+            try {
+                llama_require_encoder(model_, ctx_, model_path);
+            } catch (...) {
+                llama_free(ctx_);
+                ctx_ = nullptr;
+                llama_model_free(model_);
+                model_ = nullptr;
+                throw;
+            }
         }
         encode_limit_ = llama_encode_token_limit(ctx_);
     }
