@@ -97,9 +97,12 @@ struct LlamaUnsupportedError : public std::runtime_error {
  * context exists. llama_model_has_encoder() alone is not enough: it is true
  * for T5 only, and false for BERT. */
 inline void llama_require_encoder(const struct llama_model* model,
-                                  const struct llama_context* ctx, const char* path) {
+                                  const struct llama_context* ctx, const char* path,
+                                  bool reranker = false) {
     if (!llama_model_has_encoder(model) && llama_get_causal_attn(ctx)) {
-        std::string msg = "decoder-only GGUF embedding models are not supported yet: ";
+        std::string msg = reranker
+            ? "decoder-only (causal) GGUF rerankers such as Qwen3-Reranker are not supported yet: "
+            : "decoder-only GGUF embedding models are not supported yet: ";
         msg += path ? path : "";
         throw LlamaUnsupportedError(msg);
     }
@@ -214,18 +217,16 @@ public:
             model_ = nullptr;
             throw std::runtime_error("Failed to create llama context for embeddings");
         }
-        /* Dense embedding only: causal rerankers (Qwen3-Reranker) keep their
-         * 1.16.0 behaviour. */
-        if (!cross_encoder) {
-            try {
-                llama_require_encoder(model_, ctx_, model_path);
-            } catch (...) {
-                llama_free(ctx_);
-                ctx_ = nullptr;
-                llama_model_free(model_);
-                model_ = nullptr;
-                throw;
-            }
+        /* Dense and reranker alike: Qwen3-Reranker (causal) created fine but
+         * segfaulted at the first rerank in 1.16.0, so refuse it cleanly. */
+        try {
+            llama_require_encoder(model_, ctx_, model_path, cross_encoder);
+        } catch (...) {
+            llama_free(ctx_);
+            ctx_ = nullptr;
+            llama_model_free(model_);
+            model_ = nullptr;
+            throw;
         }
         encode_limit_ = llama_encode_token_limit(ctx_);
     }

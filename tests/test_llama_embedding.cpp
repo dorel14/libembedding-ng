@@ -291,11 +291,26 @@ static void test_decoder_only_refused(const char* path) {
     fprintf(stderr, "  Decoder-only: %d passed, %d failed\n\n", passes, failures);
 }
 
-/* GGUF reranker: ranks the relevant doc first, and a long query+document pair
- * is truncated, not fatal. The decoder-only refusal is dense-only, so the
- * reranker create path never returns UNSUPPORTED. Use a BERT cross-encoder
- * fixture (e.g. bge-reranker-base-Q4_K_M.gguf): Qwen3-Reranker creates but
- * crashes in llama_encode() on 1.16.0 too (pre-existing, tracked for 1.17). */
+/* Causal GGUF reranker (Qwen3-Reranker): it used to create, then segfault at
+ * the first rerank. It is refused at create. */
+static void test_reranker_decoder_refused(const char* path) {
+    fprintf(stderr, "--- Test 8: Causal GGUF reranker refused ---\n");
+    lembed_reranker_options_t opts = lembed_reranker_options_default();
+    opts.num_threads = 4;
+    opts.show_download_progress = 0;
+    lembed_reranker_t* rr = nullptr;
+    lembed_status_t s = lembed_reranker_create_from_gguf_path(path, &opts, &rr);
+    ASSERT(s == LEMBED_ERROR_UNSUPPORTED, "causal GGUF reranker returns LEMBED_ERROR_UNSUPPORTED");
+    ASSERT(rr == nullptr, "no reranker returned for causal GGUF");
+    const char* err = lembed_last_error();
+    ASSERT(err && strstr(err, "decoder-only") != nullptr, "error message names decoder-only");
+    if (rr) lembed_reranker_free(rr);
+    fprintf(stderr, "  Causal reranker refusal: %d passed, %d failed\n\n", passes, failures);
+}
+
+/* BERT cross-encoder GGUF reranker (e.g. bge-reranker-base-Q4_K_M.gguf) keeps
+ * working: ranks the relevant doc first, and a long query+document pair is
+ * truncated, not fatal. */
 static void test_reranker_causal(const char* path) {
     fprintf(stderr, "--- Test 7: Causal GGUF reranker ---\n");
 
@@ -380,6 +395,14 @@ int main(int argc, char** argv) {
         test_reranker_causal(rr_path);
     } else {
         fprintf(stderr, "SKIP: causal reranker test (set LEMBED_TEST_RERANKER_GGUF)\n");
+    }
+
+    /* Optional causal reranker fixture (Qwen3-Reranker-0.6B-Q4_K_M.gguf). */
+    const char* dec_rr_path = getenv("LEMBED_TEST_DECODER_RERANKER_GGUF");
+    if (dec_rr_path && dec_rr_path[0] && file_readable(dec_rr_path)) {
+        test_reranker_decoder_refused(dec_rr_path);
+    } else {
+        fprintf(stderr, "SKIP: causal reranker refusal (set LEMBED_TEST_DECODER_RERANKER_GGUF)\n");
     }
 
     fprintf(stderr, "=== TOTAL: %d passed, %d failed ===\n", passes, failures);

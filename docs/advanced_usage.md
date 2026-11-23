@@ -101,8 +101,10 @@ Limites du GGUF dense (et reranker) :
 - Les modèles d'embedding GGUF **décodeur seul** (par exemple Qwen3-Embedding) ne sont
   pas encore pris en charge : la création renvoie `LEMBED_ERROR_UNSUPPORTED`
   (`UnsupportedError` en Python) avec le message `decoder-only GGUF embedding models
-  are not supported yet`. Les rerankers GGUF causaux (Qwen3-Reranker) ne sont pas
-  concernés.
+  are not supported yet`. Il en va de même pour les rerankers GGUF
+  causaux (Qwen3-Reranker, `decoder-only (causal) GGUF rerankers ... are not supported
+  yet`), qui plantaient au premier `rerank` ; prévu en 1.17. Les cross-encoders BERT
+  restent pris en charge.
 
 ### Auto-tuning workers (llama.cpp)
 

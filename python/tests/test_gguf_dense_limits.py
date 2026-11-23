@@ -16,10 +16,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from libembedding import TextEmbedding
+from libembedding import Reranker, TextEmbedding
 from libembedding.exceptions import UnsupportedError
 
-GGUF_DIR = Path.home() / ".cache" / "libembedding" / "gguf"
+CACHE_DIR = Path.home() / ".cache" / "libembedding"
+QWEN3_RERANKER_GGUF = (
+    CACHE_DIR
+    / "models--sinjab-Qwen3-Reranker-0.6B-Q4_K_M-GGUF"
+    / "Qwen3-Reranker-0.6B-Q4_K_M.gguf"
+)
+GGUF_DIR = CACHE_DIR / "gguf"
 ENCODER_GGUF = GGUF_DIR / "all-MiniLM-L6-v2-Q4_K_M.gguf"
 DECODER_GGUF = GGUF_DIR / "qwen3-emb" / "Qwen3-Embedding-0.6B-Q8_0.gguf"
 
@@ -54,4 +60,14 @@ def test_max_length_truncates_the_prefix():
 def test_decoder_only_gguf_is_refused():
     with pytest.raises(UnsupportedError) as info:
         TextEmbedding(str(DECODER_GGUF), offline=True, show_download_progress=False)
+    assert "decoder-only" in str(info.value)
+
+
+@pytest.mark.skipif(
+    not QWEN3_RERANKER_GGUF.is_file(), reason="Qwen3-Reranker GGUF not in local cache"
+)
+def test_causal_gguf_reranker_is_refused():
+    """Qwen3-Reranker used to create, then segfault at the first rerank."""
+    with pytest.raises(UnsupportedError) as info:
+        Reranker(str(QWEN3_RERANKER_GGUF), offline=True, show_download_progress=False)
     assert "decoder-only" in str(info.value)
