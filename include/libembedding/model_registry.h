@@ -135,23 +135,23 @@ static const lembed_model_info_t lembed__text_models[] = {
     /* LEMBED_TEXT_ALL_MINILM_L6_V2 */
     { "sentence-transformers/all-MiniLM-L6-v2", "Qdrant/all-MiniLM-L6-v2-onnx",
       "model.onnx", "Sentence Transformer model, MiniLM-L6-v2",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
+      384, 256, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_ALL_MINILM_L6_V2_Q */
     { "sentence-transformers/all-MiniLM-L6-v2", "Xenova/all-MiniLM-L6-v2",
       "onnx/model_quantized.onnx", "Quantized Sentence Transformer, MiniLM-L6-v2",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_DYNAMIC },
+      384, 256, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_DYNAMIC },
     /* LEMBED_TEXT_ALL_MINILM_L12_V2 */
     { "sentence-transformers/all-MiniLM-L12-v2", "Xenova/all-MiniLM-L12-v2",
       "onnx/model.onnx", "Sentence Transformer model, MiniLM-L12-v2",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
+      384, 128, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_ALL_MINILM_L12_V2_Q */
     { "sentence-transformers/all-MiniLM-L12-v2", "Xenova/all-MiniLM-L12-v2",
       "onnx/model_quantized.onnx", "Quantized Sentence Transformer, MiniLM-L12-v2",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_DYNAMIC },
+      384, 128, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_DYNAMIC },
     /* LEMBED_TEXT_ALL_MPNET_BASE_V2 */
     { "sentence-transformers/all-mpnet-base-v2", "Xenova/all-mpnet-base-v2",
       "onnx/model.onnx", "Sentence Transformer model, mpnet-base-v2",
-      768, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
+      768, 384, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_BGE_BASE_EN_V15 */
     { "BAAI/bge-base-en-v1.5", "Xenova/bge-base-en-v1.5",
       "onnx/model.onnx", "v1.5 release of the base English model",
@@ -192,17 +192,17 @@ static const lembed_model_info_t lembed__text_models[] = {
     { "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
       "onnx/model.onnx", "Multi-lingual model",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
+      384, 128, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_PARAPHRASE_ML_MINILM_L12_V2_Q */
     { "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "Qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q",
       "model_optimized.onnx", "FP16 multi-lingual model (ORT-optimized graph)",
-      384, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_FP16 },
+      384, 128, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_FP16 },
     /* LEMBED_TEXT_PARAPHRASE_ML_MPNET_BASE_V2 */
     { "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
       "Xenova/paraphrase-multilingual-mpnet-base-v2",
       "onnx/model.onnx", "Sentence-transformers model for clustering or semantic search",
-      768, 512, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
+      768, 128, LEMBED_POOLING_MEAN, LEMBED_QUANTIZATION_NONE },
     /* LEMBED_TEXT_BGE_SMALL_ZH_V15 */
     { "BAAI/bge-small-zh-v1.5", "Xenova/bge-small-zh-v1.5",
       "onnx/model.onnx", "v1.5 release of the small Chinese model",

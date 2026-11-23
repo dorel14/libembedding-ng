@@ -43,6 +43,43 @@ inline bool parse_config_json(const std::string& config_blob,
 }
 
 /*
+ * Parse a sentence_bert_config.json blob (SentenceTransformers) and return its
+ * max_seq_length, the truncation length SentenceTransformers and FastEmbed use
+ * for the model. Returns 0 when the blob is not JSON, has no usable
+ * max_seq_length, or the value is outside [1, 131072].
+ */
+inline int parse_sentence_bert_max_seq_length(const std::string& blob) {
+    cJSON* root = cJSON_Parse(blob.c_str());
+    if (!root) return 0;
+    int out = 0;
+    cJSON* msl = cJSON_GetObjectItem(root, "max_seq_length");
+    if (cJSON_IsNumber(msl) && msl->valuedouble >= 1.0 && msl->valuedouble <= 131072.0) {
+        out = (int)msl->valuedouble;
+    }
+    cJSON_Delete(root);
+    return out;
+}
+
+/*
+ * Max token length of an ONNX text model, first non-zero of:
+ *   1. the length the caller asked for (options.max_length),
+ *   2. max_seq_length of <model_dir>/sentence_bert_config.json, when present,
+ *   3. fallback (registry max_tokens, or config.json max_position_embeddings).
+ * Returns 0 when all three are unknown (the loader then uses its own default).
+ */
+inline int resolve_text_max_length(int user_max_length,
+                                   const std::string& model_dir,
+                                   int fallback) {
+    if (user_max_length > 0) return user_max_length;
+    std::string path = model_dir + "/sentence_bert_config.json";
+    if (file_exists(path)) {
+        int sbert = parse_sentence_bert_max_seq_length(read_file_to_string(path));
+        if (sbert > 0) return sbert;
+    }
+    return fallback > 0 ? fallback : 0;
+}
+
+/*
  * Infer pooling strategy from the directory path basename.
  * Heuristic: BGE, Snowflake Arctic, GTE, MXBAI models use CLS pooling.
  * All others default to MEAN.
