@@ -133,15 +133,8 @@ class MultiVectorEmbedding:
         """Runtime serving the model (``"onnxruntime"``)."""
         return _c_string(lib.lembed_multivector_backend_name(self._require_open()))
 
-    def embed(
-        self, texts: Sequence[str], *, mode: str = "document"
-    ) -> list[np.ndarray]:
-        """Embed texts into one float32 matrix ``[n_i, dim]`` each.
-
-        Args:
-            texts: Strings to embed (a single ``str`` is refused).
-            mode: ``"document"`` or ``"query"``.
-        """
+    def _embed_native(self, texts: Sequence[str], mode: str):
+        """Run the native embed call; the caller frees the result (None if empty)."""
         mv = self._require_open()
         if isinstance(texts, (str, bytes)):
             raise TypeError("texts must be a list of strings, not a single string")
@@ -151,7 +144,7 @@ class MultiVectorEmbedding:
         texts = list(texts)
         n = len(texts)
         if n == 0:
-            return []
+            return None
 
         encoded = [t.encode("utf-8") for t in texts]
         c_strs = [ffi.new("char[]", e) for e in encoded]
@@ -160,6 +153,52 @@ class MultiVectorEmbedding:
         result = ffi.new("lembed_multivectors_t *")
         # cffi releases the GIL for the duration of the C call on its own.
         check_status(lib.lembed_multivector_embed(mv, c_texts, n, c_mode, result))
+        return result
+
+    def embed_ragged(
+        self, texts: Sequence[str], *, mode: str = "document"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Embed texts into one ragged pair ``(data, offsets)``.
+
+        ``data`` is a C-contiguous float32 array ``(total_rows, dim)`` and
+        ``offsets`` an int64 array of ``len(texts) + 1`` row offsets: text ``i`` is
+        ``data[offsets[i]:offsets[i + 1]]``. One copy of the native buffer, and the
+        pair goes straight to ``maxsim_batch`` without further copy.
+        """
+        result = self._embed_native(texts, mode)
+        if result is None:
+            return (
+                np.zeros((0, self.dim), dtype=np.float32),
+                np.zeros(1, dtype=np.int64),
+            )
+        try:
+            dim = int(result.dim)
+            n = int(result.num_docs)
+            offsets = np.frombuffer(
+                ffi.buffer(result.offsets, (n + 1) * 8), dtype=np.int64
+            ).copy()
+            total = int(offsets[-1])
+            if total > 0:
+                raw = ffi.buffer(result.data, total * dim * 4)
+                data = np.frombuffer(raw, dtype=np.float32).reshape(total, dim).copy()
+            else:
+                data = np.zeros((0, dim), dtype=np.float32)
+            return data, offsets
+        finally:
+            lib.lembed_multivectors_free(result)
+
+    def embed(
+        self, texts: Sequence[str], *, mode: str = "document"
+    ) -> list[np.ndarray]:
+        """Embed texts into one float32 matrix ``[n_i, dim]`` each.
+
+        Args:
+            texts: Strings to embed (a single ``str`` is refused).
+            mode: ``"document"`` or ``"query"``.
+        """
+        result = self._embed_native(texts, mode)
+        if result is None:
+            return []
         try:
             dim = result.dim
             out: list[np.ndarray] = []

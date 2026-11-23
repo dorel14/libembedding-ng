@@ -360,6 +360,16 @@ with MultiVectorEmbedding("/chemin/vers/answerai-colbert-small-v1") as mv:
     scores = [maxsim(q, d) for d in docs]                      # le 1er est le plus haut
 ```
 
+Pour beaucoup de documents, `embed_ragged()` renvoie une paire `(data, offsets)` (un seul
+tableau float32 `(total, dim)` et des offsets int64 `n + 1`) que `maxsim_batch(q, (data, offsets))`
+transmet au code natif sans aucune copie ; passer une liste de matrices oblige à les
+concaténer à chaque appel (environ 90 Mo pour 1000 documents longs).
+
+```python
+    data, offsets = mv.embed_ragged(texts)       # document i = data[offsets[i]:offsets[i + 1]]
+    scores = maxsim_batch(q, (data, offsets))    # zéro copie
+```
+
 ---
 
 ## Types de données
@@ -699,7 +709,7 @@ Comparaison native de vecteurs d'embedding.
 | `dot_product(a, b)` | Produit scalaire |
 | `euclidean_distance(a, b)` | Distance euclidienne (L2) |
 | `maxsim(query, doc)` | Score MaxSim (ColBERT) : somme sur les lignes de `query` du produit scalaire max avec les lignes de `doc` (matrices float32 2-D) |
-| `maxsim_batch(query, docs)` | Un score MaxSim par document (`docs` : séquence de matrices float32), dans l'ordre d'entrée |
+| `maxsim_batch(query, docs)` | Un score MaxSim par document (`docs` : séquence de matrices float32, ou paire `(data, offsets)` transmise sans copie, voir `MultiVectorEmbedding.embed_ragged`), dans l'ordre d'entrée |
 
 ```python
 from libembedding import cosine_similarity, dot_product, euclidean_distance

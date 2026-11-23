@@ -277,6 +277,16 @@ with MultiVectorEmbedding("/path/to/answerai-colbert-small-v1") as mv:
     scores = [maxsim(q, d) for d in docs]                      # first is highest
 ```
 
+For many documents, `embed_ragged()` returns a `(data, offsets)` pair (one float32
+`(total, dim)` array and `n + 1` int64 offsets) that `maxsim_batch(q, (data, offsets))`
+hands to the native code with no copy at all; passing a list of matrices forces a
+concatenation on every call (about 90 MB for 1000 long documents).
+
+```python
+    data, offsets = mv.embed_ragged(texts)       # document i = data[offsets[i]:offsets[i + 1]]
+    scores = maxsim_batch(q, (data, offsets))    # zero copy
+```
+
 ---
 
 ### Reranker
@@ -488,7 +498,7 @@ cache.clear()
 | `dot_product(a, b)` | Dot product between two vectors |
 | `euclidean_distance(a, b)` | L2 distance between two vectors |
 | `maxsim(query, doc)` | MaxSim (ColBERT) score: sum over `query` rows of the max dot product with `doc` rows (2-D float32 matrices) |
-| `maxsim_batch(query, docs)` | One MaxSim score per document (`docs`: sequence of float32 matrices), in input order |
+| `maxsim_batch(query, docs)` | One MaxSim score per document (`docs`: sequence of float32 matrices, or a `(data, offsets)` pair passed without copy, see `MultiVectorEmbedding.embed_ragged`), in input order |
 | `detect_backend(model_name, backend="auto")` | Detect which backend to use |
 
 ---
