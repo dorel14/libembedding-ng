@@ -26,6 +26,17 @@ for m in libembedding.list_text_models():
 
 ## Modèles de texte (44 modèles)
 
+> **Longueur de troncature.** Sans `max_length` explicite, un modèle texte ONNX tronque à
+> la valeur `max_seq_length` de son `sentence_bert_config.json`, comme SentenceTransformers
+> et FastEmbed : 256 pour `all-MiniLM-L6-v2`, 128 pour `all-MiniLM-L12-v2` et les deux
+> `paraphrase-multilingual-*`, 384 pour `all-mpnet-base-v2`, 512 pour BGE, E5, MxBai et
+> Arctic, 8192 pour BGE-M3, GTE, Nomic, Jina et ModernBERT. Ordre de priorité :
+> `max_length` explicite, puis `sentence_bert_config.json` s'il se trouve dans le dossier
+> du modèle (dossier local ou cache), puis la valeur du registre (`max_tokens`, visible
+> dans `list_text_models()`), puis `max_position_embeddings` de `config.json` pour un
+> dossier local. Avant la 1.17 ces modèles tronquaient à 512 : les vecteurs de textes de
+> plus de 256 (resp. 128, 384) jetons changent, et s'alignent sur SentenceTransformers.
+
 ### Anglais — BGE
 
 | Nom HuggingFace | Dim | Pooling | Quantification | Licence |
