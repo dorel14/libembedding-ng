@@ -57,7 +57,11 @@ jobs:
       # OpenMP off: an uninstrumented libgomp only adds noise.
       - name: Configure (clang, ASan + UBSan)
         run: |
-          san="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          # UBSan "enum" and "function" checks are off: the tests pass
+          # out-of-range enum values on purpose (invalid-argument paths), and
+          # vendored ggml calls ggml_vec_dot_f32 through a differently typed
+          # pointer (third_party is never patched).
+          san="-fsanitize=address,undefined -fno-sanitize=enum,function -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           cmake -S . -B build-asan -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER="clang-${CLANG_VERSION}" \
