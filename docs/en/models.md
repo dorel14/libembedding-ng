@@ -181,7 +181,7 @@ the llama.cpp backend. The registry below (`lembed_list_gguf_models()`, source:
 | `BGE-Reranker-v2-M3` (reranker, default) | `BAAI/bge-reranker-v2-m3` | `smarttasks/bge-reranker-v2-m3-GGUF` | Q4_K_M | — | ~438 MB | Apache-2.0 |
 | `BGE-Reranker-Base` (reranker) | `BAAI/bge-reranker-base` | `sinjab/bge-reranker-base-Q4_K_M-GGUF` | Q4_K_M | — | ~219 MB | MIT (conversion tagged Apache-2.0) |
 | `BGE-Reranker-Large` (reranker) | `BAAI/bge-reranker-large` | `sinjab/bge-reranker-large-Q4_K_M-GGUF` | Q4_K_M | — | ~407 MB | MIT (conversion tagged Apache-2.0) |
-| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 MB | Apache-2.0 |
+| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 MB | Apache-2.0 — **not supported yet** (decoder-only, `LEMBED_ERROR_UNSUPPORTED` at create), planned for 1.17 |
 | `Jina-Reranker-v1-Turbo-En` (reranker) | `jinaai/jina-reranker-v1-turbo-en` | `sinjab/jina-reranker-v1-turbo-en-Q8_0-GGUF` | Q8_0 | — | ~36 MB | Apache-2.0 |
 
 Any other GGUF file can still be loaded by path; the registry only records files that were checked.

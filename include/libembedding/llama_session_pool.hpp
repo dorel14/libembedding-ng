@@ -3,7 +3,7 @@
  * Public header for LlamaSessionPool (llama.cpp backend)
  *
  * Auteur: David Orel
- * Version: 1.16.0
+ * Version: 1.16.1
  *
  * SPDX-License-Identifier: MIT
  */

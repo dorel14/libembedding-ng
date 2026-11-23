@@ -3,7 +3,7 @@
  * llama.cpp backend for GGUF embedding models
  *
  * Auteur: David Orel
- * Version: 1.16.0
+ * Version: 1.16.1
  *
  * SPDX-License-Identifier: MIT
  */
@@ -81,6 +81,57 @@ inline std::vector<llama_token> build_rerank_pair_tokens(
     out.insert(out.end(), d.begin(), d.end());
     out.insert(out.end(), tail.begin(), tail.end());
     return out;
+}
+
+/* Thrown when a GGUF loads fine but cannot be used by this backend. Callers map
+ * it to LEMBED_ERROR_UNSUPPORTED instead of the generic LEMBED_ERROR_LLAMA. */
+struct LlamaUnsupportedError : public std::runtime_error {
+    explicit LlamaUnsupportedError(const std::string& what)
+        : std::runtime_error(what) {}
+};
+
+/* The dense and reranker paths only call llama_encode(). It serves encoder
+ * stacks (T5) and bidirectional BERT-style models (non-causal attention). A
+ * decoder-only model with causal attention (Qwen3-Embedding, ...) loads but
+ * then crashes at the first embed (access violation), so refuse it once the
+ * context exists. llama_model_has_encoder() alone is not enough: it is true
+ * for T5 only, and false for BERT. */
+inline void llama_require_encoder(const struct llama_model* model,
+                                  const struct llama_context* ctx, const char* path,
+                                  bool reranker = false) {
+    if (!llama_model_has_encoder(model) && llama_get_causal_attn(ctx)) {
+        std::string msg = reranker
+            ? "decoder-only (causal) GGUF rerankers such as Qwen3-Reranker are not supported yet: "
+            : "decoder-only GGUF embedding models are not supported yet: ";
+        msg += path ? path : "";
+        throw LlamaUnsupportedError(msg);
+    }
+}
+
+/* Largest token count one llama_encode() call accepts for this context. A
+ * non-causal encode asserts (GGML_ASSERT, process abort) when n_tokens exceeds
+ * n_ubatch, and cannot exceed n_batch or n_ctx either. */
+inline int llama_encode_token_limit(const struct llama_context* ctx) {
+    int64_t lim = (int64_t)llama_n_ctx(ctx);
+    const int64_t nb = (int64_t)llama_n_batch(ctx);
+    const int64_t nu = (int64_t)llama_n_ubatch(ctx);
+    if (nb > 0 && nb < lim) lim = nb;
+    if (nu > 0 && nu < lim) lim = nu;
+    return lim > 1 ? (int)lim : 1;
+}
+
+/* Truncates `tokens` to at most `limit`, keeping the trailing EOS/SEP when the
+ * model appended one (same as HF truncation: specials survive). */
+inline void llama_truncate_tokens(const struct llama_vocab* vocab,
+                                  std::vector<llama_token>& tokens, int limit) {
+    if (limit < 1) limit = 1;
+    if ((size_t)limit >= tokens.size()) return;
+    const llama_token last = tokens.back();
+    const bool keep_end = (limit > 1) &&
+        ((llama_vocab_get_add_eos(vocab) && last == llama_vocab_eos(vocab)) ||
+         (llama_vocab_get_add_sep(vocab) && last == llama_vocab_sep(vocab)));
+    tokens.resize((size_t)limit);
+    if (keep_end) tokens.back() = last;
 }
 
 class LlamaSession {
@@ -166,23 +217,51 @@ public:
             model_ = nullptr;
             throw std::runtime_error("Failed to create llama context for embeddings");
         }
+        /* Dense and reranker alike: Qwen3-Reranker (causal) created fine but
+         * segfaulted at the first rerank in 1.16.0, so refuse it cleanly. */
+        try {
+            llama_require_encoder(model_, ctx_, model_path, cross_encoder);
+        } catch (...) {
+            llama_free(ctx_);
+            ctx_ = nullptr;
+            llama_model_free(model_);
+            model_ = nullptr;
+            throw;
+        }
+        encode_limit_ = llama_encode_token_limit(ctx_);
     }
 
     int dimension() const { return n_embd_; }
 
     int max_context() const { return n_ctx_; }
 
+    /* Max tokens one encode call accepts (context, n_batch and n_ubatch). */
+    int max_encode_tokens() const { return encode_limit_ > 0 ? encode_limit_ : n_ctx_; }
+
+    /* Sets the user max_length (0 = none); applied by tokenize(). */
+    void set_max_length(int max_length) { max_length_ = max_length; }
+
+    /* Tokenizes with special tokens, then truncates to the smallest of
+     * max_tokens (if > 0), the max_length option, the model context and the
+     * encode batch limit; a trailing EOS/SEP is kept. Returns the token count. */
     int tokenize(const char* text, std::vector<llama_token>& tokens, int max_tokens = 0) const {
+        tokens.clear();
         if (!vocab_) return 0;
-        if (max_tokens <= 0) max_tokens = n_ctx_;
+        int limit = max_encode_tokens();
+        if (n_ctx_ > 0 && n_ctx_ < limit) limit = n_ctx_;
+        if (max_length_ > 0 && max_length_ < limit) limit = max_length_;
+        if (max_tokens > 0 && max_tokens < limit) limit = max_tokens;
 
         int text_len = (int)strlen(text);
         int needed = -llama_tokenize(vocab_, text, text_len, nullptr, 0, true, true);
+        if (needed <= 0) return 0;
         tokens.resize((size_t)needed);
 
         int actual = llama_tokenize(vocab_, text, text_len,
                                     tokens.data(), (int32_t)tokens.size(), true, true);
-        return actual;
+        tokens.resize(actual > 0 ? (size_t)actual : 0);
+        if (!tokens.empty()) llama_truncate_tokens(vocab_, tokens, limit);
+        return (int)tokens.size();
     }
 
     std::vector<float> embed(const char* text) {
@@ -211,6 +290,14 @@ public:
         const enum llama_pooling_type pooling = llama_pooling_type(ctx_);
         if (pooling == LLAMA_POOLING_TYPE_RANK || pooling == LLAMA_POOLING_TYPE_NONE) {
             throw std::runtime_error("GGUF model has no sequence pooling usable for dense embeddings");
+        }
+
+        /* Defence in depth: callers going through tokenize() are already within
+         * the limit, but a longer sequence would abort the process. */
+        if (tokens.size() > (size_t)max_encode_tokens()) {
+            std::vector<llama_token> cut(tokens);
+            llama_truncate_tokens(vocab_, cut, max_encode_tokens());
+            return embed_tokens(cut);
         }
 
         llama_batch batch = llama_batch_init((int32_t)tokens.size(), 0, 1);
@@ -271,7 +358,7 @@ public:
         llama_token eos = llama_vocab_eos(vocab_);
         int cap = n_ctx_;
         if (max_len > 0 && max_len < cap) cap = max_len;
-        if (cap > 512) cap = 512; /* default n_ubatch bounds one encode call */
+        if (cap > max_encode_tokens()) cap = max_encode_tokens(); /* n_ubatch bounds one encode call */
         return build_rerank_pair_tokens(tokenize_plain(query), tokenize_plain(document),
                                         bos, sep, eos, wpm, cap);
     }
@@ -282,6 +369,11 @@ public:
     float classify_tokens(const std::vector<llama_token>& tokens) {
         if (!ctx_) throw std::runtime_error("LlamaSession: null context");
         if (tokens.empty()) return 0.0f;
+        if (tokens.size() > (size_t)max_encode_tokens()) {
+            std::vector<llama_token> cut(tokens);
+            llama_truncate_tokens(vocab_, cut, max_encode_tokens());
+            return classify_tokens(cut);
+        }
 
         llama_batch batch = llama_batch_init((int32_t)tokens.size(), 0, 1);
         batch.n_tokens = 0;
@@ -320,6 +412,8 @@ private:
     int n_ctx_;
     int n_embd_;
     int n_threads_;
+    int encode_limit_ = 0;
+    int max_length_ = 0;
     const struct llama_vocab* vocab_;
 };
 
@@ -337,13 +431,24 @@ class LlamaSessionPool {
     std::atomic<size_t> next_idx_{0};
     std::unique_ptr<LlamaScheduler> scheduler_;
 
+    int encode_limit_ = 0;
+    int max_length_ = 0;
+
+    /* Same truncation rules as LlamaSession::tokenize(). */
     int tokenize(const char* text, std::vector<llama_token>& tokens) const {
+        tokens.clear();
         if (!vocab_) return 0;
-        int max_tokens = n_ctx_;
+        int limit = encode_limit_ > 0 ? encode_limit_ : n_ctx_;
+        if (n_ctx_ > 0 && n_ctx_ < limit) limit = n_ctx_;
+        if (max_length_ > 0 && max_length_ < limit) limit = max_length_;
         int text_len = (int)strlen(text);
         int needed = -llama_tokenize(vocab_, text, text_len, nullptr, 0, true, true);
+        if (needed <= 0) return 0;
         tokens.resize((size_t)needed);
-        return llama_tokenize(vocab_, text, text_len, tokens.data(), (int32_t)tokens.size(), true, true);
+        int n = llama_tokenize(vocab_, text, text_len, tokens.data(), (int32_t)tokens.size(), true, true);
+        tokens.resize(n > 0 ? (size_t)n : 0);
+        if (!tokens.empty()) llama_truncate_tokens(vocab_, tokens, limit);
+        return (int)tokens.size();
     }
 
 public:
@@ -409,9 +514,24 @@ public:
             auto ctx = std::make_unique<Context>();
             ctx->ctx = llama_init_from_model(model_, cparams);
             if (!ctx->ctx) throw std::runtime_error("Failed to create llama context");
+            if (i == 0) {
+                try {
+                    llama_require_encoder(model_, ctx->ctx, model_path);
+                } catch (...) {
+                    llama_free(ctx->ctx);
+                    ctx->ctx = nullptr;
+                    llama_model_free(model_);
+                    model_ = nullptr;
+                    throw;
+                }
+                encode_limit_ = llama_encode_token_limit(ctx->ctx);
+            }
             contexts_.push_back(std::move(ctx));
         }
     }
+
+    /* Sets the user max_length (0 = none); applied by tokenize(). */
+    void set_max_length(int max_length) { max_length_ = max_length; }
 
     void load_from_file_auto(const char* model_path, int n_ctx = 0, int n_gpu_layers = 0,
                              int n_batch = 0, bool verbose = false) {
