@@ -18,7 +18,7 @@ This module provides native similarity functions operating on raw float arrays.
 
 ## MaxSim (late interaction)
 
-`lembed_maxsim` returns the sum, over the `nq` query vectors, of the maximum dot product with the `nd` document vectors. Matrices are row-major (`dim` floats per row); L2-normalised inputs give the cosine MaxSim. `nq == 0` or `nd == 0` gives a score of 0. No allocation, no state, re-entrant.
+`lembed_maxsim` returns the sum, over the `nq` query vectors, of the maximum dot product with the `nd` document vectors. Matrices are row-major (`dim` floats per row); L2-normalised inputs give the cosine MaxSim. `nq == 0` or `nd == 0` gives a score of 0. No state, re-entrant. Portable C kernel (no intrinsics) that compilers auto-vectorise: one temporary copy of the query is allocated and freed within the call (a scalar loop with the same results is used if that allocation fails). Deterministic accumulation order.
 
 `lembed_maxsim_batch` scores one query against several concatenated documents: document `i` is rows `offsets[i]` to `offsets[i+1]-1` of `docs` (`offsets` has `num_docs + 1` entries, `offsets[0] == 0`, non-decreasing). No sorting, no top-K, no index. Returns `LEMBED_ERROR_INVALID_ARGUMENT` for a NULL output pointer, NULL `q`/`d` with a non-zero count, a negative count, `dim <= 0` or invalid offsets.
 
