@@ -92,6 +92,15 @@ extension and switches to the llama.cpp backend. There is **no**
 backend is available at runtime, use `detect_backend(model_name)` or the C call
 `lembed_llama_backend_available()`.
 
+Limits of dense (and reranker) GGUF:
+
+- Inputs are **truncated** to `max_length` (when given), the model context and the
+  encode batch size (512 tokens by default); the trailing EOS/SEP token is kept. A
+  longer text no longer aborts the process.
+- **Decoder-only** GGUF embedding models (for example Qwen3-Embedding) are not
+  supported yet: creation returns `LEMBED_ERROR_UNSUPPORTED` (`UnsupportedError` in
+  Python) with the message `decoder-only GGUF embedding models are not supported yet`.
+
 ### Auto-tuning workers (llama.cpp)
 
 For the llama.cpp backend, the optimal number of sessions/workers can be auto-detected:
