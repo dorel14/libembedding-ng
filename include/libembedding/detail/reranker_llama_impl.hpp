@@ -101,7 +101,8 @@ cleanup:
         lembed::detail::set_error(e.what());
         if (ctx) delete ctx;
         if (resolved_path) lembed_free_string(resolved_path);
-        return LEMBED_ERROR_LLAMA;
+        return dynamic_cast<const lembed::detail::LlamaUnsupportedError*>(&e)
+                   ? LEMBED_ERROR_UNSUPPORTED : LEMBED_ERROR_LLAMA;
     }
 }
 

@@ -9,7 +9,7 @@
  * - Unigram (XLM-R family: precompiled charsmap + Metaspace, see tokenizer_unigram.hpp)
  *
  * Auteur: David Orel
- * Version: 1.16.0
+ * Version: 1.16.1
  *
  * SPDX-License-Identifier: MIT
  */
