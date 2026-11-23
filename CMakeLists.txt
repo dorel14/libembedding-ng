@@ -443,13 +443,13 @@ if(MSVC)
         $<$<CONFIG:Release>:NDEBUG>
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(libembedding INTERFACE
-        -O3
-        -ffast-math
-    )
-    # No -mavx2 here: as an INTERFACE flag it reached every consumer of the
-    # header-only library and the Python shared library. See
-    # LIBEMBEDDING_ARCH_AVX2, applied to embedding_shared only.
+    # No optimisation or fast-math flag on the INTERFACE target (decision D5):
+    # libembedding is header-only on Linux/macOS, so an INTERFACE flag would be
+    # applied to the consumer's own code (-ffast-math implies
+    # -ffinite-math-only, which changes NaN/Inf semantics). Flags for the
+    # shared library are set on embedding_shared below.
+    # No -mavx2 here either: see LIBEMBEDDING_ARCH_AVX2, applied to
+    # embedding_shared only.
 endif()
 
 # =========================================================================
@@ -715,6 +715,18 @@ if(LIBEMBEDDING_BUILD_SHARED)
         CXX_VISIBILITY_PRESET default
         VISIBILITY_INLINES_HIDDEN OFF
     )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        # Safe optimisation flags, this project's shared library only.
+        # No -ffast-math: the code relies on IEEE semantics (-infinity
+        # sentinel in the GGUF sparse session, std::isfinite in the autotune
+        # cache), which -ffinite-math-only would make undefined.
+        target_compile_options(embedding_shared PRIVATE
+            $<$<CONFIG:Release>:-O3>
+            $<$<CONFIG:RelWithDebInfo>:-O3>
+            $<$<CONFIG:Release>:-fno-math-errno>
+            $<$<CONFIG:RelWithDebInfo>:-fno-math-errno>
+        )
+    endif()
     if(LIBEMBEDDING_ARCH_AVX2 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang"
        AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
         target_compile_options(embedding_shared PRIVATE -mavx2 -mfma)
