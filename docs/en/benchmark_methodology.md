@@ -108,3 +108,19 @@ artifact for 90 days.
 
 To update the baseline after an intended change, copy the three values printed by
 the job into `perf_smoke_baseline.json`, under the `linux-x86_64` key.
+
+## 6. Comparative (LE-11) and multi-vector campaigns
+
+Two full campaigns are replayed on a quiet machine (on mains, nothing else running),
+one subprocess per measurement, with peak RSS, a separate warmup, three timed passes
+(median) and the library order rotated between rounds. Each script rewrites its JSON
+after every cell and resumes where it stopped.
+
+| Campaign | Script | Results |
+|---|---|---|
+| libembedding against SentenceTransformers and FastEmbed (dense, sparse, quality on 100 BEIR pairs, batch 1 to 128, 3 thread settings) | `benchmarks/competitive/bench_competitive.py full` | `benchmarks/competitive/results.md` and `results.json` |
+| `MultiVectorEmbedding` (ColBERT) against pylate, and the MaxSim kernel against numpy | `benchmarks/multivector/bench_multivector.py full` | `benchmarks/multivector/results.md` and `results.json` |
+
+To measure the source tree rather than the PyPI wheel, set `LIBEMBEDDING_LIBRARY` to
+the built library and add `python/src` to `PYTHONPATH` (multi-vector is not in the
+wheel yet).
