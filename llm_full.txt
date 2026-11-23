@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.15.0
+Version: 1.16.0
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -2855,7 +2855,7 @@ the llama.cpp backend. The registry below (`lembed_list_gguf_models()`, source:
 | `BGE-Reranker-v2-M3` (reranker, default) | `BAAI/bge-reranker-v2-m3` | `smarttasks/bge-reranker-v2-m3-GGUF` | Q4_K_M | — | ~438 MB | Apache-2.0 |
 | `BGE-Reranker-Base` (reranker) | `BAAI/bge-reranker-base` | `sinjab/bge-reranker-base-Q4_K_M-GGUF` | Q4_K_M | — | ~219 MB | MIT (conversion tagged Apache-2.0) |
 | `BGE-Reranker-Large` (reranker) | `BAAI/bge-reranker-large` | `sinjab/bge-reranker-large-Q4_K_M-GGUF` | Q4_K_M | — | ~407 MB | MIT (conversion tagged Apache-2.0) |
-| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 MB | Apache-2.0 |
+| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 MB | Apache-2.0 — **not supported yet** (decoder-only, `LEMBED_ERROR_UNSUPPORTED` at create), planned for 1.17 |
 | `Jina-Reranker-v1-Turbo-En` (reranker) | `jinaai/jina-reranker-v1-turbo-en` | `sinjab/jina-reranker-v1-turbo-en-Q8_0-GGUF` | Q8_0 | — | ~36 MB | Apache-2.0 |
 
 Any other GGUF file can still be loaded by path; the registry only records files that were checked.
@@ -3917,6 +3917,18 @@ extension and switches to the llama.cpp backend. There is **no**
 `TextEmbedding.supports_llamacpp()` in the Python API; to check whether the
 backend is available at runtime, use `detect_backend(model_name)` or the C call
 `lembed_llama_backend_available()`.
+
+Limits of dense (and reranker) GGUF:
+
+- Inputs are **truncated** to `max_length` (when given), the model context and the
+  encode batch size (512 tokens by default); the trailing EOS/SEP token is kept. A
+  longer text no longer aborts the process.
+- **Decoder-only** GGUF embedding models (for example Qwen3-Embedding) are not
+  supported yet: creation returns `LEMBED_ERROR_UNSUPPORTED` (`UnsupportedError` in
+  Python) with the message `decoder-only GGUF embedding models are not supported yet`.
+  The same applies to causal GGUF rerankers (Qwen3-Reranker, `decoder-only (causal)
+  GGUF rerankers ... are not supported yet`), which used to crash at the first
+  `rerank`; planned for 1.17. BERT cross-encoders remain supported.
 
 ### Auto-tuning workers (llama.cpp)
 
@@ -7044,7 +7056,7 @@ liste les fichiers vérifiés.
 | `BGE-Reranker-v2-M3` (reranker, défaut) | `BAAI/bge-reranker-v2-m3` | `smarttasks/bge-reranker-v2-m3-GGUF` | Q4_K_M | — | ~438 Mo | Apache-2.0 |
 | `BGE-Reranker-Base` (reranker) | `BAAI/bge-reranker-base` | `sinjab/bge-reranker-base-Q4_K_M-GGUF` | Q4_K_M | — | ~219 Mo | MIT (conversion étiquetée Apache-2.0) |
 | `BGE-Reranker-Large` (reranker) | `BAAI/bge-reranker-large` | `sinjab/bge-reranker-large-Q4_K_M-GGUF` | Q4_K_M | — | ~407 Mo | MIT (conversion étiquetée Apache-2.0) |
-| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 Mo | Apache-2.0 |
+| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 Mo | Apache-2.0 — **pas encore pris en charge** (décodeur seul, `LEMBED_ERROR_UNSUPPORTED` à la création), prévu en 1.17 |
 | `Jina-Reranker-v1-Turbo-En` (reranker) | `jinaai/jina-reranker-v1-turbo-en` | `sinjab/jina-reranker-v1-turbo-en-Q8_0-GGUF` | Q8_0 | — | ~36 Mo | Apache-2.0 |
 
 Tout autre fichier GGUF reste chargeable par chemin ; le registre ne recense que des fichiers vérifiés.
@@ -8102,6 +8114,19 @@ Le routage se fait dans le constructeur : `_is_gguf_model()` reconnaît l'extens
 `TextEmbedding.supports_llamacpp()` côté Python ; pour savoir si le backend est
 disponible à l'exécution, utilisez `detect_backend(model_name)` ou l'appel C
 `lembed_llama_backend_available()`.
+
+Limites du GGUF dense (et reranker) :
+
+- Les entrées sont **tronquées** à `max_length` (si fourni), au contexte du modèle et
+  à la taille du lot d'encodage (512 jetons par défaut) ; le jeton de fin (EOS/SEP) est
+  conservé. Un texte plus long ne fait plus avorter le processus.
+- Les modèles d'embedding GGUF **décodeur seul** (par exemple Qwen3-Embedding) ne sont
+  pas encore pris en charge : la création renvoie `LEMBED_ERROR_UNSUPPORTED`
+  (`UnsupportedError` en Python) avec le message `decoder-only GGUF embedding models
+  are not supported yet`. Il en va de même pour les rerankers GGUF
+  causaux (Qwen3-Reranker, `decoder-only (causal) GGUF rerankers ... are not supported
+  yet`), qui plantaient au premier `rerank` ; prévu en 1.17. Les cross-encoders BERT
+  restent pris en charge.
 
 ### Auto-tuning workers (llama.cpp)
 
