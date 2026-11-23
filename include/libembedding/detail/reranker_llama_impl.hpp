@@ -70,7 +70,7 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
         ctx->device_id = options->device_id;
 
         ctx->llama.session.load_from_file(resolved_path, ctx->num_threads,
-                                          512, 0, 0, false);
+                                          512, 0, 0, false, true);
         lembed_free_string(resolved_path);
         resolved_path = nullptr;
         if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
@@ -101,7 +101,8 @@ cleanup:
         lembed::detail::set_error(e.what());
         if (ctx) delete ctx;
         if (resolved_path) lembed_free_string(resolved_path);
-        return LEMBED_ERROR_LLAMA;
+        return dynamic_cast<const lembed::detail::LlamaUnsupportedError*>(&e)
+                   ? LEMBED_ERROR_UNSUPPORTED : LEMBED_ERROR_LLAMA;
     }
 }
 

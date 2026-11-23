@@ -172,7 +172,7 @@ liste les fichiers vérifiés.
 | `BGE-Reranker-v2-M3` (reranker, défaut) | `BAAI/bge-reranker-v2-m3` | `smarttasks/bge-reranker-v2-m3-GGUF` | Q4_K_M | — | ~438 Mo | Apache-2.0 |
 | `BGE-Reranker-Base` (reranker) | `BAAI/bge-reranker-base` | `sinjab/bge-reranker-base-Q4_K_M-GGUF` | Q4_K_M | — | ~219 Mo | MIT (conversion étiquetée Apache-2.0) |
 | `BGE-Reranker-Large` (reranker) | `BAAI/bge-reranker-large` | `sinjab/bge-reranker-large-Q4_K_M-GGUF` | Q4_K_M | — | ~407 Mo | MIT (conversion étiquetée Apache-2.0) |
-| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 Mo | Apache-2.0 |
+| `Qwen3-Reranker-0.6B` (reranker) | `Qwen/Qwen3-Reranker-0.6B` | `sinjab/Qwen3-Reranker-0.6B-Q4_K_M-GGUF` | Q4_K_M | — | ~396 Mo | Apache-2.0 — **pas encore pris en charge** (décodeur seul, `LEMBED_ERROR_UNSUPPORTED` à la création), prévu en 1.17 |
 | `Jina-Reranker-v1-Turbo-En` (reranker) | `jinaai/jina-reranker-v1-turbo-en` | `sinjab/jina-reranker-v1-turbo-en-Q8_0-GGUF` | Q8_0 | — | ~36 Mo | Apache-2.0 |
 
 Tout autre fichier GGUF reste chargeable par chemin ; le registre ne recense que des fichiers vérifiés.
