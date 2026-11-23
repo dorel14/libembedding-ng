@@ -120,6 +120,16 @@ inline int llama_encode_token_limit(const struct llama_context* ctx) {
     return lim > 1 ? (int)lim : 1;
 }
 
+/* The pooled sequence vector is n_embd floats only for MEAN/CLS/LAST; RANK
+ * yields n_cls_out floats and NONE no sequence vector, so reading n_embd would
+ * overrun it. Throws instead. */
+inline void llama_require_dense_pooling(const struct llama_context* ctx) {
+    const enum llama_pooling_type pooling = llama_pooling_type(ctx);
+    if (pooling == LLAMA_POOLING_TYPE_RANK || pooling == LLAMA_POOLING_TYPE_NONE) {
+        throw std::runtime_error("GGUF model has no sequence pooling usable for dense embeddings");
+    }
+}
+
 /* Truncates `tokens` to at most `limit`, keeping the trailing EOS/SEP when the
  * model appended one (same as HF truncation: specials survive). */
 inline void llama_truncate_tokens(const struct llama_vocab* vocab,
@@ -285,12 +295,7 @@ public:
     std::vector<float> embed_tokens(const std::vector<llama_token>& tokens) {
         if (!ctx_ || tokens.empty()) return std::vector<float>((size_t)n_embd_, 0.0f);
 
-        /* The pooled sequence vector is n_embd floats only for MEAN/CLS/LAST;
-         * RANK yields n_cls_out floats, so reading n_embd would overrun it. */
-        const enum llama_pooling_type pooling = llama_pooling_type(ctx_);
-        if (pooling == LLAMA_POOLING_TYPE_RANK || pooling == LLAMA_POOLING_TYPE_NONE) {
-            throw std::runtime_error("GGUF model has no sequence pooling usable for dense embeddings");
-        }
+        llama_require_dense_pooling(ctx_);
 
         /* Defence in depth: callers going through tokenize() are already within
          * the limit, but a longer sequence would abort the process. */
@@ -551,6 +556,14 @@ public:
 
         std::vector<llama_token> tokens;
         tokenize(text, tokens);
+        if (tokens.empty()) return std::vector<float>((size_t)n_embd_, 0.0f);
+
+        llama_require_dense_pooling(ctx.ctx);
+
+        /* Defence in depth: tokenize() already truncates, but a longer
+         * sequence would abort the process in llama_encode(). */
+        const int max_tokens = encode_limit_ > 0 ? encode_limit_ : n_ctx_;
+        if (tokens.size() > (size_t)max_tokens) llama_truncate_tokens(vocab_, tokens, max_tokens);
 
         llama_batch batch = llama_batch_init((int32_t)tokens.size(), 0, 1);
         batch.n_tokens = 0;
@@ -663,6 +676,7 @@ public:
     }
 
     int dimension() const { return n_embd_; }
+    int max_context() const { return n_ctx_; }
     int num_sessions() const { return (int)contexts_.size(); }
 };
 
