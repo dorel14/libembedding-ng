@@ -4,7 +4,7 @@
  * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.16.0
+ * Version: 1.16.1
  *
  * SPDX-License-Identifier: MIT
  */
@@ -90,12 +90,16 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
                                                 options->llama_n_gpu_layers,
                                                 options->llama_n_batch,
                                                 options->llama_verbose != 0);
+            ctx->llama.pool.set_max_length(ctx->max_length);
         } else {
             ctx->llama.session.load_from_file(gguf_path, ctx->num_threads,
                                               options->llama_n_ctx,
                                               options->llama_n_gpu_layers,
                                               options->llama_n_batch,
                                               options->llama_verbose != 0);
+            /* Inputs longer than max_length (or the context / encode batch)
+             * are truncated, never passed to llama_encode() as is. */
+            ctx->llama.session.set_max_length(ctx->max_length);
         }
         ctx->dim = ctx->llama.session.dimension();
         if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
@@ -109,6 +113,9 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
         lembed__text_update_desc(ctx.get());
         *out = ctx.release();
         return LEMBED_OK;
+    } catch (const lembed::detail::LlamaUnsupportedError& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
     } catch (const std::exception& e) {
         lembed::detail::set_error(e.what());
         return LEMBED_ERROR_LLAMA;

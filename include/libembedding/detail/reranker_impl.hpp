@@ -4,7 +4,7 @@
  * Include-only header (included from reranker.h when LIBEMBEDDING_IMPLEMENTATION is defined)
  *
  * Auteur: David Orel
- * Version: 1.16.0
+ * Version: 1.16.1
  *
  * SPDX-License-Identifier: MIT
  */
@@ -25,6 +25,7 @@
 #include "sparse_batching.hpp"
 #include "embedding_cache_impl.hpp"
 #include "log.hpp"
+#include "gguf_lookup.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -218,9 +219,9 @@ static lembed_status_t lembed__reranker_create_gguf_impl(
         lembed_reranker_t** out) {
     lembed_model_info_t info;
     if (lembed_get_reranker_model_info(options->model, &info) == LEMBED_OK) {
-        /* Try to find a matching GGUF model by name or code */
-        const lembed_gguf_model_info_t* gguf_info = lembed_find_gguf_model(info.model_name);
-        if (!gguf_info) gguf_info = lembed_find_gguf_model(info.model_code);
+        /* Exact model_code match first, display-name substring as last resort */
+        const lembed_gguf_model_info_t* gguf_info =
+            lembed__gguf_for_model(info.model_name, info.model_code, 0);
         if (gguf_info && gguf_info->gguf_url && gguf_info->gguf_url[0]) {
             if (auto_fallback) {
                 lembed::detail::log_info(
