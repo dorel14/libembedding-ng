@@ -85,7 +85,8 @@ inline autotune_reference autotune_make_reference(const std::vector<autotune_mea
 }
 
 /* Cost given to an axis that cannot be computed (zero throughput). Finite on
- * purpose: the library is built with -ffast-math / /fp:fast, under which the
+ * purpose: the library was built with -ffast-math (now MSVC /fp:fast only, and
+ * consumers may use it themselves), under which the
  * compiler may assume no infinity exists and fold comparisons with one, which
  * broke selection on macOS (Clang) in both directions. */
 constexpr double kAutotuneWorstCost = 1.0e30;
