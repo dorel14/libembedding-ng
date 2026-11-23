@@ -112,3 +112,19 @@ conservé 90 jours dans l'artefact `perf-smoke-linux-x86_64`.
 Pour mettre à jour la référence après un changement voulu, recopier les trois
 valeurs affichées par le job dans `perf_smoke_baseline.json`, sous la clé
 `linux-x86_64`.
+
+## 6. Campagnes comparatives (LE-11) et multi-vecteurs
+
+Deux campagnes complètes se rejouent sur machine calme (branchée, rien d'autre en
+cours), un sous-processus par mesure, avec pic RSS, échauffement séparé, trois passes
+chronométrées (médiane) et l'ordre des bibliothèques tourné entre les rounds. Chaque
+script écrit son JSON après chaque cellule et reprend là où il s'est arrêté.
+
+| Campagne | Script | Résultats |
+|---|---|---|
+| libembedding contre SentenceTransformers et FastEmbed (dense, sparse, qualité sur 100 paires BEIR, batch 1 à 128, 3 réglages de threads) | `benchmarks/competitive/bench_competitive.py full` | `benchmarks/competitive/results.md` et `results.json` |
+| `MultiVectorEmbedding` (ColBERT) contre pylate, et noyau MaxSim contre numpy | `benchmarks/multivector/bench_multivector.py full` | `benchmarks/multivector/results.md` et `results.json` |
+
+Pour mesurer le code source et non la wheel PyPI, définir `LIBEMBEDDING_LIBRARY` vers
+la bibliothèque compilée et ajouter `python/src` à `PYTHONPATH` (le multi-vecteur
+n'existe pas encore dans la wheel).

@@ -272,6 +272,16 @@ with MultiVectorEmbedding("/path/to/answerai-colbert-small-v1") as mv:
     scores = [maxsim(q, d) for d in docs]                      # first is highest
 ```
 
+#### Performance
+
+Measured against pylate (same model, same lengths 32 / 300) on an i7-1065G7, 3 rounds:
+`MultiVectorEmbedding` is 1.14 to 1.5 times faster at batch 32 (short documents 242
+against 160 texts/s, SciFact 10.8 against 9.5), up to 3 times faster at batch 1, loads the
+model in 0.9 s against 8.5 s and uses 247 to 493 MB against 553 to 1021 MB. MaxSim scores
+agree with pylate (Spearman 1.0000). The `maxsim` kernel is single-threaded: on long
+documents (236 vectors) it is slower than numpy/BLAS. Protocol and limits:
+`benchmarks/multivector/results.md`.
+
 ---
 
 ### Reranker
