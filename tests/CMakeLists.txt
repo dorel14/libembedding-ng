@@ -220,15 +220,21 @@ add_executable(test_backend_introspection test_backend_introspection.cpp)
 target_link_libraries(test_backend_introspection PRIVATE libembedding)
 add_test(NAME test_backend_introspection COMMAND test_backend_introspection)
 
+# Default truncation length of ONNX dense models (registry max_tokens vs
+# sentence_bert_config.json; cached-model checks skip when MiniLM is absent).
+add_executable(test_text_max_length test_text_max_length.cpp)
+target_link_libraries(test_text_max_length PRIVATE libembedding)
+add_test(NAME test_text_max_length COMMAND test_text_max_length)
+
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
+    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection)
+    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()

@@ -181,6 +181,23 @@ def test_shapes(mv: MultiVectorEmbedding) -> None:
 
 
 @needs_model
+def test_embed_ragged_matches_embed(mv: MultiVectorEmbedding) -> None:
+    from libembedding import maxsim_batch
+
+    texts = ["Paris is the capital of France.", "Bananas grow in tropical climates."]
+    docs = mv.embed(texts)
+    data, offsets = mv.embed_ragged(texts)
+    assert data.dtype == np.float32 and data.flags["C_CONTIGUOUS"]
+    assert offsets.dtype == np.int64 and offsets.shape == (3,)
+    for i, d in enumerate(docs):
+        assert np.array_equal(data[offsets[i] : offsets[i + 1]], d)
+    q = mv.embed(["capital of France"], mode="query")[0]
+    assert maxsim_batch(q, (data, offsets)).tolist() == maxsim_batch(q, docs).tolist()
+    empty_data, empty_offsets = mv.embed_ragged([])
+    assert empty_data.shape == (0, 96) and empty_offsets.tolist() == [0]
+
+
+@needs_model
 def test_norms(mv: MultiVectorEmbedding) -> None:
     for m in mv.embed(["Paris is the capital of France."]) + mv.embed(["a query"], mode="query"):
         np.testing.assert_allclose(np.linalg.norm(m, axis=1), 1.0, atol=1e-3)

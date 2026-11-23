@@ -73,29 +73,74 @@ def maxsim(query: np.ndarray, doc: np.ndarray) -> float:
     return float(out[0])
 
 
-def maxsim_batch(query: np.ndarray, docs: Sequence[np.ndarray]) -> np.ndarray:
+def _ragged_docs(
+    docs: tuple[np.ndarray, np.ndarray], dim: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Validate a ragged ``(data, offsets)`` pair without copying it."""
+    data_in, offsets_in = docs
+    buf = _as_matrix(data_in, "docs data")
+    if buf.shape[1] != dim:
+        raise ValueError(f"docs data has dim {buf.shape[1]}, expected {dim}")
+    offsets = np.asarray(offsets_in)
+    if offsets.dtype != np.int64 or offsets.ndim != 1 or offsets.shape[0] < 1:
+        raise ValueError("docs offsets must be a non-empty 1-D int64 array")
+    offsets = np.ascontiguousarray(offsets)
+    if offsets[0] != 0:
+        raise ValueError("docs offsets[0] must be 0")
+    if offsets.shape[0] > 1 and bool(np.any(np.diff(offsets) < 0)):
+        raise ValueError("docs offsets must be non-decreasing")
+    if offsets[-1] > buf.shape[0]:
+        raise ValueError(
+            f"docs offsets end at row {int(offsets[-1])}, data has {buf.shape[0]} rows"
+        )
+    return buf, offsets
+
+
+def maxsim_batch(
+    query: np.ndarray,
+    docs: Sequence[np.ndarray] | tuple[np.ndarray, np.ndarray],
+) -> np.ndarray:
     """MaxSim of one query against several documents.
 
-    ``docs`` is a sequence of (n_i, dim) float32 arrays (n_i may differ). Returns
-    a float32 array with one score per document, in input order.
+    ``docs`` is either a sequence of (n_i, dim) float32 arrays (n_i may differ),
+    which is concatenated once before the native call, or a ragged pair
+    ``(data, offsets)`` passed to the native code without any copy: ``data`` is a
+    C-contiguous float32 array ``(total_rows, dim)`` and ``offsets`` an int64
+    array of ``num_docs + 1`` non-decreasing row offsets starting at 0 (document
+    ``i`` is ``data[offsets[i]:offsets[i + 1]]``). ``MultiVectorEmbedding.embed_ragged``
+    returns that pair. Returns a float32 array with one score per document, in
+    input order.
     """
     q = _as_matrix(query, "query")
     dim = q.shape[1]
     if dim <= 0:
         raise ValueError("dim must be > 0")
-    mats = []
-    for i, doc in enumerate(docs):
-        m = _as_matrix(doc, f"docs[{i}]")
-        if m.shape[1] != dim:
-            raise ValueError(f"docs[{i}] has dim {m.shape[1]}, expected {dim}")
-        mats.append(m)
-    num_docs = len(mats)
+    # A tuple of two documents is a list of 2-D matrices; the ragged pair has a
+    # 1-D offsets array as its second item.
+    if (
+        isinstance(docs, tuple)
+        and len(docs) == 2
+        and isinstance(docs[1], np.ndarray)
+        and docs[1].ndim == 1
+    ):
+        buf, offsets = _ragged_docs(docs, dim)
+        num_docs = offsets.shape[0] - 1
+    else:
+        mats = []
+        for i, doc in enumerate(docs):
+            m = _as_matrix(doc, f"docs[{i}]")
+            if m.shape[1] != dim:
+                raise ValueError(f"docs[{i}] has dim {m.shape[1]}, expected {dim}")
+            mats.append(m)
+        num_docs = len(mats)
+        if num_docs == 0:
+            return np.zeros(0, dtype=np.float32)
+        offsets = np.zeros(num_docs + 1, dtype=np.int64)
+        np.cumsum([m.shape[0] for m in mats], out=offsets[1:])
+        buf = np.concatenate(mats, axis=0)
     scores = np.zeros(num_docs, dtype=np.float32)
     if num_docs == 0:
         return scores
-    offsets = np.zeros(num_docs + 1, dtype=np.int64)
-    np.cumsum([m.shape[0] for m in mats], out=offsets[1:])
-    buf = np.ascontiguousarray(np.concatenate(mats, axis=0), dtype=np.float32)
     check_status(
         lib.lembed_maxsim_batch(
             ffi.from_buffer("float[]", q) if q.size else ffi.NULL,

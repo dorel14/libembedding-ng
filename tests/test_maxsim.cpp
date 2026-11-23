@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #define ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -124,6 +125,60 @@ int main(void) {
         ASSERT(lembed_maxsim_batch(q, 2, d, off, 1, 0, out) == LEMBED_ERROR_INVALID_ARGUMENT, "dim 0");
         ASSERT(lembed_maxsim_batch(q, 2, d, bad_first, 1, 2, out) == LEMBED_ERROR_INVALID_ARGUMENT, "offsets[0] != 0");
         ASSERT(lembed_maxsim_batch(q, 2, d, decreasing, 2, 2, out) == LEMBED_ERROR_INVALID_ARGUMENT, "decreasing offsets");
+    }
+
+    /* Kernel fidelity: random data against a double-precision reference.
+     * Dims cover multiples of the 16-lane kernel (96, 128), non-multiples (7,
+     * 17, 131) and tails only (1); counts cover 1 row up to 234 rows. */
+    {
+        const int dims[] = {1, 7, 8, 15, 16, 17, 96, 128, 131};
+        const int counts[][2] = {{1, 1}, {1, 5}, {3, 1}, {5, 4}, {32, 234}, {2, 33}};
+        unsigned long long seed = 0x9E3779B97F4A7C15ULL;
+        double worst = 0.0;
+        for (int dim : dims) {
+            for (const auto& c : counts) {
+                const int nq = c[0], nd = c[1];
+                std::vector<float> qm((size_t)nq * dim), dm((size_t)nd * dim);
+                for (auto* m : {&qm, &dm}) {
+                    for (auto& v : *m) {
+                        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+                        v = (float)((double)(seed >> 40) / (double)(1ULL << 24) * 2.0 - 1.0);
+                    }
+                }
+                double ref = 0.0;
+                for (int i = 0; i < nq; i++) {
+                    double best = -1e300;
+                    for (int j = 0; j < nd; j++) {
+                        double dot = 0.0;
+                        for (int k = 0; k < dim; k++)
+                            dot += (double)qm[(size_t)i * dim + k] * (double)dm[(size_t)j * dim + k];
+                        if (dot > best) best = dot;
+                    }
+                    ref += best;
+                }
+                float s = 0.0f, s2 = 0.0f;
+                ASSERT(lembed_maxsim(qm.data(), nq, dm.data(), nd, dim, &s) == LEMBED_OK, "fidelity ok");
+                ASSERT(lembed_maxsim(qm.data(), nq, dm.data(), nd, dim, &s2) == LEMBED_OK, "fidelity ok 2");
+                ASSERT(s == s2, "deterministic");
+                /* Float rounding of a dot of `dim` terms of magnitude <= 1,
+                 * summed over nq maxima: 1e-5 relative to nq * (1 + sqrt(dim)). */
+                double tol = 1e-5 * (double)nq * (1.0 + std::sqrt((double)dim));
+                double err = fabs((double)s - ref);
+                if (err > worst) worst = err;
+                ASSERT(err <= tol, "kernel within float rounding of the double reference");
+                /* batch over the same data split in two documents == per-doc calls */
+                if (nd >= 2) {
+                    int h = nd / 2;
+                    const int64_t off[] = {0, h, nd};
+                    float out2[2] = {0.0f, 0.0f}, a = 0.0f, b = 0.0f;
+                    ASSERT(lembed_maxsim_batch(qm.data(), nq, dm.data(), off, 2, dim, out2) == LEMBED_OK, "split batch ok");
+                    lembed_maxsim(qm.data(), nq, dm.data(), h, dim, &a);
+                    lembed_maxsim(qm.data(), nq, dm.data() + (size_t)h * dim, nd - h, dim, &b);
+                    ASSERT(out2[0] == a && out2[1] == b, "split batch == per-doc");
+                }
+            }
+        }
+        printf("maxsim kernel: worst abs error vs double reference = %.3g\n", worst);
     }
 
     printf("\n%d passed, %d failed\n", passes, failures);

@@ -19,7 +19,7 @@ Ce module fournit des fonctions de similarité natives opérant directement sur 
 
 ## MaxSim (interaction tardive)
 
-`lembed_maxsim` renvoie la somme, sur les `nq` vecteurs de la requête, du produit scalaire maximal avec les `nd` vecteurs du document. Les matrices sont row-major (`dim` floats par ligne) ; des entrées normalisées L2 donnent le MaxSim cosinus. `nq == 0` ou `nd == 0` donne un score de 0. Aucune allocation, aucun état, ré-entrant.
+`lembed_maxsim` renvoie la somme, sur les `nq` vecteurs de la requête, du produit scalaire maximal avec les `nd` vecteurs du document. Les matrices sont row-major (`dim` floats par ligne) ; des entrées normalisées L2 donnent le MaxSim cosinus. `nq == 0` ou `nd == 0` donne un score de 0. Aucun état, ré-entrant. Noyau C portable (sans intrinsics) que le compilateur vectorise : une copie temporaire de la requête est allouée puis libérée dans l'appel (repli sur une boucle scalaire aux mêmes résultats si l'allocation échoue). Ordre d'accumulation déterministe.
 
 `lembed_maxsim_batch` score une requête contre plusieurs documents concaténés : le document `i` occupe les lignes `offsets[i]` à `offsets[i+1]-1` de `docs` (`offsets` a `num_docs + 1` entrées, `offsets[0] == 0`, croissantes). Ni tri, ni top-K, ni index. Retour `LEMBED_ERROR_INVALID_ARGUMENT` pour un pointeur de sortie NULL, un `q`/`d` NULL avec un compte non nul, un compte négatif, `dim <= 0` ou des offsets invalides.
 
