@@ -7,7 +7,7 @@
  *   - Unigram model (Viterbi over a byte trie, unk fusion, byte fallback).
  *
  * Auteur: David Orel
- * Version: 1.16.2
+ * Version: 1.16.3
  *
  * SPDX-License-Identifier: MIT
  */

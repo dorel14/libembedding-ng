@@ -7,7 +7,7 @@
  * resize step costs what it costs in production).
  *
  * Auteur: David Orel
- * Version: 1.16.2
+ * Version: 1.16.3
  *
  * SPDX-License-Identifier: MIT
  */

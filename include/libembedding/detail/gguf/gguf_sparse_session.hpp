@@ -37,7 +37,7 @@
  * per session). One session per calling thread, or serialise the calls.
  *
  * Auteur: David Orel
- * Version: 1.16.2
+ * Version: 1.16.3
  *
  * SPDX-License-Identifier: MIT
  */
