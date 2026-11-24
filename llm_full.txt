@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.16.0
+Version: 1.16.1
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -2709,6 +2709,17 @@ for m in libembedding.list_text_models():
 ```
 
 ## Text models (44 models)
+
+> **Truncation length.** Without an explicit `max_length`, an ONNX text model truncates
+> at the `max_seq_length` of its `sentence_bert_config.json`, like SentenceTransformers
+> and FastEmbed: 256 for `all-MiniLM-L6-v2`, 128 for `all-MiniLM-L12-v2` and both
+> `paraphrase-multilingual-*` models, 384 for `all-mpnet-base-v2`, 512 for BGE, E5, MxBai
+> and Arctic, 8192 for BGE-M3, GTE, Nomic, Jina and ModernBERT. Priority: explicit
+> `max_length`, then `sentence_bert_config.json` when it sits in the model directory
+> (local directory or cache), then the registry value (`max_tokens`, shown by
+> `list_text_models()`), then `max_position_embeddings` of `config.json` for a local
+> directory. These models used to truncate at 512: vectors of texts longer than 256
+> (resp. 128, 384) tokens change and now line up with SentenceTransformers.
 
 ### English — BGE
 
@@ -6909,6 +6920,17 @@ for m in libembedding.list_text_models():
 ```
 
 ## Modèles de texte (44 modèles)
+
+> **Longueur de troncature.** Sans `max_length` explicite, un modèle texte ONNX tronque à
+> la valeur `max_seq_length` de son `sentence_bert_config.json`, comme SentenceTransformers
+> et FastEmbed : 256 pour `all-MiniLM-L6-v2`, 128 pour `all-MiniLM-L12-v2` et les deux
+> `paraphrase-multilingual-*`, 384 pour `all-mpnet-base-v2`, 512 pour BGE, E5, MxBai et
+> Arctic, 8192 pour BGE-M3, GTE, Nomic, Jina et ModernBERT. Ordre de priorité :
+> `max_length` explicite, puis `sentence_bert_config.json` s'il se trouve dans le dossier
+> du modèle (dossier local ou cache), puis la valeur du registre (`max_tokens`, visible
+> dans `list_text_models()`), puis `max_position_embeddings` de `config.json` pour un
+> dossier local. Avant la 1.17 ces modèles tronquaient à 512 : les vecteurs de textes de
+> plus de 256 (resp. 128, 384) jetons changent, et s'alignent sur SentenceTransformers.
 
 ### Anglais — BGE
 
@@ -11746,6 +11768,16 @@ Deux tests lisent ce fichier :
   Linux aarch64, macOS et Windows (`ci.yml` → `build-wheel.yml`), sous QEMU
   pour Linux armv7l (`build-wheel-armv7l.yml`), et sur l'émulateur Android
   via `download_smoke`.
+
+## Options de compilation GCC/Clang
+
+Sous Linux et macOS, la cible `libembedding::libembedding` est une bibliothèque
+header-only de type INTERFACE : elle **n'injecte aucune option d'optimisation**
+(`-O3`, `-ffast-math`) dans le code du consommateur. `-ffast-math` impliquait
+`-ffinite-math-only`, qui change la sémantique des NaN et des infinis. Seule la
+bibliothèque partagée construite par ce projet (`embedding_shared`, utilisée par
+Python) reçoit `-O3 -fno-math-errno`, en Release et RelWithDebInfo, sans
+`-ffast-math`. Les options MSVC ne changent pas.
 
 ## Licences des composants embarqués
 

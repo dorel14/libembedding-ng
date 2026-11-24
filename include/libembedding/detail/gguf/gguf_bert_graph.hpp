@@ -25,7 +25,7 @@
  * question.
  *
  * Auteur: David Orel
- * Version: 1.16.1
+ * Version: 1.16.2
  *
  * SPDX-License-Identifier: MIT
  */

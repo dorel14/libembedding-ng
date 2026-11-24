@@ -8,7 +8,7 @@
  * itself needs text_embedding.h and would close an include cycle).
  *
  * Auteur: David Orel
- * Version: 1.16.1
+ * Version: 1.16.2
  *
  * SPDX-License-Identifier: MIT
  */
