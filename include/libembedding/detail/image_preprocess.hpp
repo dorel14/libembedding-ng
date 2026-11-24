@@ -3,7 +3,7 @@
  * Image preprocessing pipeline (resize, crop, normalize, HWC->CHW)
  *
  * Auteur: David Orel
- * Version: 1.16.1
+ * Version: 1.16.2
  *
  * SPDX-License-Identifier: MIT
  */
