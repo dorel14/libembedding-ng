@@ -4,7 +4,7 @@
  * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.16.2
+ * Version: 1.16.3
  *
  * SPDX-License-Identifier: MIT
  */
@@ -91,6 +91,8 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
                                                 options->llama_n_batch,
                                                 options->llama_verbose != 0);
             ctx->llama.pool.set_max_length(ctx->max_length);
+            ctx->dim = ctx->llama.pool.dimension();
+            if (ctx->max_length == 0) ctx->max_length = ctx->llama.pool.max_context();
         } else {
             ctx->llama.session.load_from_file(gguf_path, ctx->num_threads,
                                               options->llama_n_ctx,
@@ -100,9 +102,9 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
             /* Inputs longer than max_length (or the context / encode batch)
              * are truncated, never passed to llama_encode() as is. */
             ctx->llama.session.set_max_length(ctx->max_length);
+            ctx->dim = ctx->llama.session.dimension();
+            if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
         }
-        ctx->dim = ctx->llama.session.dimension();
-        if (ctx->max_length == 0) ctx->max_length = ctx->llama.session.max_context();
         ctx->llama_gpu_offload = options->llama_n_gpu_layers != 0 &&
                                  lembed__ggml_has_gpu_device();
 
@@ -150,7 +152,10 @@ static inline void lembed__llama_embed_single(
         lembed_text_embedding_t* ctx,
         const char* text,
         float* out_data) {
-    auto emb = ctx->llama.session.embed(text);
+    /* The pool is the loaded object when auto_workers was set. */
+    auto emb = (ctx->llama.pool.num_sessions() > 0)
+                   ? ctx->llama.pool.embed(text)
+                   : ctx->llama.session.embed(text);
     std::memcpy(out_data, emb.data(), (size_t)ctx->dim * sizeof(float));
 }
 

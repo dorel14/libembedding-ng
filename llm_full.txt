@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.16.1
+Version: 1.16.3
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -140,6 +140,7 @@ with minimal overhead (~13%).
 | Sparse text | ONNX | SPLADE++, BGE-M3 |
 | Image | ONNX | CLIP ViT-B-32, ResNet-50, Nomic Vision, Unicom |
 | Reranking | ONNX | BGE Reranker, Jina Reranker (FP32 + INT8 quantized) |
+| Multi-vector (ColBERT) | ONNX | answerai-colbert-small-v1 |
 
 ### Production-grade tooling
 
@@ -2049,6 +2050,83 @@ print(embeddings.shape)  # (2, 512)
 
 ---
 
+### MultiVectorEmbedding
+
+Multi-vector (late interaction, ColBERT) embeddings: one float32 matrix
+`[n_tokens, dim]` per text. ONNX Runtime only. The model is either a **local
+directory** (`model.onnx` or `vespa_colbert.onnx`, `tokenizer.json`, and an optional
+`onnx_config.json`) or a **registry entry**
+(`"answerdotai/answerai-colbert-small-v1"`, downloaded into the cache on first use;
+an existing directory wins). The library embeds; it does not index or search: score with
+`maxsim` / `maxsim_batch`. Alias: `LateInteractionTextEmbedding` (FastEmbed
+naming). C API: `multivector_embedding.h` (`lembed_multivector_*`).
+
+#### Constructor
+
+```python
+MultiVectorEmbedding(
+    model_dir, *, provider="cpu", threads=0, batch_size=0,
+    query_maxlen=None, doc_maxlen=None, normalize=True,
+    query_expansion=None, attend_to_expansion=None,
+    cache_dir=None, offline=False, show_download_progress=False,
+)
+```
+
+`cache_dir` / `offline` / `show_download_progress`: registry models only.
+`MultiVectorEmbedding.list_supported_models()` lists the registry.
+`query_maxlen` / `doc_maxlen`: length overrides (model defaults: 32 / 300).
+`query_expansion`: pad queries with `[MASK]` (`None` = on).
+`attend_to_expansion`: `None` = follow the model.
+
+#### Methods and properties
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `embed(texts, *, mode="document")` | `list[np.ndarray]` | One `[n_i, dim]` matrix per text; `mode` is `"document"` or `"query"` |
+| `query_embed(query)` | `Iterator[np.ndarray]` | Query or queries (`str` or list), `query` mode |
+| `passage_embed(texts)` | `Iterator[np.ndarray]` | Documents, `document` mode |
+| `dim` | `int` (property) | Vector dimension |
+| `backend` | `str` (property) | `"onnxruntime"` |
+| `info()` / `stats()` | `ModelDesc` / `Stats` | Descriptor and usage statistics |
+| `close()` | `None` | Release resources (idempotent); works with `with` |
+
+Errors are `LembedError` subclasses (missing directory or file: `IOError`;
+`.gguf` path: `UnsupportedError`; registry download failure: `DownloadError`).
+
+#### Example
+
+```python
+from libembedding import MultiVectorEmbedding, maxsim
+
+with MultiVectorEmbedding("/path/to/answerai-colbert-small-v1") as mv:
+    (q,) = mv.query_embed("what is the capital of France?")   # (32, 96)
+    docs = list(mv.passage_embed(["Paris is the capital of France.",
+                                  "Bananas grow in tropical climates."]))
+    scores = [maxsim(q, d) for d in docs]                      # first is highest
+```
+
+For many documents, `embed_ragged()` returns a `(data, offsets)` pair (one float32
+`(total, dim)` array and `n + 1` int64 offsets) that `maxsim_batch(q, (data, offsets))`
+hands to the native code with no copy at all; passing a list of matrices forces a
+concatenation on every call (about 90 MB for 1000 long documents).
+
+```python
+    data, offsets = mv.embed_ragged(texts)       # document i = data[offsets[i]:offsets[i + 1]]
+    scores = maxsim_batch(q, (data, offsets))    # zero copy
+```
+
+#### Performance
+
+Measured against pylate (same model, same lengths 32 / 300) on an i7-1065G7, 3 rounds:
+`MultiVectorEmbedding` is 1.14 to 1.5 times faster at batch 32 (short documents 242
+against 160 texts/s, SciFact 10.8 against 9.5), up to 3 times faster at batch 1, loads the
+model in 0.9 s against 8.5 s and uses 247 to 493 MB against 553 to 1021 MB. MaxSim scores
+agree with pylate (Spearman 1.0000). The `maxsim` kernel is single-threaded: on long
+documents (236 vectors) it is slower than numpy/BLAS. Protocol and limits:
+`benchmarks/multivector/results.md`.
+
+---
+
 ### Reranker
 
 Scores and sorts documents by relevance to a query (cross-encoder).
@@ -2257,6 +2335,8 @@ cache.clear()
 | `cosine_similarity(a, b)` | Cosine similarity between two vectors |
 | `dot_product(a, b)` | Dot product between two vectors |
 | `euclidean_distance(a, b)` | L2 distance between two vectors |
+| `maxsim(query, doc)` | MaxSim (ColBERT) score: sum over `query` rows of the max dot product with `doc` rows (2-D float32 matrices) |
+| `maxsim_batch(query, docs)` | One MaxSim score per document (`docs`: sequence of float32 matrices, or a `(data, offsets)` pair passed without copy, see `MultiVectorEmbedding.embed_ragged`), in input order |
 | `detect_backend(model_name, backend="auto")` | Detect which backend to use |
 
 ---
@@ -2939,6 +3019,21 @@ other names of the ONNX model keep loading the ONNX model.
 
 ---
 
+## Multi-vector models (1 model)
+
+| HuggingFace name | Dim | Max tokens (document) | Size | Description | Licence |
+|------------------|-----|-----------------------|------|-------------|---------|
+| `answerdotai/answerai-colbert-small-v1` | 96 | 300 | 127 MB | ColBERT (late interaction), English, ONNX FP32 (`vespa_colbert.onnx`) | Apache-2.0 |
+
+`MultiVectorEmbedding("answerdotai/answerai-colbert-small-v1")` downloads
+`vespa_colbert.onnx`, `tokenizer.json` and `onnx_config.json` into the cache on first
+use (same `cache_dir`, `offline` and `show_download_progress` options as the other
+models). An existing local directory of that name wins over the registry. List:
+`libembedding.list_multivector_models()` or `MultiVectorEmbedding.list_supported_models()`;
+in C: `lembed_list_multivector_models()`, `lembed_ensure_multivector_model()`.
+
+---
+
 ## Compatibility matrix (reference validation)
 
 A model is *validated* only once libembedding reproduces a reference. The reference
@@ -2957,7 +3052,8 @@ Truncation is set to 512 on both sides. Measured with the WordPiece normalisatio
 of PR #62 (0 id mismatches against HF on the corpus).
 
 Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999,
-**broken** < 0.99. Measured on 2026-11-17, quantized siblings in the same row.
+**broken** < 0.99. Measured on 2026-11-22, after the Unigram (PR #68), byte-level BPE
+(PR #79) and `Whitespace` BPE (PR #97) tokenizers; quantized siblings in the same row.
 
 | Model | Tokenizer family | Min / mean cosine (all) | English min | Status |
 |---|---|---|---|---|
@@ -2968,16 +3064,16 @@ Status on the minimum cosine: **validated** >= 0.999, **degraded** 0.99 to 0.999
 | gte-base-en-v1.5, gte-large-en-v1.5 (quantized) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
 | snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1.000 / 1.000 | 1.000 | validated |
 | Splade_PP_en_v1 (sparse, cosine of the vectors) | WordPiece | 1.000 / 1.000 | 1.000 | validated |
-| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0.021 / 0.347 | 0.034 | broken |
-| multilingual-e5-small | Unigram (SentencePiece) | 0.768 / 0.823 | 0.768 | broken |
-| clip-vit-base-patch32 (text) | BPE byte-level | 0.295 / 0.763 | 0.316 | broken |
-| jina-reranker-v1-turbo-en (reranker, Pearson of the scores) | BPE (not byte-level) | 0.42-0.46 | n/a | broken |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 1.000 / 1.000 | 1.000 | validated |
+| multilingual-e5-small | Unigram (SentencePiece) | 1.000 / 1.000 | 1.000 | validated |
+| clip-vit-base-patch32 (text) | BPE byte-level | 1.000 / 1.000 | 1.000 | validated |
+| jina-reranker-v1-turbo-en (reranker, Pearson of the scores; quantized 0.99996) | BPE (not byte-level, `Whitespace`) | 1.000 | n/a | validated |
 
-Reading: **every measured WordPiece model matches the reference** on the whole
-multilingual corpus (lowest min cosine 0.9999999999999984). Unigram (XLM-R) and
-byte-level BPE (CLIP, ModernBERT) are broken even in English: they need their own
-tokenizer (T38). The reranker (ONNX and GGUF) now encodes a real pair, like HF
-(GGUF builds it from the vocabulary's special tokens).
+Reading: **every measured model matches the reference** on the whole multilingual
+corpus, whatever the tokenizer family (WordPiece, Unigram, byte-level BPE, `Whitespace`
+BPE). The reranker (ONNX and GGUF) encodes a real pair, like HF (GGUF builds it from
+the vocabulary's special tokens); its reference is the raw logit over 8 pairs,
+Russian and Chinese included.
 
 Not measured (not in the local cache or over 560 MB; the family comes from the
 architecture, not from the `tokenizer.json`): all-mpnet-base-v2, bge-large-en-v1.5,
@@ -2998,6 +3094,7 @@ text_models = libembedding.list_text_models()
 sparse_models = libembedding.list_sparse_models()
 image_models = libembedding.list_image_models()
 reranker_models = libembedding.list_reranker_models()
+multivector_models = libembedding.list_multivector_models()
 
 # Inspect a specific model
 for m in text_models:
@@ -3292,7 +3389,7 @@ Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
 whose result struct is unchanged; `lembed_sparse_autotune_v2()` also returns
 `workers`, `max_batch_tokens` and `from_cache`) also accept the sparse GGUF registry name (`"SPLADE-PP-En-v1-GGUF"`, already
 cached locally: the tuner never downloads) or a path ending in `.gguf`; the
-backend is chosen by the name, there is no `backend=` parameter. The grid is
+backend is chosen by the name (the `backend` option exists only for the reranker and dense text, not for sparse). The grid is
 threads × workers (graphs sharing the weights) × batch × `max_batch_tokens`
 (token budget per batch, 512 by default). `top_k` and `min_weight` are never
 tuned. The default configuration is point 0 of the grid and is returned when no
@@ -4525,7 +4622,7 @@ Rendered: https://dorel14.github.io/libembedding-ng/en/python/backend.html
 
 # Backend Detection
 
-The `backend` module provides automatic backend (ONNX or llama.cpp) detection based on model name or file path.
+The `backend` module provides `detect_backend()`, a standalone helper that tells which backend (ONNX or llama.cpp) matches a model name or path. The constructors (`TextEmbedding`, `Reranker`, etc.) do not call it: actual routing happens in the C layer, by file extension (`.gguf`, case-insensitive, goes to llama.cpp) or by the entry point used; everything else (`.onnx`, HuggingFace ID, unknown) goes to ONNX Runtime.
 
 > `backend=` is a constructor option of `Reranker` and `TextEmbedding` (`"auto"`, `"onnx"`, `"llama"`, default `"auto"`). `SparseTextEmbedding` and `ImageEmbedding` have no such parameter: the backend follows the model extension. See [Model routing](../model_routing.html).
 
@@ -4550,13 +4647,15 @@ Detects which backend to use based on model and user preference.
 | `"onnx"` | ONNX backend |
 | `"llama"` | llama.cpp backend |
 
-## Detection logic
+## `detect_backend()` logic
+
+This logic belongs to the helper only; it does not describe how the constructors route.
 
 1. If explicit `backend` → returns directly
 2. If `.gguf` file → `"llama"`
 3. If `.onnx` file → `"onnx"`
 4. Local path → detect from directory contents
-5. HuggingFace ID → GGUF if known GGUF model, else ONNX
+5. Otherwise (HuggingFace ID or unknown name) → `"onnx"`; no "known GGUF model" lookup is done
 
 ## Usage
 
@@ -4655,6 +4754,19 @@ This module provides native similarity functions operating on raw float arrays.
 | `lembed_cosine_similarity(a, b, dim)` | `float` | Cosine similarity |
 | `lembed_dot_product(a, b, dim)` | `float` | Dot product |
 | `lembed_euclidean_distance(a, b, dim)` | `float` | Euclidean (L2) distance |
+| `lembed_maxsim(q, nq, d, nd, dim, out_score)` | `lembed_status_t` | MaxSim (ColBERT) score of a query against one document |
+| `lembed_maxsim_batch(q, nq, docs, offsets, num_docs, dim, out_scores)` | `lembed_status_t` | One MaxSim score per document, in input order |
+
+## MaxSim (late interaction)
+
+`lembed_maxsim` returns the sum, over the `nq` query vectors, of the maximum dot product with the `nd` document vectors. Matrices are row-major (`dim` floats per row); L2-normalised inputs give the cosine MaxSim. `nq == 0` or `nd == 0` gives a score of 0. No state, re-entrant. Portable C kernel (no intrinsics) that compilers auto-vectorise: one temporary copy of the query is allocated and freed within the call (a scalar loop with the same results is used if that allocation fails). Deterministic accumulation order.
+
+`lembed_maxsim_batch` scores one query against several concatenated documents: document `i` is rows `offsets[i]` to `offsets[i+1]-1` of `docs` (`offsets` has `num_docs + 1` entries, `offsets[0] == 0`, non-decreasing). No sorting, no top-K, no index. Returns `LEMBED_ERROR_INVALID_ARGUMENT` for a NULL output pointer, NULL `q`/`d` with a non-zero count, a negative count, `dim <= 0` or invalid offsets.
+
+```c
+float score;
+lembed_status_t st = lembed_maxsim(q, nq, d, nd, dim, &score);
+```
 
 ## Example
 
@@ -4999,9 +5111,11 @@ This module provides interaction with the llama.cpp backend for GGUF models.
 > to detect a version.
 >
 > There is **no** `lembed_llama_set_logging()` and no
-> `lembed_llama_get_n_gpu_layers()` in this API. GPU layers are set through the
-> model options (`LEMBED_BACKEND_LLAMACPP` and `n_gpu_layers`), and logging
-> through llama.cpp's own configuration.
+> `lembed_llama_get_n_gpu_layers()` in this API. The
+> `llama_n_gpu_layers` field of `lembed_text_options_t` exists (0 = CPU, -1 = all),
+> but GPU is out of scope: the shipped builds have no ggml GPU device, and the
+> llama.cpp reranker always loads with 0 layers. Logging is set through
+> `llama_verbose` or llama.cpp's own configuration.
 
 ## Example
 
@@ -6335,6 +6449,85 @@ for r in ranked:
 
 ---
 
+### MultiVectorEmbedding
+
+Embeddings multi-vecteurs (interaction tardive, ColBERT) : une matrice float32
+`[n_tokens, dim]` par texte. Backend ONNX Runtime uniquement. Le modèle est soit un
+**répertoire local** (`model.onnx` ou `vespa_colbert.onnx`, `tokenizer.json`, et
+`onnx_config.json` optionnel), soit une **entrée du registre**
+(`"answerdotai/answerai-colbert-small-v1"`, téléchargée dans le cache au premier
+usage ; un répertoire existant l'emporte). La lib embarque ; elle n'indexe ni ne recherche :
+le scoring se fait avec `maxsim` / `maxsim_batch`. Alias :
+`LateInteractionTextEmbedding` (nommage FastEmbed). API C :
+`multivector_embedding.h` (`lembed_multivector_*`).
+
+#### Constructeur
+
+```python
+MultiVectorEmbedding(
+    model_dir, *, provider="cpu", threads=0, batch_size=0,
+    query_maxlen=None, doc_maxlen=None, normalize=True,
+    query_expansion=None, attend_to_expansion=None,
+    cache_dir=None, offline=False, show_download_progress=False,
+)
+```
+
+`cache_dir` / `offline` / `show_download_progress` : modèles du registre uniquement.
+`MultiVectorEmbedding.list_supported_models()` liste le registre.
+`query_maxlen` / `doc_maxlen` : surcharge des longueurs (défaut modèle : 32 / 300).
+`query_expansion` : padding des requêtes avec `[MASK]` (`None` = activé).
+`attend_to_expansion` : `None` = suit le modèle.
+
+#### Méthodes et propriétés
+
+| Membre | Type | Description |
+|--------|------|-------------|
+| `embed(texts, *, mode="document")` | `list[np.ndarray]` | Une matrice `[n_i, dim]` par texte ; `mode` = `"document"` ou `"query"` |
+| `query_embed(query)` | `Iterator[np.ndarray]` | Requête(s) (`str` ou liste), mode `query` |
+| `passage_embed(texts)` | `Iterator[np.ndarray]` | Documents, mode `document` |
+| `dim` | `int` (property) | Dimension des vecteurs |
+| `backend` | `str` (property) | `"onnxruntime"` |
+| `info()` / `stats()` | `ModelDesc` / `Stats` | Descripteur et statistiques |
+| `close()` | `None` | Libère les ressources (idempotent) ; utilisable avec `with` |
+
+Les erreurs sont des sous-classes de `LembedError` (répertoire ou fichier
+manquant : `IOError` ; chemin `.gguf` : `UnsupportedError` ; téléchargement du
+registre impossible : `DownloadError`).
+
+#### Exemple
+
+```python
+from libembedding import MultiVectorEmbedding, maxsim
+
+with MultiVectorEmbedding("/chemin/vers/answerai-colbert-small-v1") as mv:
+    (q,) = mv.query_embed("what is the capital of France?")   # (32, 96)
+    docs = list(mv.passage_embed(["Paris is the capital of France.",
+                                  "Bananas grow in tropical climates."]))
+    scores = [maxsim(q, d) for d in docs]                      # le 1er est le plus haut
+```
+
+Pour beaucoup de documents, `embed_ragged()` renvoie une paire `(data, offsets)` (un seul
+tableau float32 `(total, dim)` et des offsets int64 `n + 1`) que `maxsim_batch(q, (data, offsets))`
+transmet au code natif sans aucune copie ; passer une liste de matrices oblige à les
+concaténer à chaque appel (environ 90 Mo pour 1000 documents longs).
+
+```python
+    data, offsets = mv.embed_ragged(texts)       # document i = data[offsets[i]:offsets[i + 1]]
+    scores = maxsim_batch(q, (data, offsets))    # zéro copie
+```
+
+#### Performances
+
+Mesuré contre pylate (même modèle, mêmes longueurs 32 / 300) sur i7-1065G7, 3 rounds :
+`MultiVectorEmbedding` est 1,14 à 1,5 fois plus rapide à batch 32 (documents courts
+242 contre 160 textes/s, SciFact 10,8 contre 9,5), jusqu'à 3 fois plus rapide à batch 1,
+charge le modèle en 0,9 s contre 8,5 s et consomme 247 à 493 Mo contre 553 à 1021 Mo.
+Les scores MaxSim concordent avec pylate (Spearman 1,0000). Le noyau `maxsim` est
+mono-thread : sur des documents longs (236 vecteurs) il est plus lent que numpy/BLAS.
+Protocole et limites : `benchmarks/multivector/results.md`.
+
+---
+
 ## Types de données
 
 ### TextEmbeddingPool
@@ -6671,6 +6864,8 @@ Comparaison native de vecteurs d'embedding.
 | `cosine_similarity(a, b)` | Similarité cosinus |
 | `dot_product(a, b)` | Produit scalaire |
 | `euclidean_distance(a, b)` | Distance euclidienne (L2) |
+| `maxsim(query, doc)` | Score MaxSim (ColBERT) : somme sur les lignes de `query` du produit scalaire max avec les lignes de `doc` (matrices float32 2-D) |
+| `maxsim_batch(query, docs)` | Un score MaxSim par document (`docs` : séquence de matrices float32, ou paire `(data, offsets)` transmise sans copie, voir `MultiVectorEmbedding.embed_ragged`), dans l'ordre d'entrée |
 
 ```python
 from libembedding import cosine_similarity, dot_product, euclidean_distance
@@ -7132,6 +7327,21 @@ et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
 
 ---
 
+## Modèles multi-vecteurs (1 modèle)
+
+| HuggingFace name | Dim | Max tokens (document) | Taille | Description | Licence |
+|------------------|-----|-----------------------|--------|-------------|---------|
+| `answerdotai/answerai-colbert-small-v1` | 96 | 300 | 127 Mo | ColBERT (interaction tardive), anglais, ONNX FP32 (`vespa_colbert.onnx`) | Apache-2.0 |
+
+`MultiVectorEmbedding("answerdotai/answerai-colbert-small-v1")` télécharge
+`vespa_colbert.onnx`, `tokenizer.json` et `onnx_config.json` dans le cache au premier
+usage (mêmes options `cache_dir`, `offline`, `show_download_progress` que les autres
+modèles). Un répertoire local existant du même nom l'emporte sur le registre. Liste :
+`libembedding.list_multivector_models()` ou `MultiVectorEmbedding.list_supported_models()` ;
+en C : `lembed_list_multivector_models()`, `lembed_ensure_multivector_model()`.
+
+---
+
 ## Matrice de compatibilité (validation par référence)
 
 Un modèle n'est *validé* que lorsque libembedding reproduit une référence. La référence
@@ -7150,8 +7360,9 @@ La troncature est fixée à 512 des deux côtés. Mesuré avec la correction de 
 WordPiece de la PR #62 (0 écart d'ids avec HF sur le corpus).
 
 Statut selon le cosinus minimal : **validé** >= 0,999, **dégradé** 0,99 à 0,999,
-**cassé** < 0,99. Mesuré le 2026-11-17 ; les variantes quantifiées sont dans la même
-ligne.
+**cassé** < 0,99. Mesuré le 2026-11-22, après les tokenizers Unigram (PR #68),
+BPE byte-level (PR #79) et BPE `Whitespace` (PR #97) ; les variantes quantifiées sont
+dans la même ligne.
 
 | Modèle | Famille de tokenizer | Cosinus min / moyen (tous) | Anglais min | Statut |
 |---|---|---|---|---|
@@ -7162,16 +7373,16 @@ ligne.
 | gte-base-en-v1.5, gte-large-en-v1.5 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
 | snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1,000 / 1,000 | 1,000 | validé |
 | Splade_PP_en_v1 (sparse, cosinus des vecteurs) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
-| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0,021 / 0,347 | 0,034 | cassé |
-| multilingual-e5-small | Unigram (SentencePiece) | 0,768 / 0,823 | 0,768 | cassé |
-| clip-vit-base-patch32 (texte) | BPE byte-level | 0,295 / 0,763 | 0,316 | cassé |
-| jina-reranker-v1-turbo-en (reranker, Pearson des scores) | BPE (non byte-level) | 0,42-0,46 | n/d | cassé |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 1,000 / 1,000 | 1,000 | validé |
+| multilingual-e5-small | Unigram (SentencePiece) | 1,000 / 1,000 | 1,000 | validé |
+| clip-vit-base-patch32 (texte) | BPE byte-level | 1,000 / 1,000 | 1,000 | validé |
+| jina-reranker-v1-turbo-en (reranker, Pearson des scores ; quantifié 0,99996) | BPE (non byte-level, `Whitespace`) | 1,000 | n/d | validé |
 
-Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
-corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
-BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
-tokenizer (T38). Le reranker (ONNX et GGUF) encode désormais une vraie paire,
-comme HF (le GGUF la construit depuis les tokens spéciaux du vocabulaire).
+Lecture : **tous les modèles mesurés reproduisent la référence** sur tout le corpus
+multilingue, quelle que soit la famille de tokenizer (WordPiece, Unigram, BPE byte-level,
+BPE `Whitespace`). Le reranker (ONNX et GGUF) encode une vraie paire, comme HF (le GGUF
+la construit depuis les tokens spéciaux du vocabulaire) ; sa référence est le logit brut
+sur 8 paires, dont russe et chinois.
 
 Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de
 l'architecture, pas du `tokenizer.json`) : all-mpnet-base-v2, bge-large-en-v1.5,
@@ -7192,6 +7403,7 @@ text_models = libembedding.list_text_models()
 sparse_models = libembedding.list_sparse_models()
 image_models = libembedding.list_image_models()
 reranker_models = libembedding.list_reranker_models()
+multivector_models = libembedding.list_multivector_models()
 
 # Inspecter un modèle
 for m in text_models:
@@ -7491,7 +7703,7 @@ FULL) × `max_tokens` × batch. Sparse (ONNX) et image : threads × batch.
 la structure de résultat est inchangée ; `lembed_sparse_autotune_v2()` renvoie en
 plus `workers`, `max_batch_tokens` et `from_cache`) acceptent aussi le nom du registre GGUF sparse (`"SPLADE-PP-En-v1-GGUF"`, déjà en
 cache local : le tuner ne télécharge jamais) ou un chemin se terminant par
-`.gguf` ; le backend se choisit par le nom, il n'y a pas de paramètre `backend=`.
+`.gguf` ; le backend se choisit par le nom (l'option `backend` n'existe que pour le reranker et le texte dense, pas pour le sparse).
 La grille est threads × workers (graphes partageant les poids) × batch ×
 `max_batch_tokens` (budget de tokens par batch, 512 par défaut). `top_k` et
 `min_weight` ne sont jamais réglés. La configuration par défaut est le point 0 de
@@ -8739,7 +8951,7 @@ Rendu: https://dorel14.github.io/libembedding-ng/python/backend.html
 
 # Auto-détection de backend
 
-Le module `backend` fournit l'auto-détection du backend (ONNX ou llama.cpp) basée sur le nom du modèle ou le chemin du fichier.
+Le module `backend` fournit `detect_backend()`, une fonction utilitaire autonome qui indique quel backend (ONNX ou llama.cpp) correspond à un nom de modèle ou à un chemin. Les constructeurs (`TextEmbedding`, `Reranker`, etc.) ne l'appellent pas : le routage réel se fait côté C, selon l'extension du fichier (`.gguf`, insensible à la casse, vers llama.cpp) ou le point d'entrée utilisé ; tout le reste (`.onnx`, identifiant HuggingFace, inconnu) passe par ONNX Runtime.
 
 > `backend=` est une option de constructeur de `Reranker` et de `TextEmbedding` (`"auto"`, `"onnx"`, `"llama"`, défaut `"auto"`). `SparseTextEmbedding` et `ImageEmbedding` n'ont pas ce paramètre : le backend y suit l'extension du modèle. Voir [Routage des modèles](../model_routing.html).
 
@@ -8764,13 +8976,15 @@ Détecte quel backend utiliser selon le modèle et la préférence utilisateur.
 | `"onnx"` | Backend ONNX |
 | `"llama"` | Backend llama.cpp |
 
-## Logique de détection
+## Logique de `detect_backend()`
+
+Cette logique est propre à la fonction utilitaire ; elle ne décrit pas le routage des constructeurs.
 
 1. Si `backend` explicite → retourne directement
 2. Si fichier `.gguf` → `"llama"`
 3. Si fichier `.onnx` → `"onnx"`
 4. Chemin local → détecte par contenu du répertoire
-5. HuggingFace ID → GGUF si modèle GGUF connu, sinon ONNX
+5. Sinon (identifiant HuggingFace ou nom inconnu) → `"onnx"` ; aucune recherche de « modèle GGUF connu » n'est faite
 
 ## Utilisation
 
@@ -8869,6 +9083,19 @@ Ce module fournit des fonctions de similarité natives opérant directement sur 
 | `lembed_cosine_similarity(a, b, dim)` | `float` | Similarité cosinus |
 | `lembed_dot_product(a, b, dim)` | `float` | Produit scalaire |
 | `lembed_euclidean_distance(a, b, dim)` | `float` | Distance euclidienne (L2) |
+| `lembed_maxsim(q, nq, d, nd, dim, out_score)` | `lembed_status_t` | Score MaxSim (ColBERT) d'une requête contre un document |
+| `lembed_maxsim_batch(q, nq, docs, offsets, num_docs, dim, out_scores)` | `lembed_status_t` | Un score MaxSim par document, dans l'ordre d'entrée |
+
+## MaxSim (interaction tardive)
+
+`lembed_maxsim` renvoie la somme, sur les `nq` vecteurs de la requête, du produit scalaire maximal avec les `nd` vecteurs du document. Les matrices sont row-major (`dim` floats par ligne) ; des entrées normalisées L2 donnent le MaxSim cosinus. `nq == 0` ou `nd == 0` donne un score de 0. Aucun état, ré-entrant. Noyau C portable (sans intrinsics) que le compilateur vectorise : une copie temporaire de la requête est allouée puis libérée dans l'appel (repli sur une boucle scalaire aux mêmes résultats si l'allocation échoue). Ordre d'accumulation déterministe.
+
+`lembed_maxsim_batch` score une requête contre plusieurs documents concaténés : le document `i` occupe les lignes `offsets[i]` à `offsets[i+1]-1` de `docs` (`offsets` a `num_docs + 1` entrées, `offsets[0] == 0`, croissantes). Ni tri, ni top-K, ni index. Retour `LEMBED_ERROR_INVALID_ARGUMENT` pour un pointeur de sortie NULL, un `q`/`d` NULL avec un compte non nul, un compte négatif, `dim <= 0` ou des offsets invalides.
+
+```c
+float score;
+lembed_status_t st = lembed_maxsim(q, nq, d, nd, dim, &score);
+```
 
 ## Exemple
 
@@ -9227,9 +9454,11 @@ L'en-tête n'expose que deux fonctions :
 > pour détecter une version.
 >
 > Il n'existe **pas** de `lembed_llama_set_logging()` ni de
-> `lembed_llama_get_n_gpu_layers()` dans cette API. Le nombre de couches GPU se
-> règle via les options du modèle (`LEMBED_BACKEND_LLAMACPP` et
-> `n_gpu_layers`), et les logs via la configuration de llama.cpp elle-même.
+> `lembed_llama_get_n_gpu_layers()` dans cette API. Le champ
+> `llama_n_gpu_layers` de `lembed_text_options_t` existe (0 = CPU, -1 = toutes),
+> mais le GPU est hors périmètre : les builds livrés n'ont aucun périphérique GPU
+> ggml, et le reranker llama.cpp charge toujours avec 0 couche. Les logs se règlent
+> via `llama_verbose` ou la configuration de llama.cpp elle-même.
 
 ## Exemple
 
@@ -10510,6 +10739,132 @@ Scripts déjà branchés : `benchmarks/sparse/bench_sparse_backend_comparison.py
   vendorisé est décrit dans `third_party/README.md`.
 - Le p95 sur peu d'itérations (5) est une interpolation entre les deux plus grands
   échantillons : il n'a de sens statistique qu'à partir d'une vingtaine de tours.
+
+## 5. Smoke-test de performance en CI
+
+Les runners hébergés par GitHub sont des machines partagées : leur vitesse absolue
+varie de plusieurs dizaines de pour cent d'un run à l'autre, et aucun runner contrôlé
+n'est disponible pour l'instant. La CI ne compare donc pas de docs/s. Une fois les
+wheels construites, le job `perf-smoke.yml` lance `benchmarks/perf_smoke.py` sur la
+wheel Linux x86_64 et ne relève que des ratios qui neutralisent l'essentiel de la
+machine :
+
+| Métrique | Définition |
+|---|---|
+| `dense_b32_per_gflop` | docs/s en batch 32 divisés par les GFLOP/s d'un produit matriciel float32 512×512 mesuré dans le même processus |
+| `dense_b1_per_gflop` | idem en batch 1 |
+| `batch_gain` | docs/s en batch 32 sur docs/s en batch 1 |
+
+Chaque valeur est comparée à `benchmarks/perf_smoke_baseline.json`. Une baisse de
+plus de 25 % (le bruit observé entre deux runs sur ces runners) produit un
+avertissement GitHub. Le job ne fait jamais échouer le run : un avertissement
+appelle une mesure sur machine calme, selon les sections 1 à 3. Le rapport JSON est
+conservé 90 jours dans l'artefact `perf-smoke-linux-x86_64`.
+
+Pour mettre à jour la référence après un changement voulu, recopier les trois
+valeurs affichées par le job dans `perf_smoke_baseline.json`, sous la clé
+`linux-x86_64`.
+
+## 6. Campagnes comparatives (LE-11) et multi-vecteurs
+
+Deux campagnes complètes se rejouent sur machine calme (branchée, rien d'autre en
+cours), un sous-processus par mesure, avec pic RSS, échauffement séparé, trois passes
+chronométrées (médiane) et l'ordre des bibliothèques tourné entre les rounds. Chaque
+script écrit son JSON après chaque cellule et reprend là où il s'est arrêté.
+
+| Campagne | Script | Résultats |
+|---|---|---|
+| libembedding contre SentenceTransformers et FastEmbed (dense, sparse, qualité sur 100 paires BEIR, batch 1 à 128, 3 réglages de threads) | `benchmarks/competitive/bench_competitive.py full` | `benchmarks/competitive/results.md` et `results.json` |
+| `MultiVectorEmbedding` (ColBERT) contre pylate, et noyau MaxSim contre numpy | `benchmarks/multivector/bench_multivector.py full` | `benchmarks/multivector/results.md` et `results.json` |
+
+Pour mesurer le code source et non la wheel PyPI, définir `LIBEMBEDDING_LIBRARY` vers
+la bibliothèque compilée et ajouter `python/src` à `PYTHONPATH` (le multi-vecteur
+n'existe pas encore dans la wheel).
+
+---
+
+## DOCUMENT (FR): Multi-vecteurs (ColBERT) C API
+Source: https://github.com/dorel14/libembedding/blob/main/docs/c_api/multivector_embedding.md
+Rendu: https://dorel14.github.io/libembedding-ng/c_api/multivector_embedding.html
+
+# Multi-vecteurs (ColBERT) C API
+
+`include/libembedding/multivector_embedding.h` : un vecteur **par token** au lieu d'un vecteur par texte (late interaction). Backend ONNX Runtime uniquement. Le scoring se fait avec `lembed_maxsim` / `lembed_maxsim_batch` ([Similarité](similarity.html)). Cette API calcule des embeddings : pas d'index, pas de tri, pas de top-K.
+
+## Référence
+
+| Fonction | Description |
+|---|---|
+| `lembed_multivector_options_default()` | Options par défaut |
+| `lembed_multivector_create(options, &mv)` | Charge le modèle depuis `options->model_dir` (répertoire local) |
+| `lembed_multivector_embed(mv, texts, n, mode, &out)` | Embed `n` textes en mode `LEMBED_MV_QUERY` ou `LEMBED_MV_DOCUMENT` |
+| `lembed_multivectors_free(&out)` | Libère `data` et `offsets`, remet la struct à zéro (idempotent) |
+| `lembed_multivector_dim(mv)` | Dimension des vecteurs (96 pour answerai-colbert-small-v1) |
+| `lembed_multivector_desc(mv)` | Configuration effective (`lembed_model_desc_t`, possédée par le handle) |
+| `lembed_multivector_backend_name(mv)` | `"onnxruntime"` |
+| `lembed_multivector_stats(mv, &st)` | Compteurs d'usage |
+| `lembed_multivector_free(mv)` | Libère le handle |
+
+## Résultat
+
+`lembed_multivectors_t` est ragged : les vecteurs du texte `i` sont `data[offsets[i] * dim .. offsets[i+1] * dim)`, `offsets` a `num_docs + 1` entrées, `offsets[0] == 0` et `offsets[num_docs] == total_vectors`.
+
+## Pipeline
+
+Pour chaque texte : tokenisation (avec tokens spéciaux), troncature à `maxlen - 1`, insertion du marqueur (`[unused0]` requête, `[unused1]` document) à l'index 1, puis :
+
+- **requête** : par défaut, **expansion** : complétée par `[MASK]` jusqu'à `query_length`, attention à 0 sur ces pads (sauf `attend_to_expansion = 1`), **tous** les vecteurs sont conservés ;
+- **document** : les vecteurs des tokens de ponctuation (skiplist) sont retirés ; `[CLS]` et `[SEP]` sont conservés ;
+- seules les entrées présentes dans le graphe sont fournies (`input_ids`, `attention_mask`, `token_type_ids` si le graphe l'attend) ;
+- `normalize = 1` : L2 par vecteur (idempotent : le graphe officiel est déjà normalisé).
+
+## Conventions du modèle (`onnx_config.json`, ou `colbert_config.json`)
+
+Champs lus, tous optionnels : `query_prefix_id`, `document_prefix_id`, `mask_token_id`, `query_prefix` / `document_prefix` (marqueur en chaîne, résolu dans le vocabulaire : `"[Q] "` est tronqué à `"[Q]"`), `query_length`, `document_length`, `attend_to_expansion_tokens`, `skiplist_words`, `embedding_dim`.
+
+Défauts si absents : marqueurs `[unused0]` / `[unused1]`, `[MASK]`, `query_length` 32, `document_length` 300, attention des pads à 0, skiplist `string.punctuation`. Les options `query_maxlen` / `doc_maxlen` (> 0) priment sur le modèle.
+
+`do_query_expansion` n'est **pas** consulté : le fichier officiel d'answerai-colbert-small-v1 le déclare à `false`, alors que la référence (pylate) étend ses requêtes. Mesure : cosinus par token minimal 0,999995 avec expansion (pads masqués), 0,94 avec pads attendus, nombre de vecteurs différent sans expansion. Désactiver avec `query_expansion = 0`.
+
+Le fichier ONNX est cherché dans l'ordre : `model.onnx`, `vespa_colbert.onnx`, `onnx/model.onnx`. Marqueur en chaîne introuvable dans le vocabulaire des tokens du modèle : erreur (TODO : tokens ajoutés hors `model.vocab`, par exemple ModernBERT).
+
+## Erreurs
+
+| Cas | Statut |
+|---|---|
+| Argument NULL / vide / négatif | `LEMBED_ERROR_INVALID_ARGUMENT` |
+| Chemin `.gguf` | `LEMBED_ERROR_UNSUPPORTED` |
+| Provider indisponible | `LEMBED_ERROR_UNSUPPORTED` |
+| Sortie du graphe ≠ `embedding_dim` (projection absente) | `LEMBED_ERROR_UNSUPPORTED` |
+| Répertoire ou fichier absent, configuration invalide, marqueur non résolu | `LEMBED_ERROR_IO` |
+
+Le détail est dans `lembed_last_error()`. Les appels sur un même handle sont sérialisés.
+
+## Exemple
+
+```c
+lembed_multivector_options_t o = lembed_multivector_options_default();
+o.model_dir = "models--answerdotai-answerai-colbert-small-v1";
+lembed_multivector_t* mv = NULL;
+if (lembed_multivector_create(&o, &mv) != LEMBED_OK) { /* lembed_last_error() */ }
+
+const char* docs[] = { "Paris is the capital of France.", "Bananas grow in the tropics." };
+const char* q[] = { "capital of France" };
+lembed_multivectors_t dv, qv;
+lembed_multivector_embed(mv, docs, 2, LEMBED_MV_DOCUMENT, &dv);
+lembed_multivector_embed(mv, q, 1, LEMBED_MV_QUERY, &qv);
+
+float scores[2];
+lembed_maxsim_batch(qv.data, (int)qv.total_vectors, dv.data, dv.offsets, dv.num_docs, dv.dim, scores);
+
+lembed_multivectors_free(&dv);
+lembed_multivectors_free(&qv);
+lembed_multivector_free(mv);
+```
+
+## Fidélité
+
+Référence pylate 1.6.0, `answerai-colbert-small-v1`, 3 requêtes et 3 documents (`tests/data/colbert/`) : même nombre de vecteurs, cosinus par token minimal 0,999995 (requêtes et documents). Test : `tests/test_multivector_fidelity.cpp` (ignoré si le modèle est absent).
 
 ---
 
@@ -11918,6 +12273,28 @@ Le runtime ggml maison pour le sparse GGUF (voir [Runtime sparse GGUF](gguf_spar
 Ces refus sont remontés par `LEMBED_ERROR_UNSUPPORTED` avec le détail dans `lembed_last_error()` (`detail/sparse_text_embedding_gguf_impl.hpp`). Voir [Dépannage](troubleshooting.html).
 
 Cette liste concerne le **sparse GGUF**. Elle ne dit rien des quantifications acceptées par le backend dense llama.cpp, qui lit les GGUF via llama.cpp lui-même.
+
+## Qualité par variante
+
+Qualité de recherche mesurée sur BEIR SciFact (test : 5183 documents, 300 requêtes), similarité cosinus exhaustive, sans mesure de temps. La colonne « Cosinus vs FP32 » est le cosinus moyen entre l'embedding d'un document et celui de l'entrée FP32 du même modèle.
+
+| Modèle | Entrée du registre | Quantification | nDCG@10 | MRR@10 | Recall@100 | Cosinus vs FP32 |
+|---|---|---|---:|---:|---:|---:|
+| bge-small-en-v1.5 | Xenova/bge-small-en-v1.5 | none | 0,7127 | 0,6822 | 0,9417 | 1,00000 |
+| bge-small-en-v1.5 | onnx-community/bge-small-en-v1.5-ONNX | dynamic | 0,7077 | 0,6766 | 0,9467 | 0,99831 |
+| bge-small-en-v1.5 | Qdrant/bge-small-en-v1.5-onnx-Q | fp16 | 0,7127 | 0,6822 | 0,9417 | 1,00000 |
+| all-MiniLM-L6-v2 | Qdrant/all-MiniLM-L6-v2-onnx | none | 0,6541 | 0,6071 | 0,9317 | 1,00000 |
+| all-MiniLM-L6-v2 | Xenova/all-MiniLM-L6-v2 | dynamic | 0,6519 | 0,6077 | 0,9367 | 0,99336 |
+
+Une variante du registre est un autre dépôt, donc potentiellement un autre export du modèle : le tableau mesure l'entrée que l'utilisateur obtient, pas le seul effet du quantificateur. Mesuré sur un i7-1065G7, ONNX Runtime 1.31.0, une seule exécution (pas d'intervalle de confiance : les écarts de l'ordre de 0,005 sur 300 requêtes ne sont pas significatifs).
+
+Reproduire :
+
+```powershell
+python benchmarks/quantization/bench_quality.py --models BAAI/bge-small-en-v1.5 sentence-transformers/all-MiniLM-L6-v2
+```
+
+Le script écrit `quality_results.json` et `quality_results.md` dans `benchmarks/quantization/` (option `--out`), avec les métadonnées de la machine.
 
 ## Mesurer
 

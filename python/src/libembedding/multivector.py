@@ -5,7 +5,7 @@ query against a document with :func:`libembedding.maxsim`. This module embeds;
 it does not index or search.
 
 Auteur: David Orel
-Version: 1.16.2
+Version: 1.16.3
 
 SPDX-License-Identifier: MIT
 """

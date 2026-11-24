@@ -44,6 +44,27 @@ def test_long_input_is_truncated_not_fatal(max_length):
 
 
 @pytest.mark.skipif(not ENCODER_GGUF.is_file(), reason="MiniLM GGUF not in local cache")
+def test_auto_workers_matches_single_session():
+    """auto_workers=True used to leave dim=0 and return empty rows (1.16.3)."""
+    texts = [
+        "The quick brown fox jumps over the lazy dog.",
+        "Embeddings map text to vectors.",
+        " ".join(f"word{i % 97}" for i in range(3000)),
+    ]
+    single = TextEmbedding(str(ENCODER_GGUF), offline=True, show_download_progress=False)
+    pooled = TextEmbedding(
+        str(ENCODER_GGUF), offline=True, show_download_progress=False, auto_workers=True
+    )
+    a = np.asarray(single.embed(texts))
+    b = np.asarray(pooled.embed(texts))
+    assert b.shape == a.shape
+    assert b.shape[1] > 0
+    assert np.isfinite(b).all()
+    assert np.allclose(np.linalg.norm(b, axis=1), 1.0, atol=0.01)
+    assert (np.sum(a * b, axis=1) >= 0.9999).all()
+
+
+@pytest.mark.skipif(not ENCODER_GGUF.is_file(), reason="MiniLM GGUF not in local cache")
 def test_max_length_truncates_the_prefix():
     """With max_length=16 only the first tokens count, so a long text and its
     own prefix give (nearly) the same vector."""
