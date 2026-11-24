@@ -4,7 +4,7 @@
  * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.16.1
+ * Version: 1.16.2
  *
  * SPDX-License-Identifier: MIT
  */
@@ -160,7 +160,11 @@ lembed_status_t lembed_text_embedding_create(
         ctx->pooling = (lembed_pooling_t)info.pooling;
         ctx->quantization = (lembed_quantization_t)info.quantization;
         ctx->dim = info.dim;
-        ctx->max_length = (options->max_length > 0) ? options->max_length : info.max_tokens;
+        /* Explicit option, else sentence_bert_config.json when the model
+         * directory has one, else the registry value (the model's
+         * max_seq_length, which is what SentenceTransformers/FastEmbed use). */
+        ctx->max_length = lembed::detail::resolve_text_max_length(
+            options->max_length, model_dir, info.max_tokens);
         ctx->model_name_str = info.model_name;
         ctx->batch_strategy = (lembed_batch_strategy_t)options->batch_strategy;
         ctx->num_threads = options->num_threads;

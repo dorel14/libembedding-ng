@@ -4,7 +4,7 @@
  * Include-only header (guarded by LIBEMBEDDING_IMPLEMENTATION)
  *
  * Auteur: David Orel
- * Version: 1.16.1
+ * Version: 1.16.2
  *
  * SPDX-License-Identifier: MIT
  */
@@ -363,7 +363,10 @@ lembed_status_t lembed_text_embedding_create_from_path(
         }
 
         if (dim == 0) dim = options->dim;
-        if (max_length == 0) max_length = options->max_length;
+        /* Explicit option, else sentence_bert_config.json, else config.json
+         * max_position_embeddings, else the loader default. */
+        max_length = lembed::detail::resolve_text_max_length(
+            options->max_length, path_str, max_length);
         if (options->pooling == LEMBED_POOLING_CLS) pooling = LEMBED_POOLING_CLS;
 
         if (dim == 0) {

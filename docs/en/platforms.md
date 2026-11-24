@@ -296,6 +296,15 @@ Two tests read that file:
   armv7l (`build-wheel-armv7l.yml`), and on the Android emulator through
   `download_smoke`.
 
+## GCC/Clang compile options
+
+On Linux and macOS, the `libembedding::libembedding` target is a header-only
+INTERFACE library: it **injects no optimisation flag** (`-O3`, `-ffast-math`)
+into the consumer's code. `-ffast-math` implied `-ffinite-math-only`, which
+changes NaN and infinity semantics. Only the shared library this project builds
+(`embedding_shared`, used by Python) gets `-O3 -fno-math-errno`, in Release and
+RelWithDebInfo, without `-ffast-math`. MSVC options are unchanged.
+
 ## Licences of the bundled components
 
 Each wheel holds, in `.dist-info/licenses/`, the project's MIT licence and
