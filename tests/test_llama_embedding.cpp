@@ -272,6 +272,56 @@ static void test_long_input(const char* gguf_path) {
     fprintf(stderr, "  Long input: %d passed, %d failed\n\n", passes, failures);
 }
 
+/* Regression (1.16.3): auto_workers=1 loaded the session pool but dimension,
+ * max_length and embed still read the unloaded single session (dim 0, empty
+ * rows). The pooled output must equal the single-session output. */
+static void test_auto_workers(const char* gguf_path) {
+    fprintf(stderr, "--- Test 5b: auto_workers=1 matches auto_workers=0 ---\n");
+
+    std::string long_text;
+    for (int i = 0; i < 3000; i++) long_text += "word" + std::to_string(i % 97) + " ";
+    const char* texts[] = {"The quick brown fox jumps over the lazy dog.",
+                           "Embeddings map text to vectors.",
+                           long_text.c_str()};
+    const int n = 3;
+
+    lembed_embeddings_t res[2] = {{0}, {0}};
+    int dims[2] = {0, 0};
+    for (int aw = 0; aw < 2; aw++) {
+        lembed_text_options_t opts = lembed_text_options_default();
+        opts.num_threads = 4;
+        opts.show_download_progress = 0;
+        opts.auto_workers = aw;
+
+        lembed_text_embedding_t* ctx = nullptr;
+        lembed_status_t s = lembed_text_embedding_create_from_gguf_path(gguf_path, &opts, &ctx);
+        ASSERT(s == LEMBED_OK, "create embedder (auto_workers)");
+        if (s != LEMBED_OK) return;
+
+        dims[aw] = lembed_text_embedding_dim(ctx);
+        ASSERT(dims[aw] > 0, "auto_workers: dimension > 0");
+        s = lembed_text_embedding_embed(ctx, texts, n, 0, &res[aw]);
+        ASSERT(s == LEMBED_OK, "auto_workers: embed incl. >512-token input");
+        lembed_text_embedding_free(ctx);
+        if (s != LEMBED_OK || dims[aw] <= 0) return;
+    }
+    ASSERT(dims[0] == dims[1], "auto_workers: same dimension as single session");
+    if (dims[0] == dims[1]) {
+        int dim = dims[0];
+        ASSERT(res[1].num_embeddings == n, "auto_workers: 3 embeddings");
+        ASSERT(count_nan_inf(res[1].data, n * dim) == 0, "auto_workers: no NaN/Inf");
+        for (int i = 0; i < n; i++) {
+            ASSERT(fabsf(l2_norm(res[1].data + (size_t)i * dim, dim) - 1.0f) < 0.01f,
+                   "auto_workers: unit norm");
+            ASSERT(cosine_sim(res[0].data + (size_t)i * dim,
+                              res[1].data + (size_t)i * dim, dim) >= 0.9999f,
+                   "auto_workers: equals single-session output (cos >= 0.9999)");
+        }
+    }
+    lembed_embeddings_free(&res[0]);
+    lembed_embeddings_free(&res[1]);
+}
+
 /* Regression: a decoder-only GGUF (Qwen3-Embedding, ...) used to load and then
  * crash with an access violation at the first embed. It is refused at create. */
 static void test_decoder_only_refused(const char* path) {
@@ -380,6 +430,7 @@ int main(int argc, char** argv) {
     test_user_corpus(gguf_path);
     test_stress(gguf_path);
     test_long_input(gguf_path);
+    test_auto_workers(gguf_path);
 
     /* Optional decoder-only fixture (e.g. Qwen3-Embedding-0.6B-Q8_0.gguf). */
     const char* dec_path = getenv("LEMBED_TEST_DECODER_GGUF");
