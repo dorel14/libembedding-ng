@@ -66,12 +66,16 @@ command -v xz > /dev/null || missing="$missing xz"
 if [ -n "$missing" ]; then
     for attempt in 1 2 3; do
         # shellcheck disable=SC2086
-        dnf install -y --disablerepo='*' --enablerepo=baseos $missing && break
+        dnf install -y --setopt=retries=10 --setopt=timeout=60 \
+            --disablerepo='*' --enablerepo=baseos $missing && break
         if [ "$attempt" = 3 ]; then
             echo "ERROR: dnf install$missing failed 3 times" >&2
             exit 1
         fi
         echo "WARNING: dnf install attempt $attempt failed, retrying" >&2
+        # Drop possibly half-downloaded metadata so the next try refetches it
+        # (a 404 on a mirror often means a stale mirrorlist).
+        dnf clean all > /dev/null 2>&1 || true
         sleep 10
     done
 fi

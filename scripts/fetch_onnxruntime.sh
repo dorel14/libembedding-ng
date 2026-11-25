@@ -61,12 +61,12 @@ download() {
     local out="$1" url="$2" attempt
     for attempt in 1 2 3; do
         if [ "$attempt" = 1 ]; then
-            curl -fsSL --retry 3 -o "$out" "$url" && return 0
+            curl -fsSL --retry 5 --retry-delay 5 -o "$out" "$url" && return 0
         else
-            curl -fsSL --retry 3 --http1.1 -o "$out" "$url" && return 0
+            curl -fsSL --retry 5 --retry-delay 5 --http1.1 -o "$out" "$url" && return 0
         fi
         echo "WARNING: download attempt $attempt failed: $url" >&2
-        sleep 5
+        sleep $((attempt * 10))
     done
     return 1
 }

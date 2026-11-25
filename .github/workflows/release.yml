@@ -70,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ONNXRUNTIME_VERSION: "1.31.0"
+      PIP_RETRIES: "5"
+      PIP_TIMEOUT: "60"
     steps:
       - uses: actions/checkout@v4
 

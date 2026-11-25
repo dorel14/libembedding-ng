@@ -16,6 +16,9 @@ on:
 
 env:
   ONNXRUNTIME_VERSION: "1.31.0"
+  # PyPI answers 429/5xx now and then: retry with a longer timeout.
+  PIP_RETRIES: "5"
+  PIP_TIMEOUT: "60"
 
 jobs:
   build:

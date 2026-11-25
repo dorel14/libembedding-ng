@@ -39,7 +39,7 @@ mkdir -p "$dest"
 nupkg_dir=""
 for file in LICENSE ThirdPartyNotices.txt; do
     out="$dest/onnxruntime.$file"
-    if curl -fsSL --retry 3 -o "$out" \
+    if curl -fsSL --retry 5 --retry-delay 5 -o "$out" \
         "https://raw.githubusercontent.com/microsoft/onnxruntime/v$ort_version/$file"; then
         continue
     fi
@@ -51,7 +51,7 @@ for file in LICENSE ThirdPartyNotices.txt; do
     echo "WARNING: $file from GitHub unavailable, using the NuGet package" >&2
     if [ -z "$nupkg_dir" ]; then
         nupkg_dir="$(mktemp -d)"
-        curl -fsSL --retry 3 -o "$nupkg_dir/ort.nupkg" \
+        curl -fsSL --retry 5 --retry-delay 5 -o "$nupkg_dir/ort.nupkg" \
             "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$ort_version/microsoft.ml.onnxruntime.$ort_version.nupkg"
     fi
     # Each candidate must run: on Windows "python3" can be the Store stub.
