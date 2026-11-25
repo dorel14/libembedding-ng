@@ -5,7 +5,7 @@
  * Same corpus, same metrics, same protocol for both backends.
  *
  * Auteur: David Orel
- * Version: 1.16.4
+ * Version: 1.16.5
  *
  * SPDX-License-Identifier: MIT
  */
