@@ -445,7 +445,10 @@ lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* op
         return LEMBED_ERROR_UNSUPPORTED;
     }
     {
-        lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
+        /* Validate on the raw value first (no enum-typed read of a bad value). */
+        lembed_status_t ps = lembed::detail::check_provider(options->provider);
+        if (ps != LEMBED_OK) return ps;
+        ps = lembed::detail::onnx_provider_precheck((int)options->provider);
         if (ps != LEMBED_OK) return ps;
     }
 
@@ -553,8 +556,9 @@ lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv,
         lembed::detail::set_error("multivector: embed needs a handle, texts, n > 0 and an output");
         return LEMBED_ERROR_INVALID_ARGUMENT;
     }
-    if (mode != LEMBED_MV_DOCUMENT && mode != LEMBED_MV_QUERY) {
-        lembed::detail::set_error("multivector: invalid mode");
+    /* Raw read: `mode` comes from a C caller and may be out of range. */
+    if (lembed::detail::check_enum(mode, LEMBED_MV_DOCUMENT, LEMBED_MV_QUERY,
+                                   "multivector mode") != LEMBED_OK) {
         return LEMBED_ERROR_INVALID_ARGUMENT;
     }
 

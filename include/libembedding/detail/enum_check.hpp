@@ -94,6 +94,9 @@ inline lembed_status_t check_image_model(const lembed_image_model_t& v) {
 inline lembed_status_t check_reranker_model(const lembed_reranker_model_t& v) {
     return check_enum(v, 0, LEMBED_RERANKER_MODEL_COUNT - 1, "reranker model");
 }
+inline lembed_status_t check_multivector_model(const lembed_multivector_model_t& v) {
+    return check_enum(v, 0, LEMBED_MULTIVECTOR_MODEL_COUNT - 1, "multivector model");
+}
 inline lembed_status_t check_pooling(const lembed_pooling_t& v) {
     return check_enum(v, LEMBED_POOLING_CLS, LEMBED_POOLING_MEAN, "pooling");
 }

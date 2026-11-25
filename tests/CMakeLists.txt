@@ -6,6 +6,23 @@
 # Unit Tests (no downloads required)
 # =========================================================================
 
+# Every unit test executable (one with a non-integration add_test) MUST be
+# listed here. CI builds the single `lembed_unit_tests` target defined below
+# instead of an explicit --target list, so a test missing from this list is
+# neither built by CI nor copied its runtime DLLs.
+# test_repeated_calls (option-gated) is handled separately below.
+set(LEMBED_UNIT_TEST_TARGETS
+    test_model_registry test_pooling test_similarity test_maxsim
+    test_multivector test_multivector_fidelity test_local_loading
+    test_cache test_cache_cleanup test_offline_cache test_concurrency
+    test_struct_sizes test_enum_validation test_cpp_wrappers
+    test_quantization_auto test_autotune_core
+    test_tokenizer test_tokenizer_unigram test_tokenizer_bytelevel
+    test_tokenizer_wsbpe test_tokenizer_fidelity
+    test_gguf_inspect test_sparse_gguf test_matryoshka
+    test_lifecycle_memory test_backend_introspection test_text_max_length)
+add_custom_target(lembed_unit_tests)
+
 # Test model registry
 add_executable(test_model_registry test_model_registry.cpp)
 target_link_libraries(test_model_registry PRIVATE libembedding)
@@ -93,8 +110,7 @@ target_link_libraries(test_struct_sizes PRIVATE libembedding)
 add_test(NAME test_struct_sizes COMMAND test_struct_sizes)
 
 # Out-of-range enum values at the C API boundary must be rejected, not read
-# (no network, no model). Also add it to every explicit --target list in
-# .github/workflows/tests.yml and release.yml.
+# (no network, no model).
 add_executable(test_enum_validation test_enum_validation.cpp)
 target_link_libraries(test_enum_validation PRIVATE libembedding)
 if(NOT WIN32)
@@ -240,15 +256,17 @@ add_executable(test_text_max_length test_text_max_length.cpp)
 target_link_libraries(test_text_max_length PRIVATE libembedding)
 add_test(NAME test_text_max_length COMMAND test_text_max_length)
 
+add_dependencies(lembed_unit_tests ${LEMBED_UNIT_TEST_TARGETS})
+
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_enum_validation test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
+    foreach(_t ${LEMBED_UNIT_TEST_TARGETS} test_repeated_calls integration_sparse_gguf)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_maxsim test_multivector test_multivector_fidelity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_enum_validation test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
+    foreach(_t ${LEMBED_UNIT_TEST_TARGETS} test_repeated_calls integration_sparse_gguf)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()
