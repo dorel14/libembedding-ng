@@ -16,6 +16,7 @@ on:
       - "tests/**"
       - "third_party/llama.cpp/**"
       - "CMakeLists.txt"
+      - "scripts/**"
       - ".github/workflows/asan.yml"
   workflow_dispatch:
   schedule:
@@ -57,11 +58,13 @@ jobs:
       # OpenMP off: an uninstrumented libgomp only adds noise.
       - name: Configure (clang, ASan + UBSan)
         run: |
-          # UBSan "enum" and "function" checks are off: the tests pass
-          # out-of-range enum values on purpose (invalid-argument paths), and
-          # vendored ggml calls ggml_vec_dot_f32 through a differently typed
-          # pointer (third_party is never patched).
-          san="-fsanitize=address,undefined -fno-sanitize=enum,function -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          # The UBSan "function" check is off: vendored ggml calls
+          # ggml_vec_dot_f32 through a differently typed pointer (third_party
+          # is never patched). The "enum" check is ON: library code reads
+          # caller enums through enum_raw() (detail/enum_check.hpp), and the
+          # tests that pass out-of-range values do it through memcpy or
+          # NO_ENUM_SAN-annotated helpers, so a bad enum read is a real bug.
+          san="-fsanitize=address,undefined -fno-sanitize=function -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           cmake -S . -B build-asan -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER="clang-${CLANG_VERSION}" \
