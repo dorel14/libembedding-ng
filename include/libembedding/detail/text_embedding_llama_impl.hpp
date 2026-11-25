@@ -67,6 +67,10 @@ lembed_status_t lembed_text_embedding_create_from_gguf_path(
     if (!gguf_path || !gguf_path[0] || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
     const lembed_text_options_t defaults = lembed_text_options_default();
     if (!options) options = &defaults;
+    {
+        lembed_status_t es = lembed::detail::check_text_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     try {
         std::unique_ptr<lembed_text_embedding_t,

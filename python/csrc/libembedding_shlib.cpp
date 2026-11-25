@@ -21,12 +21,17 @@
 #endif
 
 #include <cstdio>
+#include <cstring>
 
 lembed_status_t lembed_autotune(
         const char* model_name,
         lembed_autotune_mode_t mode,
         lembed_tuning_result_t* result) {
     if (!model_name || !result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_autotune_mode(mode);
+        if (es != LEMBED_OK) return es;
+    }
 
     /* Accepts either the HuggingFace repo or the canonical registry name, so
      * a caller does not have to know which of the two this entry point wants. */
@@ -49,6 +54,10 @@ lembed_status_t lembed_autotune_custom(
         lembed_tuning_result_t* result) {
     if (!model_name || !texts || n_texts <= 0 || !result)
         return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_autotune_mode(mode);
+        if (es != LEMBED_OK) return es;
+    }
 
     return lembed::detail::lembed_autotune_custom_impl(
         model_name, texts, n_texts, mode, result);
@@ -63,6 +72,11 @@ lembed_status_t lembed_reranker_autotune_custom(
         lembed_reranker_tuning_result_t* result) {
     if (!model_name || !texts || n_texts <= 0 || !result)
         return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_autotune_mode(mode);
+        if (es == LEMBED_OK) es = lembed::detail::check_objective(objective);
+        if (es != LEMBED_OK) return es;
+    }
 
     return lembed::detail::lembed_reranker_autotune_custom_impl(
         model_name, texts, n_texts, mode, objective, result);
@@ -122,6 +136,13 @@ lembed_status_t lembed_autotune_unified(
         const char* model_name,
         lembed_autotune_mode_t mode,
         lembed_unified_tuning_result_t* result) {
+    /* The facade checks task and mode, but forwarding them by value would
+     * already read the enums: check here on the raw values. */
+    lembed_status_t es = lembed::detail::check_autotune_enums(task, mode, nullptr);
+    if (es != LEMBED_OK) {
+        if (result) std::memset(result, 0, sizeof(*result));
+        return es;
+    }
     return lembed::detail::lembed_autotune_unified(task, model_name, mode, result);
 }
 
@@ -130,10 +151,20 @@ lembed_status_t lembed_autotune_unified_config(
         const char* model_name,
         double target_latency_ms,
         lembed_unified_tuning_result_t* result) {
+    lembed_status_t es = lembed::detail::check_enum(
+        task, LEMBED_TASK_EMBEDDING, LEMBED_TASK_SPARSE, "autotune task");
+    if (es != LEMBED_OK) {
+        if (result) std::memset(result, 0, sizeof(*result));
+        return es;
+    }
     return lembed::detail::lembed_autotune_unified_config(task, model_name, target_latency_ms, result);
 }
 
 void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name) {
+    /* void: an unknown task is a no-op, as in the facade. */
+    if (lembed::detail::check_enum(task, LEMBED_TASK_EMBEDDING, LEMBED_TASK_SPARSE,
+                                   "autotune task") != LEMBED_OK)
+        return;
     lembed::detail::lembed_autotune_unified_clear_cache(task, model_name);
 }
 
@@ -146,6 +177,11 @@ void lembed_reranker_autotune_clear_cache(const char* model_name) {
 }
 
 lembed_autotune_options_t lembed_autotune_options_default(lembed_task_t task) {
+    /* An unknown task cannot be defaulted: fall back to EMBEDDING, whose
+     * options validate; the caller's own task value would not. */
+    if (lembed::detail::check_enum(task, LEMBED_TASK_EMBEDDING, LEMBED_TASK_SPARSE,
+                                   "autotune task") != LEMBED_OK)
+        return lembed::detail::autotune_options_default(LEMBED_TASK_EMBEDDING);
     return lembed::detail::autotune_options_default(task);
 }
 

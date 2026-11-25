@@ -19,6 +19,7 @@
 #include "../text_embedding.h"
 #include "../model_registry.h"
 #include "../downloader.h"
+#include "enum_check.hpp"
 #include "onnx_session_impl.hpp"
 #include "tokenizer_impl.hpp"
 #include "pooling.hpp"
@@ -310,6 +311,10 @@ lembed_status_t lembed_text_embedding_create_from_path(
         const lembed_text_options_t* options,
         lembed_text_embedding_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_text_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     std::string path_str(dir_path);
     bool is_gguf = (path_str.size() > 5 && path_str.compare(path_str.size() - 5, 5, ".gguf") == 0);

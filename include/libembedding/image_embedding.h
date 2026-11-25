@@ -98,6 +98,7 @@ void lembed_image_embedding_free(lembed_image_embedding_t* ctx);
 
 #include "model_registry.h"
 #include "downloader.h"
+#include "detail/enum_check.hpp"
 #include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/image_preprocess.hpp"
@@ -146,6 +147,10 @@ lembed_status_t lembed_image_embedding_create(
         const lembed_image_options_t* options,
         lembed_image_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_image_options(options, true);
+        if (es != LEMBED_OK) return es;
+    }
 
     {
         lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
@@ -206,6 +211,10 @@ lembed_status_t lembed_image_embedding_create_from_path(
         const lembed_image_options_t* options,
         lembed_image_embedding_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_image_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     {
         lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);

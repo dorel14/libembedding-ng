@@ -171,6 +171,10 @@ lembed_status_t lembed_sparse_text_embedding_create_from_gguf_path(
         const lembed_sparse_options_t* options,
         lembed_sparse_embedding_ctx_t** out) {
     if (!path || !path[0] || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (options) {
+        lembed_status_t es = lembed::detail::check_sparse_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     lembed_sparse_options_t opts =
         options ? *options : lembed_sparse_options_default();

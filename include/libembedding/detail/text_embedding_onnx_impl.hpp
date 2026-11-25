@@ -17,6 +17,7 @@
 #endif
 
 #include "../text_embedding.h"
+#include "enum_check.hpp"
 #include "onnx_session_impl.hpp"
 #include "tokenizer_impl.hpp"
 #include "pooling.hpp"
@@ -112,10 +113,11 @@ lembed_status_t lembed_text_embedding_create(
         lembed_text_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    /* Validate backend enum range */
-    if (options->backend < LEMBED_BACKEND_ONNX || options->backend > LEMBED_BACKEND_AUTO) {
-        lembed::detail::set_error("Invalid backend value in text embedding options");
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    /* Enum fields come from the caller: range-check them on their raw value
+     * before any enum-typed read (see detail/enum_check.hpp). */
+    {
+        lembed_status_t es = lembed::detail::check_text_options(options, true);
+        if (es != LEMBED_OK) return es;
     }
 
     /* Explicit llama.cpp: the registry model is served by its GGUF equivalent. */
@@ -211,6 +213,11 @@ lembed_status_t lembed_text_embedding_create_v2(
         const lembed_text_options_v2_t* options,
         lembed_text_embedding_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_text_options(&options->base, true);
+        if (es == LEMBED_OK) es = lembed::detail::check_quantization(options->quantization);
+        if (es != LEMBED_OK) return es;
+    }
 
     /* A requested quantization mode selects a different set of weights, not a
      * different session configuration: each quantized sibling is its own
@@ -306,6 +313,11 @@ lembed_status_t lembed_text_embedding_create_custom(
         lembed_text_embedding_t** out) {
     if (!model || !out || !model->onnx_data || !model->tokenizer_json)
         return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_provider(provider);
+        if (es == LEMBED_OK) es = lembed::detail::check_pooling(model->pooling);
+        if (es != LEMBED_OK) return es;
+    }
 
     {
         lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)provider);

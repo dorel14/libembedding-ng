@@ -20,6 +20,7 @@
 #define LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_SPARSE_HPP
 
 #include "libembedding/autotuner.h"
+#include "enum_check_autotune.hpp"
 #include "libembedding/sparse_text_embedding.h"
 #include "libembedding/model_registry.h"
 #include "libembedding/gguf_registry.h"
@@ -463,6 +464,10 @@ extern "C" lembed_status_t lembed_sparse_autotune_v2(const char* model_name,
                                                      lembed_sparse_tuning_result_v2_t* result) {
     if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
     *result = lembed_sparse_tuning_result_v2_t{};
+    {
+        lembed_status_t es = check_autotune_mode(mode);
+        if (es != LEMBED_OK) return es;
+    }
     return autotune_guard("sparse_autotune", [&]() {
         lembed_unified_tuning_result_t u;
         bool hit = false;
@@ -482,6 +487,13 @@ extern "C" lembed_status_t lembed_sparse_autotune(const char* model_name,
                                                   lembed_autotune_mode_t mode,
                                                   lembed_sparse_tuning_result_t* result) {
     if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = check_autotune_mode(mode);
+        if (es != LEMBED_OK) {
+            *result = lembed_sparse_tuning_result_t{};
+            return es;
+        }
+    }
     lembed_sparse_tuning_result_v2_t v2;
     lembed_status_t s = lembed_sparse_autotune_v2(model_name, mode, &v2);
     *result = v2.base;
