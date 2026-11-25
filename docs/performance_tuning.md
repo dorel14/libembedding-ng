@@ -89,6 +89,23 @@ pool.close()
 
 > **Règle d'or** : `workers × threads ≤ nombre de cœurs CPU`
 
+**Comptez les cœurs physiques, pas les threads logiques.** Avec l'hyperthreading
+(SMT), un processeur 4 cœurs annonce 8 threads logiques, mais deux threads d'un
+même cœur se partagent ses unités de calcul vectoriel. Mesuré sur un i7-1065G7
+(4 cœurs, 8 threads logiques) avec ONNX Runtime : passer de 4 à 8 threads fait
+perdre 20 à 30 % de débit au lieu d'en gagner. Le produit `workers × threads`
+doit donc rester inférieur ou égal au nombre de **cœurs physiques**.
+
+Valeurs par défaut quand `threads` n'est pas fixé (`threads=0`) :
+
+- **ONNX** : la bibliothèque ne fixe pas le nombre de threads et laisse ONNX
+  Runtime choisir. Sur la machine de mesure, ce choix est déjà correct (4).
+- **GGUF (llama.cpp)** : 4 threads fixes, quel que soit le processeur. Sur une
+  machine à 2 cœurs physiques, ou avec plusieurs workers, passez `threads=`
+  explicitement.
+- **Autotune et `TextEmbeddingRouter`** : ils partent du nombre de cœurs
+  physiques détecté, donc ils appliquent déjà cette règle.
+
 ---
 
 ## Auto-Tuning
