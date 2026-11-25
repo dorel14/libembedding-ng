@@ -14,7 +14,7 @@
 #define LIBEMBEDDING_VERSION_MAJOR 1
 #define LIBEMBEDDING_VERSION_MINOR 16
 #define LIBEMBEDDING_VERSION_PATCH 4
-#define LIBEMBEDDING_VERSION_STRING "1.16.3"
+#define LIBEMBEDDING_VERSION_STRING "1.16.4"
 
 /* Feature toggles (can be defined before including headers) */
 
