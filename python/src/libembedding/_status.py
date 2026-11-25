@@ -1,7 +1,7 @@
 """Status code checking -- raises Python exceptions from C status codes.
 
 Auteur: David Orel
-Version: 1.16.3
+Version: 1.16.4
 """
 
 from ._binding import ffi, lib

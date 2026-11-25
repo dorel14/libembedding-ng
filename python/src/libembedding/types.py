@@ -1,7 +1,7 @@
 """Data types for libembedding results.
 
 Auteur: David Orel
-Version: 1.16.3
+Version: 1.16.4
 """
 
 from dataclasses import dataclass

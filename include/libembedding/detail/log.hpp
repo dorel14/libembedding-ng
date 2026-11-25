@@ -9,7 +9,7 @@
  * lines are kept, as they report a failure the caller is about to see.
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.4
  *
  * SPDX-License-Identifier: MIT
  */
