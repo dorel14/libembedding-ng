@@ -8,6 +8,8 @@ Auteur: David Orel
 SPDX-License-Identifier: MIT
 """
 
+import asyncio
+import random
 import threading
 import time
 from typing import ClassVar
@@ -618,3 +620,272 @@ def test_router_matches_single_session(bge_small, policy):
             assert router.stats().in_flight == 0
     finally:
         ref.close()
+
+
+# ---------------------------------------------------------------------------
+# asyncio (fake sessions, hermetic)
+# ---------------------------------------------------------------------------
+
+
+async def _spin(n):
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+async def _wait_async(predicate, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "condition not reached in time"
+        await asyncio.sleep(0.0005)
+
+
+async def _settle(router, timeout=5.0):
+    """Wait until every session is back (no call running, nobody queued)."""
+    await _wait_async(
+        lambda: router.stats().in_flight == 0 and router.stats().queued == 0,
+        timeout,
+    )
+
+
+def test_aembed_basic_and_async_context_manager(fake_router):
+    async def main():
+        async with fake_router(cores=2, policy="indexing") as r:
+            out = await r.aembed(["a", "b"], normalized=True)
+            assert out.shape == (2, r.dim)
+            used = [m for m in FakeModel.instances if m.calls]
+            assert used[0].calls == [(["a", "b"], {"normalized": True})]
+            assert r.stats().in_flight == 0
+        return r
+
+    r = asyncio.run(main())
+    assert all(m.closed for m in FakeModel.instances)
+    with pytest.raises(RouterClosedError):
+        asyncio.run(r.aembed(["x"]))
+
+
+def test_async_error_releases_session():
+    router = _SessionRouter([FakeSession()])
+
+    def boom(session):
+        raise LembedError(3, "native failure")
+
+    async def main():
+        with pytest.raises(LembedError):
+            await router.arun(boom)
+        await _settle(router)
+        assert await router.arun(lambda s: 7) == 7
+
+    asyncio.run(main())
+    router.close()
+
+
+def test_async_fifo_order():
+    router = _SessionRouter([FakeSession()], max_queue=0)
+    gate = threading.Event()
+    order = []
+
+    async def main():
+        holder = asyncio.ensure_future(router.arun(lambda s: gate.wait(10)))
+        await _wait_async(lambda: router.stats().in_flight == 1)
+        tasks = []
+        for i in range(24):
+            tasks.append(
+                asyncio.ensure_future(router.arun(lambda s, i=i: order.append(i)))
+            )
+            await _spin(1)  # each task reaches the queue before the next one
+        assert router.stats().queued == 24
+        gate.set()
+        await asyncio.gather(holder, *tasks)
+
+    asyncio.run(main())
+    assert order == list(range(24))
+    router.close()
+
+
+def test_async_timeout_and_backpressure():
+    router = _SessionRouter([FakeSession()], max_queue=1)
+    gate = threading.Event()
+
+    async def main():
+        holder = asyncio.ensure_future(router.arun(lambda s: gate.wait(10)))
+        await _wait_async(lambda: router.stats().in_flight == 1)
+
+        waiter = asyncio.ensure_future(router.arun(lambda s: None, timeout=0.05))
+        await _wait_async(lambda: router.stats().queued == 1)
+        t0 = time.perf_counter()
+        with pytest.raises(RouterBusyError):
+            await router.arun(lambda s: None)
+        assert time.perf_counter() - t0 < 0.5
+        with pytest.raises(TimeoutError):
+            await waiter
+        st = router.stats()
+        assert (st.timeouts, st.rejected, st.queued) == (1, 1, 0)
+
+        gate.set()
+        await holder
+        await _settle(router)
+        assert await router.arun(lambda s: "ok") == "ok"
+
+    asyncio.run(main())
+    router.close()
+
+
+def test_async_cancel_while_waiting():
+    router = _SessionRouter([FakeSession()], max_queue=0)
+    gate = threading.Event()
+    ran = []
+
+    async def main():
+        holder = asyncio.ensure_future(router.arun(lambda s: gate.wait(10)))
+        await _wait_async(lambda: router.stats().in_flight == 1)
+        waiter = asyncio.ensure_future(router.arun(lambda s: ran.append(1)))
+        await _wait_async(lambda: router.stats().queued == 1)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert router.stats().queued == 0
+        gate.set()
+        await holder
+        await _settle(router)
+
+    asyncio.run(main())
+    assert ran == []
+    assert len(router._free) == 1
+    router.close()
+
+
+def test_async_cancel_during_native_call():
+    router = _SessionRouter([FakeSession()], max_queue=0)
+    release_call = threading.Event()
+    finished = threading.Event()
+
+    def slow(s):
+        release_call.wait(10)
+        finished.set()
+
+    async def main():
+        task = asyncio.ensure_future(router.arun(slow))
+        await _wait_async(lambda: router.stats().in_flight == 1)
+        t0 = time.perf_counter()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # Immediate: the native call is still running.
+        assert time.perf_counter() - t0 < 0.5
+        assert not finished.is_set()
+        assert router.stats().in_flight == 1
+        # The next request has to wait for the abandoned call.
+        nxt = asyncio.ensure_future(router.arun(lambda s: "next"))
+        await _wait_async(lambda: router.stats().queued == 1)
+        release_call.set()
+        assert await nxt == "next"
+        await _settle(router)
+
+    asyncio.run(main())
+    assert finished.is_set()
+    assert len(router._free) == 1
+    router.close()
+
+
+def test_async_cancellation_race_stress():
+    """10 000 random cancellations / timeouts racing with hand-offs."""
+    sessions = [FakeSession(0), FakeSession(1)]
+    router = _SessionRouter(sessions, max_queue=0)
+    rng = random.Random(20261125)
+    unexpected = []
+    counts = {"cancel_calls": 0, "cancelled": 0, "timeouts": 0, "done": 0}
+
+    async def one(timeout):
+        try:
+            await router.arun(lambda s: s.use(), timeout=timeout)
+            counts["done"] += 1
+        except asyncio.CancelledError:
+            counts["cancelled"] += 1
+            raise
+        except TimeoutError:
+            counts["timeouts"] += 1
+        except Exception as exc:  # noqa: BLE001 - recorded, asserted below
+            unexpected.append(exc)
+
+    async def main():
+        while counts["cancel_calls"] < 10_000:
+            tasks = [
+                asyncio.ensure_future(
+                    one(rng.random() * 0.0005 if rng.random() < 0.25 else None)
+                )
+                for _ in range(100)
+            ]
+            for t in tasks:
+                await _spin(rng.randrange(0, 3))
+                t.cancel()
+                counts["cancel_calls"] += 1
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await _settle(router)
+
+    asyncio.run(main())
+    assert unexpected == []
+    st = router.stats()
+    assert st.in_flight == 0
+    assert st.queued == 0
+    assert len(router._free) == len(sessions)
+    assert counts["cancelled"] > 0
+    # Both sessions must still be usable (nothing stuck, nothing closed).
+    assert router.run(lambda s: s.use()) is None
+    router.close()
+
+
+def test_async_close_wakes_waiters_and_waits_for_in_flight():
+    session = FakeSession()
+    router = _SessionRouter([session], max_queue=0)
+    gate = threading.Event()
+
+    async def main():
+        holder = asyncio.ensure_future(router.arun(lambda s: gate.wait(10)))
+        await _wait_async(lambda: router.stats().in_flight == 1)
+        waiters = [asyncio.ensure_future(router.arun(lambda s: None)) for _ in range(3)]
+        await _wait_async(lambda: router.stats().queued == 3)
+
+        closing = asyncio.ensure_future(router.aclose())
+        results = await asyncio.gather(*waiters, return_exceptions=True)
+        assert all(isinstance(r, RouterClosedError) for r in results)
+        # The loop stays responsive and the busy session is not closed.
+        await asyncio.sleep(0.05)
+        assert not closing.done()
+        assert not session.closed
+        with pytest.raises(RouterClosedError):
+            await router.arun(lambda s: None)
+
+        gate.set()
+        await holder
+        await asyncio.wait_for(closing, 5)
+        assert session.closed
+
+    asyncio.run(main())
+
+
+def test_default_loop_executor_stays_free():
+    router = _SessionRouter([FakeSession(0), FakeSession(1)], max_queue=0)
+    gate = threading.Event()
+    threads = []
+
+    def blocked(s):
+        threads.append(threading.current_thread().name)
+        gate.wait(10)
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        tasks = [asyncio.ensure_future(router.arun(blocked)) for _ in range(6)]
+        await _wait_async(lambda: router.stats().in_flight == 2)
+        await _wait_async(lambda: router.stats().queued == 4)
+        # Router saturated: the loop's default executor must still answer.
+        t0 = time.perf_counter()
+        assert await loop.run_in_executor(None, lambda: 42) == 42
+        assert await asyncio.to_thread(lambda: 43) == 43
+        assert time.perf_counter() - t0 < 1.0
+        gate.set()
+        await asyncio.gather(*tasks)
+
+    asyncio.run(main())
+    assert threads
+    assert all(name.startswith("lembed-router") for name in threads)
+    router.close()

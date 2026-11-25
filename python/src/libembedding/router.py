@@ -18,13 +18,14 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 import time
 import warnings
 from collections import deque
 from collections.abc import Callable, Sequence
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FutureTimeoutError
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, TypeVar
@@ -100,6 +101,9 @@ class _SessionRouter(Generic[_T]):
         self._max_queue = max_queue
         self._acquire_timeout = acquire_timeout
         self._closer = closer
+        # Dedicated executor for native calls made through arun(); created on
+        # first use so synchronous users never spawn a thread.
+        self._executor: ThreadPoolExecutor | None = None
         self._completed = 0
         self._rejected = 0
         self._timeouts = 0
@@ -267,6 +271,131 @@ class _SessionRouter(Generic[_T]):
         finally:
             self._release(session)
 
+    def _get_executor(self) -> ThreadPoolExecutor:
+        """Dedicated executor: as many workers as sessions, never the loop's.
+
+        A job only starts once it holds a session, so at most ``size`` jobs
+        exist at a time and none ever sits in the executor's own queue.
+        """
+        with self._lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=self._n, thread_name_prefix="lembed-router"
+                )
+            return self._executor
+
+    async def _await_session(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        fut: Future[Any],
+        timeout: float | None,
+        started: float,
+    ) -> Any:
+        """Wait for a hand-off without blocking the loop or leaking a session.
+
+        ``asyncio.wrap_future`` is not enough here: if the task is cancelled
+        (or times out) at the moment ``_release`` hands it a session, the
+        cancellation reaches the source future too late and the session would
+        be lost. Delivery therefore goes through ``box`` and a flag that are
+        only touched from the loop thread, which makes the two orders
+        (delivered first / abandoned first) mutually exclusive.
+        """
+        if timeout is None:
+            timeout = self._acquire_timeout
+        afut: asyncio.Future[None] = loop.create_future()
+        box: list[Any] = []
+        abandoned = False
+
+        def deliver(f: Future[Any]) -> None:  # loop thread
+            if f.cancelled():
+                return
+            exc = f.exception()
+            if exc is not None:
+                if not afut.done():
+                    afut.set_exception(exc)
+                return
+            session = f.result()
+            if abandoned or afut.done():
+                self._release(session)
+            else:
+                box.append(session)
+                afut.set_result(None)
+
+        def on_done(f: Future[Any]) -> None:  # any thread
+            try:
+                loop.call_soon_threadsafe(deliver, f)
+            except RuntimeError:
+                # Loop already closed: nobody can use the session.
+                if not f.cancelled() and f.exception() is None:
+                    self._release(f.result())
+
+        fut.add_done_callback(on_done)
+        try:
+            await asyncio.wait_for(afut, timeout)
+        except BaseException as exc:
+            abandoned = True
+            if box:
+                # Delivered, but the task died before it could use it.
+                self._release(box.pop())
+            else:
+                # Withdraw; if a session is already on its way, ``deliver``
+                # sees ``abandoned`` and passes it on.
+                self._cancel_waiter(fut)
+            if isinstance(exc, asyncio.TimeoutError):
+                with self._lock:
+                    self._timeouts += 1
+                raise TimeoutError(f"no session available within {timeout} s") from None
+            raise
+        self._note_wait(started)
+        return box.pop()
+
+    async def arun(
+        self, fn: Callable[[_T], _R], timeout: float | None = None
+    ) -> _R:
+        """Async ``run``: wait in the loop, run ``fn(session)`` in the executor.
+
+        The wait for a session is an ``await`` (no thread parked). ``fn`` runs
+        on the router's dedicated executor, never on the loop's default one.
+        Cancelling the task while it waits withdraws it; cancelling it during
+        ``fn`` raises ``CancelledError`` at once, but ``fn`` cannot be
+        interrupted: it finishes in the executor, its result is discarded, and
+        only then is the session handed on.
+        """
+        loop = asyncio.get_running_loop()
+        started = time.perf_counter()
+        session, fut = self._enqueue()
+        if fut is not None:
+            session = await self._await_session(loop, fut, timeout, started)
+        # From here the session is ours and must come back on every path.
+
+        def job() -> _R:
+            try:
+                return fn(session)
+            finally:
+                self._release(session)
+
+        try:
+            cf = self._get_executor().submit(job)
+        except BaseException as exc:
+            self._release(session)
+            if isinstance(exc, RuntimeError):  # executor already shut down
+                raise RouterClosedError() from None
+            raise
+        # Cancelled before it started: job() will never run, so give back here.
+        cf.add_done_callback(
+            lambda f: self._release(session) if f.cancelled() else None
+        )
+        return await asyncio.wrap_future(cf, loop=loop)
+
+    async def aclose(self) -> None:
+        """Async ``close(wait=True)`` that does not block the loop."""
+        loop = asyncio.get_running_loop()
+        closer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lembed-close")
+        try:
+            await loop.run_in_executor(closer, lambda: self.close(wait=True))
+        finally:
+            closer.shutdown(wait=False)
+
     def close(self, *, wait: bool = True) -> None:
         """Close the router and its sessions.
 
@@ -295,6 +424,12 @@ class _SessionRouter(Generic[_T]):
         if wait:
             with self._cond:
                 self._cond.wait_for(lambda: self._open == 0)
+        with self._lock:
+            executor, self._executor = self._executor, None
+        if executor is not None:
+            # wait=True: every call finished (sessions are closed), so the
+            # workers are idle and this returns at once.
+            executor.shutdown(wait=wait)
         if first_error is not None:
             raise first_error
 
@@ -503,10 +638,44 @@ class TextEmbeddingRouter:
         """
         return self._core.run(lambda m: m.embed(texts, **embed_kwargs), timeout)
 
+    async def aembed(
+        self, texts: list[str], *, timeout: float | None = None, **embed_kwargs: Any
+    ) -> np.ndarray:
+        """Async ``embed``: the event loop is never blocked.
+
+        The wait for a session is an ``await`` in the loop (no thread is parked
+        and the queue stays strict FIFO); the native call runs on an executor
+        dedicated to this router, so the loop's default executor stays free.
+        Python 3.9+ (no ``asyncio.timeout`` needed).
+
+        Cancellation:
+            * while waiting for a session: the request is withdrawn cleanly;
+            * during the native call: ``CancelledError`` is raised at once but
+              the call cannot be interrupted. It finishes in the executor, its
+              result is discarded, and only then does the session serve the
+              next request. Bound ``batch_size`` and the size of ``texts`` on
+              the server side so that one abandoned call stays short.
+
+        Args and Raises are those of :meth:`embed`; ``timeout`` covers the wait
+        for a session only.
+        """
+        return await self._core.arun(lambda m: m.embed(texts, **embed_kwargs), timeout)
+
+    async def aclose(self) -> None:
+        """Async :meth:`close` (waits for in-flight calls without blocking the loop)."""
+        await self._core.aclose()
+
+    async def __aenter__(self) -> TextEmbeddingRouter:  # noqa: PYI034 - no Self on 3.9
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.aclose()
+
     def close(self, *, wait: bool = True) -> None:
         """Close the router and release every session.
 
-        New requests raise ``RouterClosedError`` and queued requests are woken
+        From a coroutine use :meth:`aclose`: this call blocks the thread until
+        in-flight calls finish. New requests raise ``RouterClosedError`` and queued requests are woken
         with it. A session is never closed while a call runs on it. With
         ``wait=True`` (default) this blocks until in-flight calls finish and all
         sessions are closed. Idempotent.
