@@ -87,6 +87,22 @@ pool.close()
 
 > **Golden rule**: `workers × threads ≤ CPU core count`
 
+**Count physical cores, not logical threads.** With hyperthreading (SMT), a
+4-core processor reports 8 logical threads, but two threads on one core share its
+vector units. Measured on an i7-1065G7 (4 cores, 8 logical threads) with ONNX
+Runtime: going from 4 to 8 threads loses 20 to 30 % of throughput instead of
+gaining any. Keep `workers × threads` at or below the number of **physical
+cores**.
+
+Defaults when `threads` is not set (`threads=0`):
+
+- **ONNX**: the library does not set a thread count and lets ONNX Runtime
+  choose. On the measurement machine, that choice is already right (4).
+- **GGUF (llama.cpp)**: a fixed 4 threads, whatever the processor. On a machine
+  with 2 physical cores, or with several workers, pass `threads=` explicitly.
+- **Autotune and `TextEmbeddingRouter`**: they start from the detected number of
+  physical cores, so they already follow this rule.
+
 ---
 
 ## Auto-Tuning
