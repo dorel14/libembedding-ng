@@ -3,7 +3,7 @@
  * model_registry.h - Model registry query API
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.5
  *
  * SPDX-License-Identifier: MIT
  */
@@ -126,6 +126,8 @@ int lembed_mobile_model_limit_mb(void);
 
 /* Provides lembed::detail::set_error() used for registry diagnostics. */
 #include "error.h"
+/* Raw-value range checks for enums received from the caller. */
+#include "detail/enum_check.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -545,29 +547,33 @@ static const int lembed__model_sizes_count =
  * ========================================================================= */
 
 lembed_status_t lembed_get_text_model_info(lembed_text_model_t model, lembed_model_info_t* out) {
-    if ((int)model < 0 || (int)model >= LEMBED_TEXT_MODEL_COUNT || !out)
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_status_t s = lembed::detail::check_text_model(model);
+    if (s != LEMBED_OK) return s;
     *out = lembed__text_models[(int)model];
     return LEMBED_OK;
 }
 
 lembed_status_t lembed_get_sparse_model_info(lembed_sparse_model_t model, lembed_model_info_t* out) {
-    if ((int)model < 0 || (int)model >= LEMBED_SPARSE_MODEL_COUNT || !out)
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_status_t s = lembed::detail::check_sparse_model(model);
+    if (s != LEMBED_OK) return s;
     *out = lembed__sparse_models[(int)model];
     return LEMBED_OK;
 }
 
 lembed_status_t lembed_get_image_model_info(lembed_image_model_t model, lembed_model_info_t* out) {
-    if ((int)model < 0 || (int)model >= LEMBED_IMAGE_MODEL_COUNT || !out)
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_status_t s = lembed::detail::check_image_model(model);
+    if (s != LEMBED_OK) return s;
     *out = lembed__image_models[(int)model];
     return LEMBED_OK;
 }
 
 lembed_status_t lembed_get_reranker_model_info(lembed_reranker_model_t model, lembed_model_info_t* out) {
-    if ((int)model < 0 || (int)model >= LEMBED_RERANKER_MODEL_COUNT || !out)
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_status_t s = lembed::detail::check_reranker_model(model);
+    if (s != LEMBED_OK) return s;
     *out = lembed__reranker_models[(int)model];
     return LEMBED_OK;
 }

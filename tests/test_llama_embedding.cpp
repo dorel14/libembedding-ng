@@ -190,7 +190,13 @@ static void test_user_corpus(const char* gguf_path) {
         fprintf(stderr, "  Cosine (greeting vs quantum):  %.4f\n", sim_different);
 
         ASSERT(sim_greeting > sim_different, "similar texts have higher similarity");
-        ASSERT(sim_greeting > 0.3f, "greeting similarity > 0.3");
+        // MiniLM-L6-v2 gives a low cosine for this short cross-lingual pair.
+        // Measured (E13): ONNX fp32 0.168, GGUF Q8_0 0.166, GGUF Q4_K_M 0.187;
+        // the unrelated text (index 16) scores 0.065 to 0.072. The GGUF path
+        // matches ONNX (per-text cosine >= 0.999 for Q8_0), so 0.3 was never
+        // reachable for this model.
+        ASSERT(sim_greeting > 0.1f, "greeting similarity > 0.1");
+        ASSERT(sim_greeting - sim_different > 0.02f, "greeting margin over unrelated text > 0.02");
 
         lembed_embeddings_free(&result);
     }

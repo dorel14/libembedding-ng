@@ -3,7 +3,7 @@
  * Text embedding auto-tuner with custom corpus
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.5
  *
  * SPDX-License-Identifier: MIT
  */

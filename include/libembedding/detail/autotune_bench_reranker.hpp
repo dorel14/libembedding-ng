@@ -12,7 +12,7 @@
  * grid filter, constraints and cache identity.
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.5
  *
  * SPDX-License-Identifier: MIT
  */
@@ -21,6 +21,7 @@
 #define LIBEMBEDDING_DETAIL_AUTOTUNE_BENCH_RERANKER_HPP
 
 #include "libembedding/autotuner.h"
+#include "enum_check_autotune.hpp"
 #include "libembedding/reranker.h"
 #include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
@@ -322,6 +323,11 @@ extern "C" lembed_status_t lembed_reranker_autotune(const char* model_name,
                                                     lembed_autotune_mode_t mode,
                                                     lembed_objective_t objective,
                                                     lembed_reranker_tuning_result_t* result) {
+    {
+        lembed_status_t es = check_autotune_mode(mode);
+        if (es == LEMBED_OK) es = check_objective(objective);
+        if (es != LEMBED_OK) return es;
+    }
     reranker_tune_request req;
     req.model_name = model_name;
     req.mode = mode;
@@ -332,6 +338,11 @@ extern "C" lembed_status_t lembed_reranker_autotune(const char* model_name,
 extern "C" lembed_status_t lembed_reranker_autotune_constrained(
     const char* model_name, lembed_autotune_mode_t mode, lembed_objective_t objective,
     int min_tokens, double max_latency_ms, lembed_reranker_tuning_result_t* result) {
+    {
+        lembed_status_t es = check_autotune_mode(mode);
+        if (es == LEMBED_OK) es = check_objective(objective);
+        if (es != LEMBED_OK) return es;
+    }
     reranker_tune_request req;
     req.model_name = model_name;
     req.mode = mode;
@@ -347,13 +358,17 @@ extern "C" lembed_status_t lembed_reranker_auto_config(const char* model_name,
                                                        double target_latency_ms,
                                                        lembed_objective_t objective,
                                                        lembed_reranker_tuning_result_t* result) {
+    {
+        lembed_status_t es = check_objective(objective);
+        if (es != LEMBED_OK) return es;
+    }
     return lembed_reranker_autotune_constrained(model_name, LEMBED_AUTOTUNE_QUICK, objective, 0,
                                                 target_latency_ms, result);
 }
 
 /* Latency budget per profile: interactive 100 ms, balanced 300 ms, quality 1 s. */
-inline double reranker_profile_budget_ms(lembed_reranker_profile_t profile) {
-    switch (profile) {
+inline double reranker_profile_budget_ms(const lembed_reranker_profile_t& profile) {
+    switch (enum_raw(profile)) {  /* raw: an unknown profile falls to BALANCED */
         case LEMBED_PROFILE_INTERACTIVE: return 100.0;
         case LEMBED_PROFILE_QUALITY:     return 1000.0;
         case LEMBED_PROFILE_BALANCED:
@@ -364,6 +379,11 @@ inline double reranker_profile_budget_ms(lembed_reranker_profile_t profile) {
 extern "C" lembed_status_t lembed_reranker_auto_config_profile(
     const char* model_name, lembed_reranker_profile_t profile,
     lembed_reranker_tuning_result_t* result) {
+    {
+        lembed_status_t es = check_enum(profile, LEMBED_PROFILE_INTERACTIVE,
+                                        LEMBED_PROFILE_QUALITY, "reranker profile");
+        if (es != LEMBED_OK) return es;
+    }
     return lembed_reranker_auto_config(model_name, reranker_profile_budget_ms(profile),
                                        LEMBED_OBJECTIVE_BALANCED, result);
 }
