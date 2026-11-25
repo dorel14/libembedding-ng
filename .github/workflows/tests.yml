@@ -258,4 +258,42 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
+
+      # test_llama_embedding skips (exit 0) without LEMBED_TEST_GGUF and is
+      # only built with LIBEMBEDDING_INTEGRATION_TESTS=ON, so the dense GGUF
+      # path was never validated by ctest in CI. Build that one target and run
+      # it on the MiniLM Q8_0 GGUF (about 25 MB, cached; URL from
+      # include/libembedding/detail/gguf_registry_impl.hpp). Linux x86_64 only,
+      # last in the job: turning the integration option on registers tests
+      # whose targets are not built, which the steps above must not see.
+      - name: Cache MiniLM GGUF (dense llama.cpp test)
+        if: matrix.name == 'linux-x86_64'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gguf-models
+          key: gguf-minilm-l6-q8_0-v1
+
+      - name: Run llama.cpp dense GGUF test (Linux x86_64)
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        env:
+          ONNXRUNTIME_ROOT: ${{ env.ONNXRUNTIME_ROOT }}
+        run: |
+          gguf="$RUNNER_TEMP/gguf-models/all-MiniLM-L6-v2-Q8_0.gguf"
+          if [ ! -s "$gguf" ]; then
+            mkdir -p "$(dirname "$gguf")"
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$gguf.part" \
+              "https://huggingface.co/second-state/All-MiniLM-L6-v2-Embedding-GGUF/resolve/main/all-MiniLM-L6-v2-Q8_0.gguf"
+            mv "$gguf.part" "$gguf"
+          fi
+          cd build
+          cmake .. -DLIBEMBEDDING_INTEGRATION_TESTS=ON
+          cmake --build . --parallel 2 --target test_llama_embedding
+          export LEMBED_TEST_GGUF="$gguf"
+          ctest -R '^test_llama_embedding$' --output-on-failure -V --timeout 300 | tee "$RUNNER_TEMP/llama-test.log"
+          # The test exits 0 when it skips: fail if it did not really run.
+          if grep -q "SKIP: GGUF model not found" "$RUNNER_TEMP/llama-test.log"; then
+            echo "ERROR: test_llama_embedding skipped"
+            exit 1
+          fi
           exit 0

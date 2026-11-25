@@ -53,7 +53,9 @@ ort="$work/ort"
 if [ ! -f "$ort/lib/libonnxruntime.so" ]; then
     mkdir -p "$ort/include" "$ort/lib" "$work/aar"
     aar="$work/onnxruntime-android-${ONNXRUNTIME_VERSION}.aar"
-    curl -fsSL -o "$aar" \
+    # Maven Central answers 429 under load: back off between retries. The
+    # host curl (ubuntu runner) supports --retry-all-errors.
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$aar" \
         "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ONNXRUNTIME_VERSION}/onnxruntime-android-${ONNXRUNTIME_VERSION}.aar"
     unzip -q -o "$aar" -d "$work/aar"
     cp "$work/aar/headers/"*.h "$ort/include/"

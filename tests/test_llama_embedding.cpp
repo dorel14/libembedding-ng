@@ -17,6 +17,13 @@
 #include <vector>
 #include <string>
 
+// Linux/macOS: the library is header-only, so one translation unit must define
+// the implementation (Windows links the DLL). Same pattern as test_reranker.cpp.
+#ifndef _WIN32
+#define LIBEMBEDDING_IMPLEMENTATION
+#endif
+#include <libembedding/libembedding.h>
+
 // The real C API headers: single source of truth for every type and prototype.
 #include <libembedding/text_embedding.h>
 #include <libembedding/error.h>

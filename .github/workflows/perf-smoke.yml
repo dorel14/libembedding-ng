@@ -32,7 +32,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v2
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
       - name: Install wheel
         run: |

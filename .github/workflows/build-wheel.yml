@@ -16,6 +16,9 @@ on:
 
 env:
   ONNXRUNTIME_VERSION: "1.31.0"
+  # PyPI answers 429/5xx now and then: retry with a longer timeout.
+  PIP_RETRIES: "5"
+  PIP_TIMEOUT: "60"
 
 jobs:
   build:
@@ -395,7 +398,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v2
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
       # ── ggml CPU dispatch: the variants are dlopen()ed, so nothing in the
       #    dynamic section of libembedding.so lists them. Check they are in the
@@ -478,6 +481,9 @@ jobs:
           # CPU dispatch: ggml must have loaded a variant from the installed
           # wheel (not from python's directory, where there is none).
           (cd "$RUNNER_TEMP" && python -c "import libembedding, sys; f = libembedding.ggml_cpu_features(); print('ggml CPU features:', ' '.join(f)); sys.exit(0 if f else 'no ggml CPU variant loaded')")
+          # Prefetch with retries (no-op on a cache hit): a slow HF download
+          # then fails here, loudly, instead of timing a test out (1.16.1).
+          (cd "$RUNNER_TEMP" && python "$GITHUB_WORKSPACE/scripts/ci_prefetch_models.py")
           # 600 s: network tests download models of several hundred MB, and a
           # slow runner download is not a hang (it failed the 1.15.0 release).
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
@@ -487,7 +493,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v2
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
       # ── Upload repaired wheel as artifact ─────────────────────────────
       - name: Upload repaired wheel artifact

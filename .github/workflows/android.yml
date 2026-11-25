@@ -32,11 +32,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The AAR is the same for both ABIs: cache it on the ORT version so a
+      # Maven Central 429 does not fail the job when it is already known.
+      - name: Cache ONNX Runtime Android AAR
+        id: aar-cache
+        uses: actions/cache@v4
+        with:
+          path: onnxruntime-android-${{ env.ONNXRUNTIME_VERSION }}.aar
+          key: ort-android-aar-${{ env.ONNXRUNTIME_VERSION }}
+
       - name: Fetch ONNX Runtime Android AAR
         run: |
           aar="onnxruntime-android-${ONNXRUNTIME_VERSION}.aar"
-          curl -fsSL -o "$aar" \
-            "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ONNXRUNTIME_VERSION}/$aar"
+          if [ ! -s "$aar" ]; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$aar" \
+              "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ONNXRUNTIME_VERSION}/$aar"
+          fi
           mkdir -p ort-aar ort/include ort/lib
           unzip -q "$aar" -d ort-aar
           cp ort-aar/headers/*.h ort/include/
