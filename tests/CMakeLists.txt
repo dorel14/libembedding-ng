@@ -77,6 +77,13 @@ add_test(NAME test_struct_sizes COMMAND test_struct_sizes)
 # .github/workflows/tests.yml and release.yml.
 add_executable(test_enum_validation test_enum_validation.cpp)
 target_link_libraries(test_enum_validation PRIVATE libembedding)
+if(NOT WIN32)
+    # The autotune entry points live only in the shared-library source; the
+    # header-only target does not provide them. It defines
+    # LIBEMBEDDING_IMPLEMENTATION, so the test file must not.
+    target_sources(test_enum_validation PRIVATE
+        ${PROJECT_SOURCE_DIR}/python/csrc/libembedding_shlib.cpp)
+endif()
 add_test(NAME test_enum_validation COMMAND test_enum_validation)
 
 # Compile-and-resolve checks for the public C++ wrappers (no network).

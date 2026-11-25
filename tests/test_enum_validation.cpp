@@ -17,9 +17,11 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef _WIN32
-#define LIBEMBEDDING_IMPLEMENTATION
-#endif
+/* No LIBEMBEDDING_IMPLEMENTATION here. The autotune entry points
+ * (lembed_autotune_ex, lembed_reranker_autotune...) are defined only in
+ * python/csrc/libembedding_shlib.cpp, which defines the implementation itself:
+ * on Windows it is the DLL, elsewhere tests/CMakeLists.txt compiles it into
+ * this executable. Defining it here too would duplicate every definition. */
 #include <libembedding/libembedding.h>
 
 #include <cstdio>
