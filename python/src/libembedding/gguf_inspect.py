@@ -10,7 +10,7 @@ API is built to prevent.
 The convention is documented in ``docs/gguf_sparse_convention.md``.
 
 Author: David Orel
-Version: 1.16.3
+Version: 1.16.4
 
 SPDX-License-Identifier: MIT
 """

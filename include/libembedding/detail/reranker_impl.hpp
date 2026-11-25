@@ -4,7 +4,7 @@
  * Include-only header (included from reranker.h when LIBEMBEDDING_IMPLEMENTATION is defined)
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.4
  *
  * SPDX-License-Identifier: MIT
  */
@@ -18,6 +18,7 @@
 
 #include "../model_registry.h"
 #include "../downloader.h"
+#include "enum_check.hpp"
 #include "model_loader_impl.hpp"
 #include "onnx_session_impl.hpp"
 #include "tokenizer_impl.hpp"
@@ -243,13 +244,13 @@ lembed_status_t lembed_reranker_create(
         lembed_reranker_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
 
-    lembed_backend_t backend = (lembed_backend_t)options->backend;
-
-    /* Validate backend enum range */
-    if (backend < LEMBED_BACKEND_ONNX || backend > LEMBED_BACKEND_AUTO) {
-        lembed::detail::set_error("Invalid backend value in reranker options");
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    /* Enum fields come from the caller: range-check them on their raw value
+     * before any enum-typed read (see detail/enum_check.hpp). */
+    {
+        lembed_status_t es = lembed::detail::check_reranker_options(options, true);
+        if (es != LEMBED_OK) return es;
     }
+    lembed_backend_t backend = options->backend;
 
     if (backend == LEMBED_BACKEND_LLAMACPP) {
         return lembed__reranker_create_gguf_impl(options, false, out);
@@ -272,6 +273,11 @@ lembed_status_t lembed_reranker_create_v2(
         const lembed_reranker_options_v2_t* options,
         lembed_reranker_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_reranker_options(&options->base, true);
+        if (es == LEMBED_OK) es = lembed::detail::check_quantization(options->quantization);
+        if (es != LEMBED_OK) return es;
+    }
     lembed_reranker_options_t base = options->base;
     if (base.backend == LEMBED_BACKEND_LLAMACPP) {
         return lembed_reranker_create(&base, out);
@@ -295,6 +301,10 @@ lembed_status_t lembed_reranker_create_from_path(
         const lembed_reranker_options_t* options,
         lembed_reranker_t** out) {
     if (!path || !path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_reranker_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     if (lembed__path_ends_with_gguf(path)) {
         return lembed_reranker_create_from_gguf_path(path, options, out);

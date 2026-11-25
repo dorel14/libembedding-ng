@@ -7,7 +7,7 @@
  * their signature cannot express.
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.4
  *
  * SPDX-License-Identifier: MIT
  */
@@ -16,6 +16,7 @@
 #define LIBEMBEDDING_DETAIL_AUTOTUNER_IMPL_HPP
 
 #include "libembedding/autotuner.h"
+#include "enum_check_autotune.hpp"
 #include "autotune_cache.hpp"
 #include "autotune_result.hpp"
 /* Order matters: autotune_bench_text.hpp pulls the model/ONNX/llama impl chain
@@ -45,9 +46,18 @@ inline lembed_autotune_options_t autotune_options_default(lembed_task_t task) {
     return o;
 }
 
-inline bool valid_objective(lembed_objective_t o) {
-    return o == LEMBED_OBJECTIVE_LATENCY || o == LEMBED_OBJECTIVE_THROUGHPUT ||
-           o == LEMBED_OBJECTIVE_BALANCED || o == LEMBED_OBJECTIVE_MEMORY;
+/* Raw-value range check of the three autotune enums. `objective` is optional
+ * (the facades have none). Sets lembed_last_error() on failure. */
+inline lembed_status_t check_autotune_enums(const lembed_task_t& task,
+                                            const lembed_autotune_mode_t& mode,
+                                            const lembed_objective_t* objective) {
+    lembed_status_t s = check_enum(task, LEMBED_TASK_EMBEDDING, LEMBED_TASK_SPARSE, "autotune task");
+    if (s == LEMBED_OK)
+        s = check_enum(mode, LEMBED_AUTOTUNE_QUICK, LEMBED_AUTOTUNE_FULL, "autotune mode");
+    if (s == LEMBED_OK && objective)
+        s = check_enum(*objective, LEMBED_OBJECTIVE_LATENCY, LEMBED_OBJECTIVE_MEMORY,
+                       "autotune objective");
+    return s;
 }
 
 inline std::vector<std::string> copy_texts(const char* const* texts, int n) {
@@ -62,15 +72,22 @@ inline lembed_status_t autotune_ex_impl(const char* model_name,
                                         const lembed_autotune_options_t* options,
                                         lembed_unified_tuning_result_t* result) {
     if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
+    /* task, mode and objective come from the caller: range-check the raw
+     * values before any enum-typed read (see enum_check.hpp). */
+    if (options) {
+        lembed_status_t es = check_autotune_enums(options->task, options->mode,
+                                                  &options->objective);
+        if (es != LEMBED_OK) {
+            std::memset(result, 0, sizeof(*result));
+            return es;
+        }
+    }
     lembed_autotune_options_t o =
         options ? *options : autotune_options_default(LEMBED_TASK_EMBEDDING);
     *result = make_unified_result(o.task);
 
     const lembed_status_t bad = LEMBED_ERROR_INVALID_ARGUMENT;
     if (!model_name) return autotune_fail(bad, "autotune: model_name is NULL");
-    if (o.mode != LEMBED_AUTOTUNE_QUICK && o.mode != LEMBED_AUTOTUNE_FULL)
-        return autotune_fail(bad, "autotune: mode must be QUICK or FULL");
-    if (!valid_objective(o.objective)) return autotune_fail(bad, "autotune: unknown objective");
     if (o.n_texts < 0 || (o.n_texts > 0 && !o.texts))
         return autotune_fail(bad, "autotune: texts/n_texts are inconsistent");
     if (o.max_latency_ms < 0.0 || o.min_tokens < 0)
@@ -134,6 +151,13 @@ inline lembed_status_t autotune_ex_impl(const char* model_name,
 inline lembed_status_t lembed_autotune_unified(lembed_task_t task, const char* model_name,
                                                lembed_autotune_mode_t mode,
                                                lembed_unified_tuning_result_t* result) {
+    {
+        lembed_status_t es = check_autotune_enums(task, mode, nullptr);
+        if (es != LEMBED_OK) {
+            if (result) std::memset(result, 0, sizeof(*result));
+            return es;
+        }
+    }
     lembed_autotune_options_t o = autotune_options_default(task);
     o.mode = mode;
     return autotune_ex_impl(model_name, &o, result);
@@ -143,6 +167,14 @@ inline lembed_status_t lembed_autotune_unified(lembed_task_t task, const char* m
 inline lembed_status_t lembed_autotune_unified_config(lembed_task_t task, const char* model_name,
                                                       double target_latency_ms,
                                                       lembed_unified_tuning_result_t* result) {
+    {
+        lembed_status_t es = check_enum(task, LEMBED_TASK_EMBEDDING, LEMBED_TASK_SPARSE,
+                                        "autotune task");
+        if (es != LEMBED_OK) {
+            if (result) std::memset(result, 0, sizeof(*result));
+            return es;
+        }
+    }
     lembed_autotune_options_t o = autotune_options_default(task);
     o.max_latency_ms = target_latency_ms > 0.0 ? target_latency_ms : 0.0;
     return autotune_ex_impl(model_name, &o, result);
@@ -153,7 +185,7 @@ inline lembed_status_t lembed_autotune_unified_config(lembed_task_t task, const 
  * root-level text entries only. lembed_autotune_clear_cache(NULL) would wipe
  * every task's cache, which is not what a task-scoped call promises. */
 inline void lembed_autotune_unified_clear_cache(lembed_task_t task, const char* model_name) {
-    switch (task) {
+    switch (enum_raw(task)) {  /* void: an unknown task is a no-op */
         case LEMBED_TASK_EMBEDDING:
             autotune_guard("autotune_clear_cache", [&]() {
                 if (model_name) lembed_autotune_clear_cache(model_name);

@@ -3,7 +3,7 @@
  * Model download C API
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.4
  *
  * SPDX-License-Identifier: MIT
  */
@@ -146,6 +146,10 @@ lembed_status_t lembed_ensure_text_model(
         lembed_text_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_text_model(model);
+        if (es != LEMBED_OK) return es;
+    }
     try {
         std::string dir = lembed::detail::ensure_model_by_kind(
             (int)model, LEMBED__MODEL_TYPE_TEXT,
@@ -165,6 +169,10 @@ lembed_status_t lembed_ensure_sparse_model(
         lembed_sparse_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_sparse_model(model);
+        if (es != LEMBED_OK) return es;
+    }
     try {
         std::string dir = lembed::detail::ensure_model_by_kind(
             (int)model, LEMBED__MODEL_TYPE_SPARSE,
@@ -204,6 +212,10 @@ lembed_status_t lembed_ensure_image_model(
         lembed_image_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_image_model(model);
+        if (es != LEMBED_OK) return es;
+    }
     try {
         std::string dir = lembed::detail::ensure_model_by_kind(
             (int)model, LEMBED__MODEL_TYPE_IMAGE,
@@ -225,6 +237,10 @@ lembed_status_t lembed_ensure_reranker_model(
         lembed_reranker_model_t model, const char* cache_dir,
         int show_progress, int offline, char** model_dir_out) {
     if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_reranker_model(model);
+        if (es != LEMBED_OK) return es;
+    }
     try {
         std::string dir = lembed::detail::ensure_model_by_kind(
             (int)model, LEMBED__MODEL_TYPE_RERANKER,
