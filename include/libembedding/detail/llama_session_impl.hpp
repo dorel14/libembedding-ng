@@ -28,10 +28,33 @@
 #include "ggml_cpu_backend.hpp"
 #include "worker_autotune_impl.hpp"
 #include "llama_scheduler_impl.hpp"
+#include "tokenizer_impl.hpp"
 
 namespace lembed { namespace detail {
 
 inline std::string llama_last_error;
+
+/* llama.cpp's WPM tokenizer applies NFD through a 1:1 codepoint table, so a
+ * Hangul syllable collapses to its leading consonant jamo and the vowel and
+ * final are lost (HF decomposes into 2-3 jamo). For WPM (BERT) vocabs holding
+ * Hangul syllables, pre-decompose with the library's HF-exact BERT
+ * normalization (NFD, strip Mn, lowercase: the same defaults llama.cpp uses for
+ * WPM). Jamo are untouched by llama's own pass. Returns true and fills `out`
+ * only in that case; other vocab types and other texts are left alone. */
+inline bool llama_wpm_hangul_prepare(const struct llama_vocab* vocab, const char* text,
+                                     std::string& out) {
+    if (!vocab || !text || llama_vocab_type(vocab) != LLAMA_VOCAB_TYPE_WPM) return false;
+    bool hangul = false;
+    for (const unsigned char* p = (const unsigned char*)text; *p && !hangul; ++p) {
+        /* Syllables U+AC00..U+D7A3 are 3-byte: EA B0.. / EB / EC / ED ..9E */
+        if (*p < 0xEA || *p > 0xED) continue;
+        const unsigned char b1 = p[1];
+        hangul = *p != 0xED ? (*p != 0xEA || b1 >= 0xB0) : b1 <= 0x9E;
+    }
+    if (!hangul) return false;
+    out = bert_normalize(std::string(text));
+    return true;
+}
 
 inline void llama_log_callback(ggml_log_level level, const char* text, void* userdata) {
     (void)userdata;
@@ -262,6 +285,8 @@ public:
         if (max_length_ > 0 && max_length_ < limit) limit = max_length_;
         if (max_tokens > 0 && max_tokens < limit) limit = max_tokens;
 
+        std::string prepared;
+        if (llama_wpm_hangul_prepare(vocab_, text, prepared)) text = prepared.c_str();
         int text_len = (int)strlen(text);
         int needed = -llama_tokenize(vocab_, text, text_len, nullptr, 0, true, true);
         if (needed <= 0) return 0;
@@ -342,6 +367,8 @@ public:
     std::vector<llama_token> tokenize_plain(const char* text) const {
         std::vector<llama_token> toks;
         if (!vocab_ || !text || !text[0]) return toks;
+        std::string prepared;
+        if (llama_wpm_hangul_prepare(vocab_, text, prepared)) text = prepared.c_str();
         int len = (int)strlen(text);
         int needed = -llama_tokenize(vocab_, text, len, nullptr, 0, false, false);
         if (needed <= 0) return toks;
@@ -446,6 +473,8 @@ class LlamaSessionPool {
         int limit = encode_limit_ > 0 ? encode_limit_ : n_ctx_;
         if (n_ctx_ > 0 && n_ctx_ < limit) limit = n_ctx_;
         if (max_length_ > 0 && max_length_ < limit) limit = max_length_;
+        std::string prepared;
+        if (llama_wpm_hangul_prepare(vocab_, text, prepared)) text = prepared.c_str();
         int text_len = (int)strlen(text);
         int needed = -llama_tokenize(vocab_, text, text_len, nullptr, 0, true, true);
         if (needed <= 0) return 0;
