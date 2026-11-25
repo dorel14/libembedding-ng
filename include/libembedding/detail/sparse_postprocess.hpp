@@ -3,7 +3,7 @@
  * SPLADE and BGE-M3 sparse embedding postprocessing
  *
  * Auteur: David Orel
- * Version: 1.16.4
+ * Version: 1.16.5
  *
  * SPDX-License-Identifier: MIT
  */

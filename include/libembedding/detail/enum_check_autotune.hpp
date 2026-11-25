@@ -5,7 +5,7 @@
  * in, which model_registry.h (an includer of enum_check.hpp) must not.
  *
  * Auteur: David Orel
- * Version: 1.16.4
+ * Version: 1.16.5
  *
  * SPDX-License-Identifier: MIT
  */
