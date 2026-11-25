@@ -32,7 +32,14 @@ from .benchmark import (
     detect_hardware,
 )
 from .cache import EmbeddingCache, cache_config_default
-from .exceptions import CacheMissError, GgufError, LembedError, LlamaError
+from .exceptions import (
+    CacheMissError,
+    GgufError,
+    LembedError,
+    LlamaError,
+    RouterBusyError,
+    RouterClosedError,
+)
 from .gguf_inspect import (
     SPARSE_FORMULA_SCALAR,
     SPARSE_FORMULA_SPLADE,
@@ -60,6 +67,7 @@ from .reranker import (
     reranker_autotune_constrained,
     reranker_autotune_custom,
 )
+from .router import RouterStats, TextEmbeddingRouter
 from .similarity import (
     cosine_similarity,
     dot_product,
@@ -184,12 +192,16 @@ __all__ = [
     "RerankResult",
     "Reranker",
     "RerankerTuningResult",
+    "RouterBusyError",
+    "RouterClosedError",
+    "RouterStats",
     "SparseEmbedding",
     "SparseTextEmbedding",
     "SparseTuningResult",
     "Stats",
     "TextEmbedding",
     "TextEmbeddingPool",
+    "TextEmbeddingRouter",
     "TuningResult",
     "UnifiedTuningResult",
     "auto_select_model",

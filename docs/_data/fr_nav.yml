@@ -29,6 +29,8 @@
   url: performance_tuning.html
 - title: Usage avancé
   url: advanced_usage.html
+- title: Requêtes concurrentes
+  url: concurrency.html
 - title: Quantification
   url: quantization.html
 - title: Routage des modèles

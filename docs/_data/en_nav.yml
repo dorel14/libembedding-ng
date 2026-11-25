@@ -29,6 +29,8 @@
   url: en/gguf_sparse_runtime.html
 - title: Advanced usage
   url: en/advanced_usage.html
+- title: Concurrent requests
+  url: en/concurrency.html
 - title: Quantization
   url: en/quantization.html
 - title: Model routing

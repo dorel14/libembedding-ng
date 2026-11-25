@@ -61,3 +61,22 @@ class CacheMissError(LembedError):
 
 class GgufError(LembedError):
     pass
+
+
+class RouterBusyError(LembedError):
+    """The router queue is full: the request was rejected without waiting.
+
+    Raised by ``TextEmbeddingRouter`` when ``max_queue`` requests are already
+    waiting for a session. Map it to a retryable error (HTTP 503) in a server.
+    """
+
+    def __init__(self, message: str = "router queue is full", detail: str = ""):
+        # No native status behind this error: 0 is LEMBED_OK, so use -1.
+        super().__init__(-1, message, detail)
+
+
+class RouterClosedError(LembedError):
+    """The router is closed (or closing): it accepts no new request."""
+
+    def __init__(self, message: str = "router is closed", detail: str = ""):
+        super().__init__(-1, message, detail)
