@@ -32,7 +32,14 @@ from .benchmark import (
     detect_hardware,
 )
 from .cache import EmbeddingCache, cache_config_default
-from .exceptions import CacheMissError, GgufError, LembedError, LlamaError
+from .exceptions import (
+    CacheMissError,
+    GgufError,
+    LembedError,
+    LlamaError,
+    RouterBusyError,
+    RouterClosedError,
+)
 from .gguf_inspect import (
     SPARSE_FORMULA_SCALAR,
     SPARSE_FORMULA_SPLADE,
@@ -184,6 +191,8 @@ __all__ = [
     "RerankResult",
     "Reranker",
     "RerankerTuningResult",
+    "RouterBusyError",
+    "RouterClosedError",
     "SparseEmbedding",
     "SparseTextEmbedding",
     "SparseTuningResult",
