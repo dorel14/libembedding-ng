@@ -72,6 +72,13 @@ add_executable(test_struct_sizes test_struct_sizes.cpp)
 target_link_libraries(test_struct_sizes PRIVATE libembedding)
 add_test(NAME test_struct_sizes COMMAND test_struct_sizes)
 
+# Out-of-range enum values at the C API boundary must be rejected, not read
+# (no network, no model). Also add it to every explicit --target list in
+# .github/workflows/tests.yml and release.yml.
+add_executable(test_enum_validation test_enum_validation.cpp)
+target_link_libraries(test_enum_validation PRIVATE libembedding)
+add_test(NAME test_enum_validation COMMAND test_enum_validation)
+
 # Compile-and-resolve checks for the public C++ wrappers (no network).
 # The C++ wrapper layer had no coverage at all, which is how a circular include,
 # two missing include guards and a read through an opaque handle all survived:
@@ -202,13 +209,13 @@ add_test(NAME test_text_max_length COMMAND test_text_max_length)
 
 # On Windows, copy runtime DLLs (onnxruntime, libcurl) next to test executables
 if(WIN32)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_enum_validation test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
         if(TARGET ${_t})
             copy_runtime_dlls(${_t})
         endif()
     endforeach()
 elseif(ONNXRuntime_LIBRARIES)
-    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
+    foreach(_t test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_struct_sizes test_enum_validation test_cpp_wrappers test_quantization_auto test_autotune_core test_gguf_inspect test_sparse_gguf test_tokenizer test_tokenizer_fidelity test_concurrency test_repeated_calls integration_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length)
         if(TARGET ${_t})
             copy_runtime_libs(${_t})
         endif()

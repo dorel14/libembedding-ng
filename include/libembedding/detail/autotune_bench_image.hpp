@@ -17,6 +17,7 @@
 
 #ifndef LIBEMBEDDING_NO_IMAGE
 #include "libembedding/autotuner.h"
+#include "enum_check_autotune.hpp"
 #include "libembedding/image_embedding.h"
 #include "libembedding/model_registry.h"
 #include "autotune_cache.hpp"
@@ -234,6 +235,10 @@ extern "C" lembed_status_t lembed_image_autotune(const char* model_name,
                                                  lembed_image_tuning_result_t* result) {
     if (!result) return LEMBED_ERROR_INVALID_ARGUMENT;
     *result = lembed_image_tuning_result_t{0};
+    {
+        lembed_status_t es = check_autotune_mode(mode);
+        if (es != LEMBED_OK) return es;
+    }
     return autotune_guard("image_autotune", [&]() {
         lembed_unified_tuning_result_t u;
         lembed_status_t s = image_autotune_run(model_name, mode, image_default_objective(), 0.0, &u);

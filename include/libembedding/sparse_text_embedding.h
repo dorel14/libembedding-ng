@@ -147,6 +147,7 @@ lembed_status_t lembed_sparse_text_embedding_set_max_batch_tokens(
 
 #include "model_registry.h"
 #include "downloader.h"
+#include "detail/enum_check.hpp"
 #include "detail/model_loader_impl.hpp"
 #include "detail/onnx_session_impl.hpp"
 #include "detail/tokenizer_impl.hpp"
@@ -235,6 +236,10 @@ lembed_status_t lembed_sparse_text_embedding_create(
         const lembed_sparse_options_t* options,
         lembed_sparse_embedding_ctx_t** out) {
     if (!options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_sparse_options(options, true);
+        if (es != LEMBED_OK) return es;
+    }
 
     {
         lembed_status_t ps = lembed::detail::onnx_provider_precheck((int)options->provider);
@@ -302,6 +307,10 @@ lembed_status_t lembed_sparse_text_embedding_create_from_path(
         const lembed_sparse_options_t* options,
         lembed_sparse_embedding_ctx_t** out) {
     if (!dir_path || !dir_path[0] || !options || !out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_sparse_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     /* A file, not a directory of ONNX artefacts. Routing on the extension means
      * a caller that only knows a path does not have to know the backend, and it

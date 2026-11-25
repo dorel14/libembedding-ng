@@ -46,6 +46,10 @@ lembed_status_t lembed_reranker_create_from_gguf_path(
         lembed_reranker_t** out) {
     if (!gguf_path || !gguf_path[0] || !options || !out)
         return LEMBED_ERROR_INVALID_ARGUMENT;
+    {
+        lembed_status_t es = lembed::detail::check_reranker_options(options, false);
+        if (es != LEMBED_OK) return es;
+    }
 
     lembed_reranker_t* ctx = nullptr;
     char* resolved_path = nullptr;
