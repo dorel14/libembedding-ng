@@ -127,7 +127,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v2
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
       - name: Run Python tests
         env:
@@ -137,6 +137,8 @@ jobs:
           cd python
           pip install -e .[dev]
           pip install pytest-timeout
+          # Prefetch with retries (no-op on a cache hit), see build-wheel.yml.
+          python ../scripts/ci_prefetch_models.py
           # 600 s: network tests download models of several hundred MB.
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
 
@@ -146,7 +148,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v2
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
   # -----------------------------------------------------------------------
   # 3) Determine the next version and create the release (AFTER tests pass)
