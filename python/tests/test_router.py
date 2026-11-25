@@ -469,7 +469,7 @@ def test_explicit_threads_override(fake_router):
 
 
 def test_budget_overrun_warns(fake_router):
-    with pytest.warns(ResourceWarning, match="exceeds"):
+    with pytest.warns(RuntimeWarning, match="exceeds"):
         r = fake_router(cores=4, sessions=2, threads=4)
     r.close()
 
@@ -477,7 +477,7 @@ def test_budget_overrun_warns(fake_router):
 def test_presets_stay_within_budget(fake_router, recwarn):
     for policy in ("latency", "balanced", "indexing"):
         fake_router(cores=6, policy=policy).close()
-    assert not [w for w in recwarn if issubclass(w.category, ResourceWarning)]
+    assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]
 
 
 @pytest.mark.parametrize(

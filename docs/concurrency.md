@@ -88,7 +88,7 @@ Banc T32 : i7-1065G7 (4 cœurs physiques), ONNX Runtime 1.31.0, bge-small et Min
 
 ### Budget de threads
 
-Si `sessions × threads` dépasse P, le constructeur émet un `ResourceWarning` (pas une erreur). Les préréglages ne le dépassent jamais.
+Si `sessions × threads` dépasse P, le constructeur émet un `RuntimeWarning` (pas une erreur). Les préréglages ne le dépassent jamais.
 
 ## File d'attente et contre-pression
 

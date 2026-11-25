@@ -238,7 +238,7 @@ router.close()                                  # or: await router.aclose()
 
 GGUF models use 1 thread per session. Numbers come from one machine (i7-1065G7,
 4 physical cores); other core counts and ARM are assumed, not measured. A
-`ResourceWarning` is emitted when `sessions x threads` exceeds P.
+`RuntimeWarning` is emitted when `sessions x threads` exceeds P.
 
 `aembed` cancellation: while waiting, the request is withdrawn; during the
 native call `CancelledError` is raised at once but the call cannot be

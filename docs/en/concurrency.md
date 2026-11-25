@@ -87,7 +87,7 @@ T32 benchmark: i7-1065G7 (4 physical cores), ONNX Runtime 1.31.0, bge-small and 
 
 ### Thread budget
 
-If `sessions x threads` exceeds P, the constructor emits a `ResourceWarning` (not an error). Presets never exceed it.
+If `sessions x threads` exceeds P, the constructor emits a `RuntimeWarning` (not an error). Presets never exceed it.
 
 ## Queueing and backpressure
 

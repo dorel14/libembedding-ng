@@ -507,7 +507,8 @@ class TextEmbeddingRouter:
             ``cache_size`` is per session: the LRU cache is not shared.
 
     Raises:
-        ResourceWarning: (warning) sessions x threads exceeds P.
+        RuntimeWarning: (warning) sessions x threads exceeds P. Not a
+            ``ResourceWarning``: Python hides those by default.
 
     Example::
 
@@ -561,7 +562,7 @@ class TextEmbeddingRouter:
                 f"TextEmbeddingRouter: {n_sessions} sessions x {n_threads} threads "
                 f"= {n_sessions * n_threads} exceeds the {cores} physical cores; "
                 "oversubscription usually lowers throughput.",
-                ResourceWarning,
+                RuntimeWarning,
                 stacklevel=2,
             )
 
