@@ -10,7 +10,9 @@ SPDX-License-Identifier: MIT
 
 import threading
 import time
+from typing import ClassVar
 
+import numpy as np
 import pytest
 
 from libembedding.exceptions import LembedError, RouterBusyError, RouterClosedError
@@ -359,3 +361,260 @@ def test_close_is_idempotent_and_closes_idle_sessions():
     router.close()
     assert all(s.closed for s in sessions)
     assert router.closed
+
+
+# ---------------------------------------------------------------------------
+# TextEmbeddingRouter (fake TextEmbedding, hermetic)
+# ---------------------------------------------------------------------------
+
+
+class FakeModel:
+    """Stand-in for TextEmbedding recording its construction arguments."""
+
+    instances: ClassVar[list] = []
+
+    def __init__(self, model_name, **kwargs):
+        self.model_name = model_name
+        self.kwargs = kwargs
+        self.dim = 4
+        self.closed = False
+        self.calls = []
+        FakeModel.instances.append(self)
+
+    def embed(self, texts, **kwargs):
+        assert not self.closed
+        self.calls.append((list(texts), kwargs))
+        return np.full((len(texts), self.dim), float(len(texts)), dtype=np.float32)
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def fake_router(monkeypatch):
+    """Router factory on FakeModel with a pinned physical core count."""
+    import libembedding.router as router_mod
+
+    FakeModel.instances = []
+    monkeypatch.setattr(router_mod, "TextEmbedding", FakeModel)
+
+    def make(cores=4, model="m", **kwargs):
+        monkeypatch.setattr(router_mod, "_physical_cores", lambda: cores)
+        return router_mod.TextEmbeddingRouter(model, **kwargs)
+
+    yield make
+    for m in FakeModel.instances:
+        m.close()
+
+
+@pytest.mark.parametrize(
+    ("policy", "cores", "expected"),
+    [
+        ("latency", 4, (1, 4)),
+        ("balanced", 4, (2, 2)),
+        ("indexing", 4, (4, 1)),
+        ("latency", 16, (1, 16)),
+        ("balanced", 16, (2, 8)),
+        ("indexing", 16, (8, 1)),  # capped at 8 sessions
+        ("balanced", 1, (1, 1)),  # P/2 < 1: falls back on latency
+        ("balanced", 2, (2, 1)),
+        ("indexing", 1, (1, 1)),
+    ],
+)
+def test_onnx_presets(fake_router, policy, cores, expected):
+    r = fake_router(cores=cores, policy=policy)
+    assert (r.sessions, r.threads) == expected
+    assert r.policy == policy
+    assert all(m.kwargs["threads"] == expected[1] for m in FakeModel.instances)
+    r.close()
+
+
+@pytest.mark.parametrize(
+    ("policy", "cores", "sessions"),
+    [
+        ("latency", 4, 1),
+        ("balanced", 4, 2),
+        ("balanced", 5, 3),
+        ("indexing", 4, 4),
+        ("indexing", 32, 8),
+    ],
+)
+def test_gguf_presets_use_one_thread_per_session(
+    fake_router, policy, cores, sessions
+):
+    r = fake_router(cores=cores, model="x/model.gguf", policy=policy)
+    assert (r.sessions, r.threads) == (sessions, 1)
+    r.close()
+
+
+def test_default_policy_is_latency(fake_router):
+    r = fake_router(cores=4)
+    assert (r.policy, r.sessions, r.threads) == ("latency", 1, 4)
+    r.close()
+
+
+def test_sessions_override_disables_policy(fake_router):
+    r = fake_router(cores=8, sessions=4)
+    assert r.policy is None
+    assert (r.sessions, r.threads) == (4, 2)
+    r.close()
+
+
+def test_explicit_threads_override(fake_router):
+    r = fake_router(cores=8, policy="balanced", threads=3)
+    assert (r.sessions, r.threads) == (2, 3)
+    r.close()
+
+
+def test_budget_overrun_warns(fake_router):
+    with pytest.warns(ResourceWarning, match="exceeds"):
+        r = fake_router(cores=4, sessions=2, threads=4)
+    r.close()
+
+
+def test_presets_stay_within_budget(fake_router, recwarn):
+    for policy in ("latency", "balanced", "indexing"):
+        fake_router(cores=6, policy=policy).close()
+    assert not [w for w in recwarn if issubclass(w.category, ResourceWarning)]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"policy": "fast"},
+        {"policy": None},
+        {"sessions": 0},
+        {"threads": 0},
+        {"sessions": True},
+        {"max_queue": -1},
+        {"acquire_timeout": 0},
+    ],
+)
+def test_invalid_arguments(fake_router, kwargs):
+    with pytest.raises(ValueError):
+        fake_router(**kwargs)
+    assert FakeModel.instances == []
+
+
+def test_failed_construction_closes_built_sessions(monkeypatch):
+    import libembedding.router as router_mod
+
+    FakeModel.instances = []
+    built = []
+
+    def flaky(model_name, **kwargs):
+        if len(built) == 2:
+            raise LembedError(7, "model not found")
+        m = FakeModel(model_name, **kwargs)
+        built.append(m)
+        return m
+
+    monkeypatch.setattr(router_mod, "TextEmbedding", flaky)
+    monkeypatch.setattr(router_mod, "_physical_cores", lambda: 4)
+    with pytest.raises(LembedError):
+        router_mod.TextEmbeddingRouter("m", sessions=3, threads=1)
+    assert len(built) == 2
+    assert all(m.closed for m in built)
+
+
+def test_session_kwargs_and_download_progress(fake_router):
+    r = fake_router(cores=4, policy="indexing", cache_size=8, batch_size=16)
+    shown = [m.kwargs.get("show_download_progress") for m in FakeModel.instances]
+    assert shown == [None, False, False, False]
+    assert all(m.kwargs["cache_size"] == 8 for m in FakeModel.instances)
+    assert all(m.kwargs["batch_size"] == 16 for m in FakeModel.instances)
+    r.close()
+
+
+def test_embed_stats_and_context_manager(fake_router):
+    with fake_router(cores=2, policy="indexing") as r:
+        out = r.embed(["a", "b", "c"], normalized=True, batch_size=2)
+        assert out.shape == (3, r.dim)
+        used = [m for m in FakeModel.instances if m.calls]
+        assert used[0].calls == [(["a", "b", "c"], {"normalized": True, "batch_size": 2})]
+        st = r.stats()
+        assert st.sessions == 2
+        assert st.in_flight == 0
+        assert st.completed == 1
+        assert "TextEmbeddingRouter" in repr(r)
+    assert all(m.closed for m in FakeModel.instances)
+    with pytest.raises(RouterClosedError):
+        r.embed(["x"])
+
+
+def test_embed_default_and_per_call_timeout(fake_router):
+    r = fake_router(cores=2, policy="latency", acquire_timeout=0.05)
+    gate, started = threading.Event(), threading.Event()
+    holder = _hold(r._core, gate, started)
+    with pytest.raises(TimeoutError):
+        r.embed(["a"])
+    with pytest.raises(TimeoutError):
+        r.embed(["a"], timeout=0.01)
+    gate.set()
+    holder.join()
+    assert r.stats().timeouts == 2
+    r.close()
+
+
+def test_embed_concurrent_threads(fake_router):
+    r = fake_router(cores=4, policy="indexing")
+    results = []
+
+    def work(n):
+        for _ in range(20):
+            results.append(r.embed(["t"] * n).shape)
+
+    threads = [threading.Thread(target=work, args=(1 + i % 3,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(results) == 160
+    assert r.stats().in_flight == 0
+    r.close()
+
+
+# ---------------------------------------------------------------------------
+# Integration: real model from the cache (marked `network` by the fixture)
+# ---------------------------------------------------------------------------
+
+
+def _min_cosine(a, b):
+    a = a / np.linalg.norm(a, axis=1, keepdims=True)
+    b = b / np.linalg.norm(b, axis=1, keepdims=True)
+    return float((a * b).sum(axis=1).min())
+
+
+@pytest.mark.parametrize("policy", ["balanced", "indexing"])
+def test_router_matches_single_session(bge_small, policy):
+    from libembedding import TextEmbeddingRouter
+
+    ref = bge_small()
+    texts = [f"sentence number {i} about embeddings and routers" for i in range(8)]
+    try:
+        expected = ref.embed(texts)
+        with TextEmbeddingRouter(
+            ref.model_name, policy=policy, offline=True, show_download_progress=False
+        ) as router:
+            assert router.dim == ref.dim
+            for batch in (1, 8):
+                got = router.embed(texts[:batch])
+                assert got.shape == (batch, ref.dim)
+                assert _min_cosine(got, expected[:batch]) >= 0.9999
+
+            # Concurrent requests land on different sessions: same vectors.
+            outs = [None] * 8
+
+            def work(i):
+                outs[i] = router.embed(texts[i : i + 1])
+
+            threads = [threading.Thread(target=work, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            for i, out in enumerate(outs):
+                assert _min_cosine(out, expected[i : i + 1]) >= 0.9999
+            assert router.stats().in_flight == 0
+    finally:
+        ref.close()

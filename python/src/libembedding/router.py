@@ -18,16 +18,23 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
+import os
 import threading
 import time
+import warnings
 from collections import deque
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as _FutureTimeoutError
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
+import numpy as np  # pyright: ignore[reportMissingImports]
+
+from .benchmark import detect_hardware
 from .exceptions import RouterBusyError, RouterClosedError
+from .models import _is_gguf_model
+from .text_embedding import TextEmbedding
 
 _T = TypeVar("_T")
 _R = TypeVar("_R")
@@ -290,3 +297,230 @@ class _SessionRouter(Generic[_T]):
                 self._cond.wait_for(lambda: self._open == 0)
         if first_error is not None:
             raise first_error
+
+
+# ---------------------------------------------------------------------------
+# Public router
+# ---------------------------------------------------------------------------
+
+_MAX_SESSIONS = 8
+_POLICIES = ("latency", "balanced", "indexing")
+
+
+def _physical_cores() -> int:
+    """Physical core count P used to size the presets (never < 1)."""
+    try:
+        cores = int(detect_hardware().physical_cores)
+    except Exception:  # noqa: BLE001 - detection must never block construction
+        cores = 0
+    if cores < 1:
+        # Logical count halved: assume SMT. Over-counting would oversubscribe.
+        cores = max(1, (os.cpu_count() or 2) // 2)
+    return cores
+
+
+def _preset(policy: str, cores: int, gguf: bool) -> tuple[int, int]:
+    """Return ``(sessions, threads)`` for a policy on ``cores`` physical cores.
+
+    ONNX: latency 1 x P, balanced 2 x floor(P/2), indexing min(P, 8) x 1.
+    GGUF (one thread per session): latency 1, balanced ceil(P/2), indexing
+    min(P, 8) sessions. Sessions are capped at 8 and sessions x threads never
+    exceeds P.
+    """
+    if gguf:
+        sessions = {
+            "latency": 1,
+            "balanced": (cores + 1) // 2,
+            "indexing": cores,
+        }[policy]
+        return max(1, min(sessions, _MAX_SESSIONS)), 1
+    if policy == "latency":
+        return 1, cores
+    if policy == "balanced":
+        if cores // 2 < 1:
+            return 1, cores
+        return 2, cores // 2
+    return max(1, min(cores, _MAX_SESSIONS)), 1
+
+
+class TextEmbeddingRouter:
+    """Serve concurrent embedding requests from several ``TextEmbedding`` sessions.
+
+    A native context runs one call at a time, so a server that embeds from many
+    threads (or asyncio tasks) needs several sessions. The router owns them and
+    hands each request to a free one in strict arrival order. When all sessions
+    are busy the request waits in a bounded FIFO. This differs from
+    ``TextEmbeddingPool``, which splits *one* large call across workers: the
+    router keeps each call whole and runs many calls at once.
+
+    Args:
+        model_name: Same as ``TextEmbedding``.
+        policy: Preset that sizes sessions and threads from the physical core
+            count P: ``"latency"`` (1 session x P threads, the default),
+            ``"balanced"`` (2 x P/2) or ``"indexing"`` (min(P, 8) x 1). GGUF
+            models always use 1 thread per session. Ignored when ``sessions``
+            is given.
+        sessions: Explicit number of sessions (disables ``policy``).
+        threads: Intra-op threads per session. Defaults to the preset value, or
+            P // sessions when ``sessions`` is given (1 for GGUF).
+        max_queue: Maximum waiting requests; one more raises
+            ``RouterBusyError`` at once. 0 = unbounded.
+        acquire_timeout: Default maximum wait for a session, in seconds
+            (None = wait forever). Raises ``TimeoutError``.
+        **session_kwargs: Passed to every ``TextEmbedding`` (``batch_size``,
+            ``cache_size``, ``quantization``, ``backend``...). Note that
+            ``cache_size`` is per session: the LRU cache is not shared.
+
+    Raises:
+        ResourceWarning: (warning) sessions x threads exceeds P.
+
+    Example::
+
+        with TextEmbeddingRouter("BAAI/bge-small-en-v1.5") as router:
+            vectors = router.embed(["a query"])          # from any thread
+            vectors = await router.aembed(["a query"])   # from asyncio
+    """
+
+    def __init__(
+        self,
+        model_name: str = "BAAI/bge-small-en-v1.5",
+        *,
+        policy: Literal["latency", "balanced", "indexing"] | None = "latency",
+        sessions: int | None = None,
+        threads: int | None = None,
+        max_queue: int = 64,
+        acquire_timeout: float | None = None,
+        **session_kwargs: Any,
+    ) -> None:
+        for name, value in (("sessions", sessions), ("threads", threads)):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise ValueError(f"{name} must be an int >= 1, got {value!r}")
+        if isinstance(max_queue, bool) or not isinstance(max_queue, int) or max_queue < 0:
+            raise ValueError(f"max_queue must be an int >= 0, got {max_queue!r}")
+        if acquire_timeout is not None and acquire_timeout <= 0:
+            raise ValueError(f"acquire_timeout must be > 0, got {acquire_timeout!r}")
+        if sessions is None and policy not in _POLICIES:
+            raise ValueError(
+                f"policy must be one of {_POLICIES} (or give sessions=), got {policy!r}"
+            )
+
+        gguf = _is_gguf_model(model_name) or str(
+            session_kwargs.get("backend", "auto")
+        ).lower() in ("llama", "llamacpp", "llama.cpp")
+        cores = _physical_cores()
+        if sessions is None:
+            assert policy is not None
+            n_sessions, preset_threads = _preset(policy, cores, gguf)
+            self._policy: str | None = policy
+        else:
+            n_sessions = sessions
+            preset_threads = 1 if gguf else max(1, cores // n_sessions)
+            self._policy = None
+        n_threads = threads if threads is not None else preset_threads
+        if gguf and threads is None:
+            n_threads = 1
+        if n_sessions * n_threads > cores:
+            warnings.warn(
+                f"TextEmbeddingRouter: {n_sessions} sessions x {n_threads} threads "
+                f"= {n_sessions * n_threads} exceeds the {cores} physical cores; "
+                "oversubscription usually lowers throughput.",
+                ResourceWarning,
+                stacklevel=2,
+            )
+
+        models: list[TextEmbedding] = []
+        try:
+            for i in range(n_sessions):
+                kwargs = dict(session_kwargs)
+                kwargs["threads"] = n_threads
+                if i > 0:
+                    kwargs["show_download_progress"] = False
+                models.append(TextEmbedding(model_name, **kwargs))
+        except BaseException:
+            for m in models:
+                m.close()
+            raise
+
+        self._sessions = n_sessions
+        self._threads = n_threads
+        self._dim = models[0].dim
+        self._core: _SessionRouter[TextEmbedding] = _SessionRouter(
+            models, max_queue=max_queue, acquire_timeout=acquire_timeout
+        )
+
+    # ------------------------------------------------------------ properties
+
+    @property
+    def dim(self) -> int:
+        """Embedding dimension."""
+        return self._dim
+
+    @property
+    def sessions(self) -> int:
+        """Number of ``TextEmbedding`` sessions."""
+        return self._sessions
+
+    @property
+    def threads(self) -> int:
+        """Intra-op threads per session."""
+        return self._threads
+
+    @property
+    def policy(self) -> str | None:
+        """Preset in use, or None when ``sessions`` was given explicitly."""
+        return self._policy
+
+    def stats(self) -> RouterStats:
+        """Snapshot of in-flight, queued, rejected and timed-out requests."""
+        return self._core.stats()
+
+    # ------------------------------------------------------------------ sync
+
+    def embed(
+        self, texts: list[str], *, timeout: float | None = None, **embed_kwargs: Any
+    ) -> np.ndarray:
+        """Embed texts on the next free session, in arrival order.
+
+        Runs in the calling thread; safe to call from many threads at once.
+
+        Args:
+            texts: Strings to embed. The whole list runs on one session.
+            timeout: Maximum wait for a session in seconds (None = the
+                ``acquire_timeout`` of the router). The native call itself is
+                not interruptible and not covered by this delay.
+            **embed_kwargs: ``batch_size``, ``dtype``, ``normalized`` as in
+                ``TextEmbedding.embed``.
+
+        Returns:
+            Array of shape ``(len(texts), dim)``.
+
+        Raises:
+            RouterBusyError: ``max_queue`` requests are already waiting.
+            RouterClosedError: The router is closed.
+            TimeoutError: No session became free within the delay.
+        """
+        return self._core.run(lambda m: m.embed(texts, **embed_kwargs), timeout)
+
+    def close(self, *, wait: bool = True) -> None:
+        """Close the router and release every session.
+
+        New requests raise ``RouterClosedError`` and queued requests are woken
+        with it. A session is never closed while a call runs on it. With
+        ``wait=True`` (default) this blocks until in-flight calls finish and all
+        sessions are closed. Idempotent.
+        """
+        self._core.close(wait=wait)
+
+    def __enter__(self) -> TextEmbeddingRouter:  # noqa: PYI034 - no Self on 3.9
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def __repr__(self) -> str:
+        return (
+            f"TextEmbeddingRouter(sessions={self._sessions}, "
+            f"threads={self._threads}, dim={self._dim}, policy={self._policy!r})"
+        )

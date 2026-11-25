@@ -67,6 +67,7 @@ from .reranker import (
     reranker_autotune_constrained,
     reranker_autotune_custom,
 )
+from .router import RouterStats, TextEmbeddingRouter
 from .similarity import (
     cosine_similarity,
     dot_product,
@@ -193,12 +194,14 @@ __all__ = [
     "RerankerTuningResult",
     "RouterBusyError",
     "RouterClosedError",
+    "RouterStats",
     "SparseEmbedding",
     "SparseTextEmbedding",
     "SparseTuningResult",
     "Stats",
     "TextEmbedding",
     "TextEmbeddingPool",
+    "TextEmbeddingRouter",
     "TuningResult",
     "UnifiedTuningResult",
     "auto_select_model",
