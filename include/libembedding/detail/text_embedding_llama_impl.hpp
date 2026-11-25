@@ -168,8 +168,16 @@ static inline void lembed__llama_embed_batch(
         const char* const* texts,
         int num_texts,
         float* result_data) {
-    for (int i = 0; i < num_texts; i++) {
-        lembed__llama_embed_single(ctx, texts[i], result_data + (size_t)i * ctx->dim);
+    /* Texts share llama_encode() calls (one sequence per text). */
+    if (ctx->llama.pool.num_sessions() > 0) {
+        std::vector<std::string> v(texts, texts + num_texts);
+        auto embs = ctx->llama.pool.embed_batch(v);
+        for (int i = 0; i < num_texts; i++) {
+            std::memcpy(result_data + (size_t)i * ctx->dim, embs[(size_t)i].data(),
+                        (size_t)ctx->dim * sizeof(float));
+        }
+    } else {
+        ctx->llama.session.embed_texts(texts, num_texts, result_data);
     }
     lembed::detail::l2_normalize(result_data, num_texts, ctx->dim);
 }
