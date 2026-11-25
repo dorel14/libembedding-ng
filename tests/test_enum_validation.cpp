@@ -90,6 +90,20 @@ static NO_ENUM_SAN void test_registry() {
         EXPECT_INVALID(lembed_get_reranker_model_info(bad<lembed_reranker_model_t>(v), &info),
                        "get_reranker_model_info", v);
 
+        EXPECT_INVALID(lembed_get_multivector_model_info(bad<lembed_multivector_model_t>(v), &info),
+                       "get_multivector_model_info", v);
+
+        /* A registry name as model_dir: the provider check must fire before
+         * any registry lookup, so no download is attempted. */
+        {
+            lembed_multivector_options_t mo = lembed_multivector_options_default();
+            mo.model_dir = "answerdotai/answerai-colbert-small-v1";
+            set_raw(mo.provider, v);
+            lembed_multivector_t* mv = nullptr;
+            EXPECT_BAD_PROVIDER(lembed_multivector_create(&mo, &mv), "multivector_create.provider", v);
+            if (mv != nullptr) { std::fprintf(stderr, "FAIL: multivector handle created\n"); failures++; }
+        }
+
         char* dir = nullptr;
         EXPECT_INVALID(lembed_ensure_text_model(bad<lembed_text_model_t>(v), nullptr, 0, 1, &dir),
                        "ensure_text_model", v);

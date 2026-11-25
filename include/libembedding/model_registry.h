@@ -579,8 +579,9 @@ lembed_status_t lembed_get_reranker_model_info(lembed_reranker_model_t model, le
 }
 
 lembed_status_t lembed_get_multivector_model_info(lembed_multivector_model_t model, lembed_model_info_t* out) {
-    if ((int)model < 0 || (int)model >= LEMBED_MULTIVECTOR_MODEL_COUNT || !out)
-        return LEMBED_ERROR_INVALID_ARGUMENT;
+    if (!out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_status_t s = lembed::detail::check_multivector_model(model);
+    if (s != LEMBED_OK) return s;
     *out = lembed__multivector_models[(int)model];
     return LEMBED_OK;
 }

@@ -28,6 +28,7 @@ def _message():
         "lembed_get_sparse_model_info",
         "lembed_get_image_model_info",
         "lembed_get_reranker_model_info",
+        "lembed_get_multivector_model_info",
     ],
 )
 def test_registry_rejects_out_of_range_model(getter, value):
@@ -56,6 +57,21 @@ def test_unknown_provider_is_unsupported_not_cpu(value):
     opts.provider = value
     status = lib.lembed_reranker_create(opts, out)
     assert status == lib.LEMBED_ERROR_UNSUPPORTED
+    assert "unknown lembed_execution_provider_t" in _message()
+
+
+@pytest.mark.parametrize("value", BAD_VALUES)
+def test_multivector_create_unknown_provider_is_unsupported(value):
+    # model_dir is a registry name: the provider check must fire before any
+    # lookup or download.
+    out = ffi.new("lembed_multivector_t **")
+    opts = ffi.new("lembed_multivector_options_t *", lib.lembed_multivector_options_default())
+    model_dir = ffi.new("char[]", b"answerdotai/answerai-colbert-small-v1")
+    opts.model_dir = model_dir
+    opts.provider = value
+    status = lib.lembed_multivector_create(opts, out)
+    assert status == lib.LEMBED_ERROR_UNSUPPORTED
+    assert out[0] == ffi.NULL
     assert "unknown lembed_execution_provider_t" in _message()
 
 
