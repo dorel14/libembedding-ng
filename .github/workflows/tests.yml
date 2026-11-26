@@ -31,10 +31,10 @@ jobs:
             name: windows-x86_64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python (for cffi build deps)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -268,7 +268,7 @@ jobs:
       # whose targets are not built, which the steps above must not see.
       - name: Cache MiniLM GGUF (dense llama.cpp test)
         if: matrix.name == 'linux-x86_64'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/gguf-models
           key: gguf-minilm-l6-q8_0-v1
