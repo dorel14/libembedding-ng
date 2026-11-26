@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.16.3
+Version: 1.16.6
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -3211,6 +3211,22 @@ pool.close()
 | **8 workers × 1 thread** | **~360** | **3.6x** |
 
 > **Golden rule**: `workers × threads ≤ CPU core count`
+
+**Count physical cores, not logical threads.** With hyperthreading (SMT), a
+4-core processor reports 8 logical threads, but two threads on one core share its
+vector units. Measured on an i7-1065G7 (4 cores, 8 logical threads) with ONNX
+Runtime: going from 4 to 8 threads loses 20 to 30 % of throughput instead of
+gaining any. Keep `workers × threads` at or below the number of **physical
+cores**.
+
+Defaults when `threads` is not set (`threads=0`):
+
+- **ONNX**: the library does not set a thread count and lets ONNX Runtime
+  choose. On the measurement machine, that choice is already right (4).
+- **GGUF (llama.cpp)**: a fixed 4 threads, whatever the processor. On a machine
+  with 2 physical cores, or with several workers, pass `threads=` explicitly.
+- **Autotune and `TextEmbeddingRouter`**: they start from the detected number of
+  physical cores, so they already follow this rule.
 
 ---
 
@@ -7522,6 +7538,23 @@ pool.close()
 
 > **Règle d'or** : `workers × threads ≤ nombre de cœurs CPU`
 
+**Comptez les cœurs physiques, pas les threads logiques.** Avec l'hyperthreading
+(SMT), un processeur 4 cœurs annonce 8 threads logiques, mais deux threads d'un
+même cœur se partagent ses unités de calcul vectoriel. Mesuré sur un i7-1065G7
+(4 cœurs, 8 threads logiques) avec ONNX Runtime : passer de 4 à 8 threads fait
+perdre 20 à 30 % de débit au lieu d'en gagner. Le produit `workers × threads`
+doit donc rester inférieur ou égal au nombre de **cœurs physiques**.
+
+Valeurs par défaut quand `threads` n'est pas fixé (`threads=0`) :
+
+- **ONNX** : la bibliothèque ne fixe pas le nombre de threads et laisse ONNX
+  Runtime choisir. Sur la machine de mesure, ce choix est déjà correct (4).
+- **GGUF (llama.cpp)** : 4 threads fixes, quel que soit le processeur. Sur une
+  machine à 2 cœurs physiques, ou avec plusieurs workers, passez `threads=`
+  explicitement.
+- **Autotune et `TextEmbeddingRouter`** : ils partent du nombre de cœurs
+  physiques détecté, donc ils appliquent déjà cette règle.
+
 ---
 
 ## Auto-Tuning
@@ -10868,6 +10901,204 @@ Référence pylate 1.6.0, `answerai-colbert-small-v1`, 3 requêtes et 3 document
 
 ---
 
+## DOCUMENT (FR): Requêtes concurrentes : `TextEmbeddingRouter`
+Source: https://github.com/dorel14/libembedding/blob/main/docs/concurrency.md
+Rendu: https://dorel14.github.io/libembedding-ng/concurrency.html
+
+# Requêtes concurrentes : `TextEmbeddingRouter`
+
+> **English:** [Concurrent requests](en/concurrency.html)
+
+Un contexte natif n'exécute **qu'un appel à la fois** (`call_mutex`). Un serveur qui embarque des textes depuis plusieurs threads ou tâches `asyncio` a donc besoin de plusieurs sessions et d'un ordonnanceur. `TextEmbeddingRouter` fournit les deux : N sessions `TextEmbedding`, une file FIFO stricte bornée, un délai d'attente, des préréglages issus de mesures, et une API `asyncio`.
+
+Disponible en Python uniquement (aucune API C), pour le **texte dense** (ONNX et GGUF), à partir de la 1.17.
+
+## Quand l'utiliser
+
+| Besoin | Outil |
+|---|---|
+| Plusieurs requêtes courtes (1 à 8 textes) en parallèle : serveur web, API | **`TextEmbeddingRouter`** |
+| Un seul gros lot à répartir sur plusieurs cœurs | `TextEmbeddingPool` (inchangé) |
+| Un seul appelant | `TextEmbedding` |
+
+`TextEmbeddingPool` découpe *un* appel en morceaux. Le router, lui, garde chaque appel entier et en exécute plusieurs en même temps.
+
+## Démarrage rapide
+
+```python
+from libembedding import TextEmbeddingRouter
+
+with TextEmbeddingRouter("BAAI/bge-small-en-v1.5") as router:
+    vectors = router.embed(["une requête"])      # depuis n'importe quel thread
+    print(vectors.shape, router.sessions, router.threads)
+```
+
+Depuis `asyncio` :
+
+```python
+import asyncio
+from libembedding import TextEmbeddingRouter
+
+async def main():
+    async with TextEmbeddingRouter("BAAI/bge-small-en-v1.5") as router:
+        vectors = await router.aembed(["une requête"])
+
+asyncio.run(main())
+```
+
+## Paramètres
+
+| Paramètre | Défaut | Rôle |
+|---|---|---|
+| `model_name` | `BAAI/bge-small-en-v1.5` | Comme `TextEmbedding` |
+| `policy` | `"latency"` | Préréglage (voir ci-dessous) : `"latency"`, `"balanced"`, `"indexing"` |
+| `sessions` | `None` | Nombre de sessions explicite (désactive `policy`) |
+| `threads` | `None` | Threads intra-op par session |
+| `max_queue` | `64` | Attentes maximales ; la suivante lève `RouterBusyError` tout de suite. `0` = illimité |
+| `acquire_timeout` | `None` | Attente maximale d'une session en secondes (`TimeoutError`) ; `None` = indéfiniment |
+| `**session_kwargs` | | Transmis à chaque `TextEmbedding` (`batch_size`, `cache_size`, `quantization`, `backend`…) |
+
+`embed(texts, *, timeout=None, **kwargs)` et `aembed(...)` acceptent `batch_size`, `dtype` et `normalized` comme `TextEmbedding.embed`. `timeout` remplace `acquire_timeout` pour cet appel et ne couvre que l'**attente d'une session**, pas l'appel natif.
+
+## Préréglages
+
+P est le nombre de **cœurs physiques** (`detect_hardware().physical_cores` ; à défaut, la moitié des cœurs logiques). Les sessions sont plafonnées à 8.
+
+| Policy | ONNX (sessions × threads) | Usage |
+|---|---|---|
+| `latency` (défaut) | 1 × P | Serveur peu chargé, latence minimale |
+| `balanced` | 2 × ⌊P/2⌋ | Serveur chargé |
+| `indexing` | min(P, 8) × 1 | Indexation par lots, débit maximal |
+
+Pour les modèles **GGUF**, chaque session utilise 1 thread et le nombre de sessions vaut 1, ⌈P/2⌉ ou min(P, 8) selon le préréglage.
+
+### Ce qui a été mesuré
+
+Banc T32 : i7-1065G7 (4 cœurs physiques), ONNX Runtime 1.31.0, bge-small et MiniLM-L6 FP32, 3 passes entrelacées. Références prises par rapport à 1×4 (une session, 4 threads) :
+
+| Configuration | Débit à concurrence ≥ 4 | p95, batch 1, bge | RSS (bge) |
+|---|---|---|---|
+| 1×4 (`latency`) | référence | 9 ms | 243 Mo |
+| 2×2 (`balanced`) | +25 à 27 % (batch 1) | 13 à 15 ms | 382 Mo |
+| 4×1 (`indexing`) | +50 à 70 % (batch 1), +21 à 34 % (batch 8) | 24 ms | 658 Mo |
+
+- 1×8 (plus de threads que de cœurs physiques) **perd 25 à 30 %** : c'est pourquoi les préréglages ne dépassent jamais P.
+- Les sessions donnent des vecteurs identiques (écart 0).
+- La mémoire croît à peu près linéairement avec le nombre de sessions (ORT ne partage pas les poids).
+
+> **Limites de ces chiffres.** Une seule machine, 4 cœurs. Les valeurs pour P ≠ 4, l'ARM et les préréglages GGUF sont **supposées, pas mesurées**. Utilisez `sessions=` / `threads=` pour imposer votre configuration, et mesurez sur votre matériel.
+
+### Budget de threads
+
+Si `sessions × threads` dépasse P, le constructeur émet un `RuntimeWarning` (pas une erreur). Les préréglages ne le dépassent jamais.
+
+## File d'attente et contre-pression
+
+- **FIFO strict** : une session libérée est remise **directement** au plus ancien en attente, sans repasser par la liste libre. Un thread qui rend sa session ne peut pas la reprendre avant celui qui attendait (pas de famine).
+- **Bornée** : avec `max_queue` requêtes déjà en attente, la suivante lève `RouterBusyError` immédiatement, sans bloquer.
+- **Délai** : `TimeoutError` standard si aucune session n'est libre à temps. Aucune session n'est perdue dans ce cas.
+- **Erreurs natives** (`LembedError`) : propagées telles quelles, la session est rendue.
+
+`RouterBusyError` et `RouterClosedError` héritent de `LembedError`. Pour un serveur HTTP : `RouterBusyError` → 503, `TimeoutError` → 504.
+
+## `asyncio`
+
+`aembed` attend une session **dans la boucle** (aucun thread parqué, FIFO préservée) puis exécute l'appel natif sur un `ThreadPoolExecutor` **dédié au router** (jamais l'executor par défaut de la boucle, qui reste libre même router saturé). Compatible Python 3.9+.
+
+### Annulation : ce qui est possible
+
+| Moment | Comportement |
+|---|---|
+| En attente d'une session | La requête est retirée proprement de la file. Si une session lui était attribuée à cet instant précis, elle est rendue et passe au suivant. |
+| **Pendant l'appel natif** | `CancelledError` est levée **immédiatement**, mais l'appel natif **ne peut pas être interrompu** : il se termine dans l'executor, son résultat est jeté, et la session est rendue seulement ensuite. |
+
+Conséquence : une annulation ne libère pas la session tout de suite. **Bornez `batch_size` et la taille de `texts` côté serveur**, sinon un gros lot abandonné monopolise une session jusqu'à sa fin. Le délai `timeout` ne couvre pas non plus l'appel natif.
+
+## Fermeture
+
+`close(wait=True)` (ou `await aclose()`) :
+
+1. refuse les nouvelles requêtes (`RouterClosedError`) ;
+2. réveille les requêtes en attente avec `RouterClosedError` ;
+3. attend la fin des appels en vol ;
+4. ferme les sessions. Une session occupée n'est **jamais** fermée.
+
+Dans une coroutine, utilisez `aclose()` (ou `async with`) : `close()` bloque le thread. `close(wait=False)` rend la main aussitôt ; le dernier appel terminé ferme les sessions restantes.
+
+## Observabilité
+
+`router.stats()` renvoie un `RouterStats` : `sessions`, `in_flight`, `queued`, `completed`, `rejected`, `timeouts`, `max_wait_ms`.
+
+## Autres classes : `asyncio.to_thread`
+
+Le router ne couvre que le texte dense. Pour `Reranker`, `SparseTextEmbedding` ou `MultiVectorEmbedding`, le contournement est :
+
+```python
+scores = await asyncio.to_thread(reranker.rerank, query, documents)
+```
+
+Limites : l'executor par défaut est partagé avec toute l'application ; pas de FIFO stricte, pas de contre-pression, pas de délai ; et un seul appel à la fois par instance (le contexte natif est verrouillé). Pour du parallélisme, créez plusieurs instances et gérez la file vous-même.
+
+## Exemple : fournisseur d'embeddings pour un moteur de recherche (style Whoosh-NG)
+
+```python
+import asyncio
+from fastapi import FastAPI, HTTPException
+from libembedding import RouterBusyError, TextEmbeddingRouter
+
+router = TextEmbeddingRouter(
+    "BAAI/bge-small-en-v1.5",
+    policy="balanced",
+    max_queue=64,
+    acquire_timeout=2.0,
+    batch_size=32,          # borné : une requête annulée finit son appel natif
+)
+
+class LibembeddingProvider:
+    """Protocole EmbeddingProvider : embed, embed_batch, dimension."""
+
+    @property
+    def dimension(self) -> int:
+        return router.dim
+
+    def embed(self, text: str):
+        return router.embed([text])[0]
+
+    def embed_batch(self, texts: list[str]):
+        return router.embed(texts)
+
+    async def aembed_batch(self, texts: list[str]):
+        return await router.aembed(texts)
+
+app = FastAPI()
+provider = LibembeddingProvider()
+
+@app.post("/embed")
+async def embed(texts: list[str]):
+    try:
+        vectors = await provider.aembed_batch(texts[:64])
+    except RouterBusyError:
+        raise HTTPException(503, "busy")
+    except TimeoutError:
+        raise HTTPException(504, "timeout")
+    return {"dim": router.dim, "vectors": vectors.tolist()}
+
+@app.on_event("shutdown")
+async def shutdown():
+    await router.aclose()
+```
+
+Pour une indexation hors ligne, créez une seconde instance en `policy="indexing"` le temps du traitement : la mémoire double.
+
+## Points d'attention
+
+- **Cache LRU** : `cache_size` est **par session**. Le cache n'est pas partagé, le taux de succès est divisé par le nombre de sessions.
+- **Mémoire** : `indexing` coûte environ 2,7 fois la mémoire de `latency` (bge-small, mesure T32).
+- **Conteneurs et CPU hybrides** : la détection des cœurs ne tient pas compte des quotas cgroup. Imposez `sessions=` / `threads=`.
+- **Contexte après une erreur native** : supposé sain (le verrou est libéré, aucun état partiel) ; non vérifié sur toutes les erreurs.
+
+---
+
 ## DOCUMENT (FR): GGUF sparse embedding convention
 Source: https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md
 Rendu: https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html
@@ -11716,7 +11947,23 @@ if (lembed_text_embedding_embed(ctx, texts, n, 0, &emb) == LEMBED_OK) {
 
 ## Qualité par dimension (nDCG@10, BEIR SciFact)
 
-NDCG_TABLE_FR
+nDCG@10 sur BEIR SciFact (split test, 5 183 documents, 300 requêtes, `max_length` 512, ONNX fp32). Entre parenthèses, la part de la qualité obtenue à la dimension native.
+
+| Modèle | 1024 | 768 | 512 | 256 | 128 | 64 |
+|---|---|---|---|---|---|---|
+| `nomic-ai/nomic-embed-text-v1.5` | — | 0,7032 (natif) | 0,7007 (99,6 %) | 0,6825 (97,1 %) | 0,6425 (91,4 %) | 0,5274 (75,0 %) |
+| `mixedbread-ai/mxbai-embed-large-v1` | 0,7389 (natif) | 0,7316 (99,0 %) | 0,7277 (98,5 %) | 0,6932 (93,8 %) | 0,6714 (90,9 %) | 0,5985 (81,0 %) |
+
+En pratique, 512 dimensions conservent plus de 98 % de la qualité pour 1,5 à 2 fois moins de mémoire, et 256 dimensions plus de 93 %. En dessous de 128, la perte devient nette.
+
+Mesuré le 2026-11-24 sur un Intel Core i7-1065G7 (4 cœurs, Windows 11), ONNX Runtime 1.31.0, commit `071b1ce` de `dev`. Pour reproduire :
+
+```bash
+python benchmarks/matryoshka/bench_matryoshka_ndcg.py \
+  --beir ~/.cache/libembedding/datasets/beir-scifact/scifact \
+  --model nomic-ai/nomic-embed-text-v1.5 \
+  --model mixedbread-ai/mxbai-embed-large-v1
+```
 
 ---
 

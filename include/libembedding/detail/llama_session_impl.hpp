@@ -3,7 +3,7 @@
  * llama.cpp backend for GGUF embedding models
  *
  * Auteur: David Orel
- * Version: 1.16.5
+ * Version: 1.16.6
  *
  * SPDX-License-Identifier: MIT
  */
@@ -14,6 +14,7 @@
 #include <llama.h>
 #include <ggml.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -167,6 +168,69 @@ inline void llama_truncate_tokens(const struct llama_vocab* vocab,
     if (keep_end) tokens.back() = last;
 }
 
+/* Dense batching: several texts go through one llama_encode() as distinct
+ * sequences (seq_id 0..k-1) instead of one encode per text. A non-causal
+ * encode computes full n_tokens x n_tokens attention (block-diagonal mask), so
+ * packing is capped in total tokens to keep that quadratic term small.
+ * n_seq_max is fixed at context creation.
+ * Values come from a sweep on MiniLM Q8_0 (i7-1065G7, mixed corpus): 8
+ * sequences / 256 tokens per encode gave the best throughput; 512 tokens cost
+ * +35 MB RSS for no further gain, 128 tokens lost about 7 %. */
+inline int llama_pack_seqs()   { return 8; }
+inline int llama_pack_tokens() { return 256; }
+
+/* Splits the non-empty token lists into consecutive groups of at most
+ * max_seqs sequences and max_tokens total tokens (a lone longer text still
+ * forms its own group; callers already truncated it to the encode limit). */
+inline std::vector<std::vector<size_t>> llama_pack_groups(
+        const std::vector<std::vector<llama_token>>& toks, int max_seqs, int max_tokens) {
+    std::vector<std::vector<size_t>> groups;
+    size_t used = 0;
+    for (size_t i = 0; i < toks.size(); i++) {
+        if (toks[i].empty()) continue;
+        if (groups.empty() || (int)groups.back().size() >= max_seqs ||
+            used + toks[i].size() > (size_t)max_tokens) {
+            groups.emplace_back();
+            used = 0;
+        }
+        groups.back().push_back(i);
+        used += toks[i].size();
+    }
+    return groups;
+}
+
+/* One llama_encode() over the sequences `group` (indices into toks); the
+ * pooled vector of group[k] is copied to out + group[k] * n_embd. Caller holds
+ * the context exclusively and has checked the pooling type. */
+inline void llama_encode_packed(struct llama_context* ctx,
+                                const std::vector<std::vector<llama_token>>& toks,
+                                const std::vector<size_t>& group, int n_embd, float* out) {
+    size_t total = 0;
+    for (size_t g : group) total += toks[g].size();
+    llama_batch batch = llama_batch_init((int32_t)total, 0, 1);
+    batch.n_tokens = 0;
+    for (size_t k = 0; k < group.size(); k++) {
+        const auto& t = toks[group[k]];
+        for (size_t i = 0; i < t.size(); i++) {
+            batch.token[batch.n_tokens] = t[i];
+            batch.pos[batch.n_tokens] = (llama_pos)i;
+            batch.seq_id[batch.n_tokens][0] = (llama_seq_id)k;
+            batch.n_seq_id[batch.n_tokens] = 1;
+            batch.logits[batch.n_tokens] = 0;
+            batch.n_tokens++;
+        }
+    }
+    llama_memory_clear(llama_get_memory(ctx), false);
+    int ret = llama_encode(ctx, batch);
+    llama_batch_free(batch);
+    if (ret != 0) throw std::runtime_error("llama_encode failed for embedding extraction");
+    for (size_t k = 0; k < group.size(); k++) {
+        const float* p = llama_get_embeddings_seq(ctx, (llama_seq_id)k);
+        if (!p) throw std::runtime_error("Failed to retrieve embeddings from llama context");
+        memcpy(out + group[k] * (size_t)n_embd, p, (size_t)n_embd * sizeof(float));
+    }
+}
+
 class LlamaSession {
 public:
     LlamaSession()
@@ -243,6 +307,13 @@ public:
         if (n_batch > 0) {
             cparams.n_batch = (uint32_t)n_batch;
         }
+        if (!cross_encoder) {
+            /* Packed dense batches: one sequence per text. kv_unified keeps
+             * n_ctx as requested (otherwise n_ctx is split and padded per
+             * sequence, which would also change the truncation limit). */
+            cparams.n_seq_max = (uint32_t)llama_pack_seqs();
+            cparams.kv_unified = true;
+        }
 
         ctx_ = llama_init_from_model(model_, cparams);
         if (!ctx_) {
@@ -309,12 +380,37 @@ public:
     struct llama_context* context() const { return ctx_; }
 
     std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts) {
+        std::vector<const char*> ptrs;
+        ptrs.reserve(texts.size());
+        for (const auto& t : texts) ptrs.push_back(t.c_str());
+        std::vector<float> flat((size_t)texts.size() * (size_t)n_embd_);
+        embed_texts(ptrs.data(), (int)ptrs.size(), flat.data());
         std::vector<std::vector<float>> results;
         results.reserve(texts.size());
-        for (const auto& text : texts) {
-            results.push_back(embed(text.c_str()));
+        for (size_t i = 0; i < texts.size(); i++) {
+            results.emplace_back(flat.begin() + (ptrdiff_t)(i * (size_t)n_embd_),
+                                 flat.begin() + (ptrdiff_t)((i + 1) * (size_t)n_embd_));
         }
         return results;
+    }
+
+    /* Embeds n texts into out (n * dimension() floats, raw pooled vectors),
+     * packing them into shared llama_encode() calls. Empty tokenizations give
+     * a zero vector, like embed(). */
+    void embed_texts(const char* const* texts, int n, float* out) {
+        if (n <= 0) return;
+        std::fill(out, out + (size_t)n * (size_t)n_embd_, 0.0f);
+        if (!ctx_) return;
+        llama_require_dense_pooling(ctx_);
+        std::vector<std::vector<llama_token>> toks((size_t)n);
+        for (int i = 0; i < n; i++) tokenize(texts[i], toks[(size_t)i]);
+        int max_seqs = (int)llama_n_seq_max(ctx_);
+        if (max_seqs < 1) max_seqs = 1;
+        int max_tokens = llama_pack_tokens();
+        if (max_tokens > max_encode_tokens()) max_tokens = max_encode_tokens();
+        for (const auto& g : llama_pack_groups(toks, max_seqs, max_tokens)) {
+            llama_encode_packed(ctx_, toks, g, n_embd_, out);
+        }
     }
 
     std::vector<float> embed_tokens(const std::vector<llama_token>& tokens) {
@@ -544,6 +640,9 @@ public:
             if (n_batch > 0) {
                 cparams.n_batch = (uint32_t)n_batch;
             }
+            /* Packed dense batches, see LlamaSession::load_from_file. */
+            cparams.n_seq_max = (uint32_t)llama_pack_seqs();
+            cparams.kv_unified = true;
 
             auto ctx = std::make_unique<Context>();
             ctx->ctx = llama_init_from_model(model_, cparams);
@@ -626,9 +725,31 @@ public:
 
     std::vector<std::vector<float>> embed_batch(const std::vector<std::string>& texts) {
         if (texts.empty()) return {};
+        if (contexts_.empty()) {
+            throw std::runtime_error("LlamaSessionPool: no contexts available");
+        }
+        std::vector<std::vector<llama_token>> toks(texts.size());
+        for (size_t i = 0; i < texts.size(); i++) tokenize(texts[i].c_str(), toks[i]);
+        int max_seqs = (int)llama_n_seq_max(contexts_[0]->ctx);
+        if (max_seqs < 1) max_seqs = 1;
+        int max_tokens = llama_pack_tokens();
+        const int enc_limit = encode_limit_ > 0 ? encode_limit_ : n_ctx_;
+        if (max_tokens > enc_limit) max_tokens = enc_limit;
+
+        std::vector<float> flat(texts.size() * (size_t)n_embd_, 0.0f);
+        for (const auto& g : llama_pack_groups(toks, max_seqs, max_tokens)) {
+            size_t idx = next_idx_.fetch_add(1, std::memory_order_relaxed) % contexts_.size();
+            auto& c = *contexts_[idx];
+            std::unique_lock<std::mutex> lock(c.mtx);
+            llama_require_dense_pooling(c.ctx);
+            llama_encode_packed(c.ctx, toks, g, n_embd_, flat.data());
+        }
         std::vector<std::vector<float>> out;
         out.reserve(texts.size());
-        for (const auto& t : texts) out.push_back(embed(t.c_str()));
+        for (size_t i = 0; i < texts.size(); i++) {
+            out.emplace_back(flat.begin() + (ptrdiff_t)(i * (size_t)n_embd_),
+                             flat.begin() + (ptrdiff_t)((i + 1) * (size_t)n_embd_));
+        }
         return out;
     }
 

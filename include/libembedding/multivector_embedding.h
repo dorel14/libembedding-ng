@@ -7,7 +7,7 @@
  * it does not index, sort or search.
  *
  * Auteur: David Orel
- * Version: 1.16.3
+ * Version: 1.16.6
  *
  * SPDX-License-Identifier: MIT
  */
