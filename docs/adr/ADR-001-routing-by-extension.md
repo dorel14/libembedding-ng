@@ -17,7 +17,9 @@ backend, and in `AUTO` falls back from ONNX to GGUF when the ONNX files are miss
 Sparse and image have no such field (adding one is an ABI change; sparse would need
 a `lembed_sparse_options_v2`). It is no longer slated for
 removal in 2.0. The bullets of the Decision section below that call it deprecated or
-removed are superseded by this paragraph; the routing by extension is unchanged.
+removed, and the Consequences that follow from them (a model cannot be forced onto
+the other backend; the field stays only until 2.0), are superseded by this
+paragraph. The routing by extension is unchanged: it is what `AUTO` does.
 
 ## Context
 
