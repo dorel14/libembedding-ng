@@ -11,7 +11,7 @@ that releases its session therefore cannot take it back before the thread it
 woke up (the starvation seen with a plain ``queue.Queue``).
 
 Auteur: David Orel
-Version: 1.16.6
+Version: 1.16.7
 
 SPDX-License-Identifier: MIT
 """

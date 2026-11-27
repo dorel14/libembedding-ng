@@ -27,7 +27,7 @@
  * not grow a switch per head type and no caller has to be edited.
  *
  * Auteur: David Orel
- * Version: 1.16.6
+ * Version: 1.16.7
  *
  * SPDX-License-Identifier: MIT
  */

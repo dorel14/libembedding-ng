@@ -3,6 +3,7 @@
 # pyright: reportAttributeAccessIssue=false,reportCallIssue=false
 from __future__ import annotations
 
+import mmap
 import os
 import warnings
 
@@ -38,6 +39,28 @@ _MODE_TO_MODEL = {
 # `normalized=True` is only meaningful for callers that bypassed that path.
 # It is kept for API symmetry and is a no-op on already-unit vectors.
 _VALID_DTYPES = ("float32", "float16")
+
+
+def _has_dynamic_quantization(onnx_path: str) -> bool:
+    """True when the ONNX graph quantizes its activations at run time.
+
+    DynamicQuantizeLinear (and ORT's fused DynamicQuantizeMatMul) compute their
+    scale over the whole input tensor. In a padded batch that tensor holds every
+    text of the batch, so a text's vector depends on its neighbours (measured:
+    cosine 0.95 to 0.98 against the same text run alone). Such models keep one
+    text per ORT run. Op types are stored as plain strings in the protobuf, so
+    a byte search is enough. An unreadable file counts as quantized: one text
+    per run is the conservative choice.
+    """
+    try:
+        with open(onnx_path, "rb") as f:
+            m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            try:
+                return m.find(b"DynamicQuantize") != -1
+            finally:
+                m.close()
+    except (OSError, ValueError):
+        return True
 
 
 def _validate_output_dtype(dtype: str) -> str:
@@ -221,6 +244,7 @@ class TextEmbedding:
                 raise FileNotFoundError(f"GGUF model not found: '{model_name}'")
 
             opts = ffi.new("lembed_text_options_t *")
+            opts[0] = lib.lembed_text_options_default()
             opts.provider = _PROVIDER_MAP[provider]
             opts.num_threads = threads
             opts.batch_size = batch_size
@@ -262,8 +286,14 @@ class TextEmbedding:
                     raise ModelNotFoundError(7, f"Unknown model: {model_name}")
 
             if _is_local_path(model_name):
-                # Local ONNX model directory
+                # Local ONNX model directory. Start from the C defaults: a
+                # zero-filled struct means batch_strategy 0, i.e.
+                # LEMBED_BATCH_SEQUENTIAL (one ORT call per text, batch_size
+                # ignored).
                 opts = ffi.new("lembed_text_options_t *")
+                opts[0] = lib.lembed_text_options_default()
+                if _has_dynamic_quantization(os.path.join(model_name, "model.onnx")):
+                    opts.batch_strategy = lib.LEMBED_BATCH_SEQUENTIAL
                 opts.backend = backend_enum
                 opts.provider = _PROVIDER_MAP[provider]
                 opts.num_threads = threads
@@ -283,6 +313,15 @@ class TextEmbedding:
                 )
             else:
                 opts = ffi.new("lembed_text_options_v2_t *")
+                # C defaults first (LEMBED_BATCH_LENGTH_BUCKET, not the
+                # zero-filled LEMBED_BATCH_SEQUENTIAL).
+                opts[0] = lib.lembed_text_options_default_v2()
+                # Only FP32 weights are batch-invariant. Quantized variants
+                # (dynamic int8 scales are computed over the whole batch, see
+                # _has_dynamic_quantization), FP16 and an unresolved "auto"
+                # keep one text per ORT run, as before.
+                if resolved_quant != lib.LEMBED_QUANTIZATION_NONE:
+                    opts.base.batch_strategy = lib.LEMBED_BATCH_SEQUENTIAL
                 # Registry index the session is built from. Without it the
                 # zero-initialised struct points at entry 0, so every
                 # HuggingFace name silently loaded all-MiniLM-L6-v2.

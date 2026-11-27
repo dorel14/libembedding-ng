@@ -1,6 +1,6 @@
 # libembedding-ng — Full Technical Documentation
 
-Version: 1.16.6
+Version: 1.16.7
 Source: https://github.com/dorel14/libembedding
 Site: https://dorel14.github.io/libembedding-ng/
 
@@ -10365,7 +10365,9 @@ backend, and in `AUTO` falls back from ONNX to GGUF when the ONNX files are miss
 Sparse and image have no such field (adding one is an ABI change; sparse would need
 a `lembed_sparse_options_v2`). It is no longer slated for
 removal in 2.0. The bullets of the Decision section below that call it deprecated or
-removed are superseded by this paragraph; the routing by extension is unchanged.
+removed, and the Consequences that follow from them (a model cannot be forced onto
+the other backend; the field stays only until 2.0), are superseded by this
+paragraph. The routing by extension is unchanged: it is what `AUTO` does.
 
 ## Context
 
@@ -10515,7 +10517,7 @@ Remove in 2.0 (each symbol verified in the repository):
 
 | Item | Where | Replacement |
 |---|---|---|
-| ~~`backend` field and `lembed_backend_t` (`LEMBED_BACKEND_*`) in options; Python `Reranker(backend=...)`~~ **Withdrawn 2026-11-21**: kept as a reranker-only option (ADR-001, amendment). Only the ignored `backend` field of `lembed_text_options_t` has no effect. | `include/libembedding/types.h` | none |
+| ~~`backend` field and `lembed_backend_t` (`LEMBED_BACKEND_*`) in options; Python `Reranker(backend=...)`~~ **Withdrawn 2026-11-21**: kept as an official option of the reranker and of dense text (ADR-001, amendment). `lembed_text_options_t.backend` is honoured: an explicit backend that does not match the path returns `LEMBED_ERROR_UNSUPPORTED` (`detail/text_embedding_impl.hpp`). | `include/libembedding/types.h` | none |
 | `lembed_cache_get()` (borrowed pointer, racy) | `include/libembedding/embedding_cache.h` | `lembed_cache_get_copy()` |
 | `lembed_sparse_best_config()` | `include/libembedding/sparse_text_embedding.h` | `lembed_sparse_autotune()` (`autotuner.h`) |
 | Registry entries under a non-MIT-compatible licence: `jinaai/jina-reranker-v2-base-multilingual` (CC-BY-NC-4.0), `onnx-community/embeddinggemma-300m-ONNX` (Gemma Terms), with their enum values | `include/libembedding/model_registry.h` | MIT/Apache-2.0 replacements, validated (fidelity, Recall@K) |
