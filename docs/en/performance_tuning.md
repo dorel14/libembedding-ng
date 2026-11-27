@@ -709,10 +709,21 @@ benchmark does not measure.
   `Reranker(quantization=...)` does not resolve a variant either: pass the name of
   the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
 
-- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
-  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
-  corpus before switching a quality-critical index; static INT8 (`_Q`) is the safer
-  default.
+- **Dynamic INT8 runs one text per ONNX call.** `DynamicQuantizeLinear`
+  computes its int8 scale over the whole batch tensor, so in a padded batch a
+  text's vector depends on its neighbours (cosine down to 0.970 against the same
+  text run alone, gte-base). Since 1.17 the library detects the operator in the
+  graph (registry entries, local directories and in-memory models alike) and
+  keeps one text per run whatever `batch_strategy` asks for; the switch is logged
+  under `LIBEMBEDDING_VERBOSE=1`. Embeddings are then reproducible: a text gets
+  the same vector alone, in any batch, or from the LRU cache. Measured on SciFact
+  (2026-11-27, 4 threads, batch 32): batching these models changes nDCG@10 by at
+  most 0.003 and gains nothing on documents, +27 to +90 % on short queries. If you
+  need that throughput on short texts, FP32 with batching is the reproducible
+  option. The quality loss comes from the quantization itself: nDCG@10 FP32 vs
+  INT8 is 0.7127 vs 0.7077 on bge-small-en-v1.5 and 0.7679 vs 0.7429 on
+  gte-base-en-v1.5. Validate on your own corpus before switching a
+  quality-critical index.
 
 Full report, machine block included, archived verbatim in
 `docs/archive/benchmarks/quantization-2026-10-01/` — every figure published above

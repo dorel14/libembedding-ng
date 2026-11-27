@@ -367,7 +367,10 @@ typedef struct {
     int                   quantization; /* lembed_quantization_t */
 } lembed_text_options_v2_t;
 
-/* Batching strategy for ONNX backend */
+/* Batching strategy for ONNX backend.
+ * A text model whose graph uses DynamicQuantizeLinear (dynamic int8) always
+ * runs as LEMBED_BATCH_SEQUENTIAL: its int8 scale spans the whole batch, so
+ * batching would make a text's vector depend on its neighbours. */
 typedef enum {
     LEMBED_BATCH_SEQUENTIAL = 0,    /* One text at a time (no batching) */
     LEMBED_BATCH_FIXED = 1,         /* Fixed-size batches (naive, may pad heavily) */

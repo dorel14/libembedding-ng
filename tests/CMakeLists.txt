@@ -20,7 +20,8 @@ set(LEMBED_UNIT_TEST_TARGETS
     test_tokenizer test_tokenizer_unigram test_tokenizer_bytelevel
     test_tokenizer_wsbpe test_tokenizer_fidelity
     test_gguf_inspect test_sparse_gguf test_matryoshka
-    test_lifecycle_memory test_backend_introspection test_text_max_length)
+    test_lifecycle_memory test_backend_introspection test_text_max_length
+    test_dynamic_quant_sequential)
 add_custom_target(lembed_unit_tests)
 
 # Test model registry
@@ -255,6 +256,12 @@ add_test(NAME test_backend_introspection COMMAND test_backend_introspection)
 add_executable(test_text_max_length test_text_max_length.cpp)
 target_link_libraries(test_text_max_length PRIVATE libembedding)
 add_test(NAME test_text_max_length COMMAND test_text_max_length)
+
+# Dynamic int8 text models run one text per ONNX call (T46): byte detector,
+# then the cached dynamic all-MiniLM-L6-v2 variant (skipped when absent).
+add_executable(test_dynamic_quant_sequential test_dynamic_quant_sequential.cpp)
+target_link_libraries(test_dynamic_quant_sequential PRIVATE libembedding)
+add_test(NAME test_dynamic_quant_sequential COMMAND test_dynamic_quant_sequential)
 
 add_dependencies(lembed_unit_tests ${LEMBED_UNIT_TEST_TARGETS})
 

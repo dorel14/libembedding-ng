@@ -724,10 +724,21 @@ arbitrage ici, sauf la précision — que ce benchmark ne mesure pas.
   `Reranker(quantization=...)` ne résout pas non plus une variante : passez le nom
   de l'entrée quantifiée, `jinaai/jina-reranker-v1-turbo-en-quantized`.
 
-- **La qualité n'est pas mesurée ici.** Les embeddings INT8 dynamiques varient
-  légèrement selon la composition du batch (cos ≈ 0,984 face à la référence
-  FP32). À valider sur votre propre corpus avant de basculer un index critique ;
-  l'INT8 statique (`_Q`) est le choix par défaut le plus sûr.
+- **L'INT8 dynamique traite un texte par appel ONNX.** `DynamicQuantizeLinear`
+  calcule son échelle int8 sur tout le tenseur du lot : dans un lot avec padding,
+  le vecteur d'un texte dépend de ses voisins (cosinus jusqu'à 0,970 face au même
+  texte seul, gte-base). Depuis la 1.17, la bibliothèque détecte l'opérateur dans
+  le graphe (entrées du registre, dossiers locaux et modèles en mémoire) et garde
+  un texte par run quel que soit `batch_strategy` ; la bascule est journalisée
+  avec `LIBEMBEDDING_VERBOSE=1`. Les embeddings sont alors reproductibles : un
+  texte a le même vecteur seul, dans n'importe quel lot ou depuis le cache LRU.
+  Mesuré sur SciFact (2026-11-27, 4 threads, batch 32) : traiter ces modèles par
+  lots change le nDCG@10 de 0,003 au plus, n'apporte rien sur les documents et
+  +27 à +90 % sur les requêtes courtes. Pour ce débit sur des textes courts, le
+  FP32 par lots est l'option reproductible. La perte de qualité vient de la
+  quantification elle-même : nDCG@10 FP32 contre INT8 = 0,7127 contre 0,7077
+  sur bge-small-en-v1.5 et 0,7679 contre 0,7429 sur gte-base-en-v1.5. À valider
+  sur votre propre corpus avant de basculer un index critique.
 
 Rapport complet, bloc d'environnement inclus, archivé verbatim dans
 `docs/archive/benchmarks/quantization-2026-10-01/` : chaque chiffre publié
