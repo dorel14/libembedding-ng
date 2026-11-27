@@ -3,7 +3,7 @@
  * Inline factory for EmbeddingProvider (header-only)
  *
  * Author: David Orel
- * Version: 1.16.6
+ * Version: 1.16.7
  *
  * SPDX-License-Identifier: MIT
  */
