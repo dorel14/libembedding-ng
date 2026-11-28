@@ -103,7 +103,7 @@ La CI wheel exige une couverture Python ≥ 40 % (`--cov-fail-under=40`).
 - GPU (CUDA, DirectML, CoreML, TensorRT, Vulkan, Metal) : hors périmètre jusqu'après 1.x.
 - Ne jamais présumer qu'une quantification est plus rapide : mesurer.
 
-## 6. État de la roadmap (au 2026-11-26)
+## 6. État de la roadmap (au 2026-11-28)
 
 Le détail vit dans `.kilo/plans/roadmap.md` et `.kilo/plans/le11-corrections.md` ;
 cette section n'en est qu'un résumé.
@@ -120,19 +120,21 @@ bloquant), audit llama.cpp v0.6.0.
 - **Wheels** : 7 wheels publiées à chaque release (manylinux x86_64, aarch64 et armv7l,
   macOS arm64, Windows amd64, Android arm64-v8a et x86_64).
 - **LE-11** : benchmarks concurrentiels faits ; leurs écarts sont traités dans
-  `.kilo/plans/le11-corrections.md`.
+  `.kilo/plans/le11-corrections.md`. E7 clos : le binding Python passait un texte par
+  run ORT (corrigé en 1.16.7). Remesure du 2026-11-28 dans
+  `benchmarks/competitive/results.md` : en FP32 ONNX à batch 32, libembedding est
+  +55 % devant SentenceTransformers et FastEmbed.
 - **Train 1.16.x** (correctifs depuis `main`) : 1.16.4 (validation des enums de l'API C),
   1.16.5 (texte coréen en GGUF WordPiece, T45), 1.16.6 (lots de séquences en GGUF dense,
-  +50 % de débit dès 8 textes).
-
-Sur `dev`, pour la 1.17 (release sur feu vert explicite de David) : ColBERT
-(`lembed_multivector_*`, `lembed_maxsim`, binding Python, entrée registry
-answerai-colbert-small-v1) et le routeur de sessions Python (`TextEmbeddingRouter`,
-asyncio).
+  +50 % de débit dès 8 textes), 1.16.7 (lots ONNX dense depuis Python).
+- **1.17.0 publiée le 2026-11-28** : ColBERT (`lembed_multivector_*`, `lembed_maxsim`,
+  binding Python, entrée registry answerai-colbert-small-v1), routeur de sessions Python
+  (`TextEmbeddingRouter`, asyncio). T46 : un modèle int8 dynamique (`DynamicQuantizeLinear`)
+  passe un texte par run ONNX, pour des vecteurs reproductibles.
 
 Ouvert :
-- LE-11 corrections restantes : E7 (profil de l'écart ONNX dense), E10 (cellules de
-  bench perturbées, machine calme).
+- LE-11 : E10 (cellules de bench perturbées, machine calme) ; le reranker jina INT8
+  fait aussi des lots avec `DynamicQuantizeLinear`, à décider.
 - Suites du routeur : harnais T32 dans `benchmarks/concurrency/`, A/B file vs routeur
   vs asyncio.
 - T44 (llama.cpp v1.0.0, revérifier T45), T14b (SIMD de `lembed_maxsim`).

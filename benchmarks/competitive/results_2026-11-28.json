@@ -1,0 +1,2654 @@
+{
+ "cells": {
+  "dense|minilm|libembedding|b32|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 465.3966643132281,
+   "samples": [
+    364.50620800006715,
+    465.3966643132281,
+    487.202315752198
+   ],
+   "load_ms": 787.8204000880942,
+   "peak_rss_mb": 204.21484375,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b32|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 324.1557703260032,
+   "samples": [
+    318.12955094530577,
+    340.5130162341304,
+    324.1557703260032
+   ],
+   "load_ms": 8996.17539998144,
+   "peak_rss_mb": 538.7265625,
+   "process_threads": 35,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b32|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 301.17354984146033,
+   "samples": [
+    301.17354984146033,
+    300.6067205602402,
+    331.94853258024443
+   ],
+   "load_ms": 1204.6639999607578,
+   "peak_rss_mb": 226.5859375,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b32|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 264.5537919346179,
+   "samples": [
+    264.5537919346179,
+    263.05563531970313,
+    266.9910643699101
+   ],
+   "load_ms": 927.2115000057966,
+   "peak_rss_mb": 246.80859375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b32|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 147.6212801455069,
+   "samples": [
+    147.6212801455069,
+    143.8840080810106,
+    150.57943493489776
+   ],
+   "load_ms": 911.5462999325246,
+   "peak_rss_mb": 221.65625,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b32|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 256.17906466195166,
+   "samples": [
+    256.17906466195166,
+    263.812601249815,
+    256.0540327261867
+   ],
+   "load_ms": 776.6694999299943,
+   "peak_rss_mb": 106.671875,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b32|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 170.20549419790393,
+   "samples": [
+    169.52755146444878,
+    170.20549419790393,
+    174.22686696912535
+   ],
+   "load_ms": 8699.276099912822,
+   "peak_rss_mb": 577.578125,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b32|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 141.58486129520648,
+   "samples": [
+    141.58486129520648,
+    120.49948724406835,
+    144.3035467826414
+   ],
+   "load_ms": 1204.4474999420345,
+   "peak_rss_mb": 264.23828125,
+   "process_threads": 25
+  },
+  "dense|minilm|sentence-transformers|b32|t0|r1": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 319.253946948621,
+   "samples": [
+    306.9219053831016,
+    319.253946948621,
+    323.222084596455
+   ],
+   "load_ms": 8473.269499954768,
+   "peak_rss_mb": 537.77734375,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b32|t0|r1": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 323.55029407970613,
+   "samples": [
+    327.30832889672723,
+    250.4114008893201,
+    323.55029407970613
+   ],
+   "load_ms": 1054.4759000185877,
+   "peak_rss_mb": 225.9765625,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b32|t0|r1": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 531.453970350422,
+   "samples": [
+    531.453970350422,
+    559.1861023911208,
+    508.6237926989243
+   ],
+   "load_ms": 605.1110000116751,
+   "peak_rss_mb": 204.05859375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b32|t0|r1": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 145.64195858520768,
+   "samples": [
+    155.51342282251576,
+    133.8258821681653,
+    145.64195858520768
+   ],
+   "load_ms": 901.841799961403,
+   "peak_rss_mb": 221.58984375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b32|t0|r1": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 221.64499462809513,
+   "samples": [
+    212.85405638019378,
+    221.64499462809513,
+    264.2281578464855
+   ],
+   "load_ms": 670.9825999569148,
+   "peak_rss_mb": 106.68359375,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b32|t0|r1": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 175.6409656977747,
+   "samples": [
+    179.84399181150638,
+    175.6409656977747,
+    170.40033104006505
+   ],
+   "load_ms": 8713.779999990948,
+   "peak_rss_mb": 578.0703125,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b32|t0|r1": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 141.6404874917457,
+   "samples": [
+    141.6404874917457,
+    129.11487492517924,
+    150.54587331422042
+   ],
+   "load_ms": 1028.5000000149012,
+   "peak_rss_mb": 250.79296875,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b32|t0|r1": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 0,
+   "round": 1,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 264.59913838645446,
+   "samples": [
+    261.7680510465529,
+    278.56352034650894,
+    264.59913838645446
+   ],
+   "load_ms": 816.8100999901071,
+   "peak_rss_mb": 246.92578125,
+   "process_threads": 17
+  },
+  "dense|minilm|fastembed|b32|t0|r2": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 344.1790342291153,
+   "samples": [
+    346.9185720924632,
+    344.1790342291153,
+    332.751694463225
+   ],
+   "load_ms": 1011.316700023599,
+   "peak_rss_mb": 226.921875,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b32|t0|r2": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 501.8881534261785,
+   "samples": [
+    475.6224471006429,
+    501.8881534261785,
+    549.2361361116605
+   ],
+   "load_ms": 591.6444000322372,
+   "peak_rss_mb": 203.87109375,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b32|t0|r2": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 329.2060225596447,
+   "samples": [
+    340.50064489991234,
+    315.0394542760138,
+    329.2060225596447
+   ],
+   "load_ms": 8525.878000073135,
+   "peak_rss_mb": 538.828125,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|libembedding-int8|b32|t0|r2": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 251.59825274064463,
+   "samples": [
+    264.16759891097075,
+    251.59825274064463,
+    245.94922850353606
+   ],
+   "load_ms": 631.2000999459997,
+   "peak_rss_mb": 106.76953125,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b32|t0|r2": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 168.3326804521185,
+   "samples": [
+    167.82882534107307,
+    176.08723079579914,
+    168.3326804521185
+   ],
+   "load_ms": 8742.130199912935,
+   "peak_rss_mb": 577.14453125,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b32|t0|r2": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 148.6348027130605,
+   "samples": [
+    149.12375997185913,
+    144.49905465232277,
+    148.6348027130605
+   ],
+   "load_ms": 1070.0541000114754,
+   "peak_rss_mb": 267.7109375,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b32|t0|r2": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 263.1579501437749,
+   "samples": [
+    263.1579501437749,
+    275.3145007056492,
+    260.86893459293617
+   ],
+   "load_ms": 762.0395000558347,
+   "peak_rss_mb": 246.89453125,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b32|t0|r2": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 32,
+   "threads": 0,
+   "round": 2,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 149.36115768294172,
+   "samples": [
+    151.3668555727056,
+    149.36115768294172,
+    141.99029212323254
+   ],
+   "load_ms": 772.1743000438437,
+   "peak_rss_mb": 221.7265625,
+   "process_threads": 17
+  },
+  "dense|minilm|libembedding|b1|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 308.7309927469268,
+   "samples": [
+    308.7309927469268,
+    326.24414591720586,
+    294.773422561597
+   ],
+   "load_ms": 613.5501000098884,
+   "peak_rss_mb": 203.91796875,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b1|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 92.36776090911451,
+   "samples": [
+    92.36776090911451,
+    94.84213474478771,
+    85.02057659522372
+   ],
+   "load_ms": 8109.823900042102,
+   "peak_rss_mb": 504.58984375,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b1|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 247.0101947791776,
+   "samples": [
+    246.72605626200337,
+    247.0101947791776,
+    277.1449480874814
+   ],
+   "load_ms": 1100.5806000903249,
+   "peak_rss_mb": 224.8984375,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b1|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 238.46283423770242,
+   "samples": [
+    236.2290678322389,
+    238.46283423770242,
+    261.93065312657683
+   ],
+   "load_ms": 743.0495999287814,
+   "peak_rss_mb": 204.8046875,
+   "process_threads": 21
+  },
+  "dense|minilm|sentence-transformers|b1|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 75.28038083774335,
+   "samples": [
+    75.28038083774335,
+    70.97940311886472,
+    77.09562523500833
+   ],
+   "load_ms": 8859.301200020127,
+   "peak_rss_mb": 504.796875,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|minilm|fastembed|b1|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 191.4325143933616,
+   "samples": [
+    206.30087856991193,
+    191.4325143933616,
+    175.97713282869364
+   ],
+   "load_ms": 983.8320999406278,
+   "peak_rss_mb": 226.2734375,
+   "process_threads": 29
+  },
+  "dense|minilm|libembedding|b1|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 243.23524474530518,
+   "samples": [
+    254.31400475796255,
+    206.05623592050094,
+    243.23524474530518
+   ],
+   "load_ms": 611.2307999283075,
+   "peak_rss_mb": 203.9140625,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b1|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 86.51159486313232,
+   "samples": [
+    80.70124996105682,
+    86.51159486313232,
+    93.5681812341766
+   ],
+   "load_ms": 9322.003500070423,
+   "peak_rss_mb": 504.38671875,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b1|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 250.68876738718458,
+   "samples": [
+    248.99937732445795,
+    280.7210364737683,
+    250.68876738718458
+   ],
+   "load_ms": 943.3915999252349,
+   "peak_rss_mb": 225.73828125,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b8|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 401.8024859435365,
+   "samples": [
+    401.8024859435365,
+    401.55391728288987,
+    463.385330122529
+   ],
+   "load_ms": 682.2891000192612,
+   "peak_rss_mb": 203.83984375,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b8|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 252.92579500786033,
+   "samples": [
+    253.04777061238553,
+    252.92579500786033,
+    250.7102998878983
+   ],
+   "load_ms": 8367.369299987331,
+   "peak_rss_mb": 520.90234375,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b8|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 324.07101641252683,
+   "samples": [
+    302.8918997888774,
+    324.07101641252683,
+    328.1359981959601
+   ],
+   "load_ms": 1020.6259000115097,
+   "peak_rss_mb": 220.7421875,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b8|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 399.896842607099,
+   "samples": [
+    359.61116395080376,
+    418.7589433850006,
+    399.896842607099
+   ],
+   "load_ms": 661.1753000179306,
+   "peak_rss_mb": 204.55859375,
+   "process_threads": 21
+  },
+  "dense|minilm|sentence-transformers|b8|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 244.27124690302668,
+   "samples": [
+    211.55247892452078,
+    261.7204913576188,
+    244.27124690302668
+   ],
+   "load_ms": 8370.66519993823,
+   "peak_rss_mb": 525.6015625,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|minilm|fastembed|b8|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 247.74806301176056,
+   "samples": [
+    218.8934750962617,
+    247.74806301176056,
+    286.9887041493795
+   ],
+   "load_ms": 969.1336000105366,
+   "peak_rss_mb": 226.48828125,
+   "process_threads": 29
+  },
+  "dense|minilm|libembedding|b8|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 454.04130358345054,
+   "samples": [
+    469.2815787081266,
+    448.02965740493835,
+    454.04130358345054
+   ],
+   "load_ms": 593.8062999630347,
+   "peak_rss_mb": 203.8828125,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b8|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 252.01225485241775,
+   "samples": [
+    252.01225485241775,
+    230.82119394750575,
+    256.5440474187352
+   ],
+   "load_ms": 8215.347799938172,
+   "peak_rss_mb": 523.1796875,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b8|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 298.9887542547406,
+   "samples": [
+    330.39285891034325,
+    272.62626965825365,
+    298.9887542547406
+   ],
+   "load_ms": 1054.3665000004694,
+   "peak_rss_mb": 224.93359375,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b32|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 360.2189338566445,
+   "samples": [
+    360.2189338566445,
+    381.0898781795479,
+    265.4690895929862
+   ],
+   "load_ms": 667.0115999877453,
+   "peak_rss_mb": 204.5078125,
+   "process_threads": 21
+  },
+  "dense|minilm|sentence-transformers|b32|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 254.4858604334546,
+   "samples": [
+    225.28721472391945,
+    261.1108679882248,
+    254.4858604334546
+   ],
+   "load_ms": 12505.493500037119,
+   "peak_rss_mb": 541.23046875,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|minilm|fastembed|b32|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 301.3627714962886,
+   "samples": [
+    301.3627714962886,
+    333.8794153749962,
+    280.62455014949956
+   ],
+   "load_ms": 1031.988799921237,
+   "peak_rss_mb": 226.17578125,
+   "process_threads": 29
+  },
+  "dense|minilm|libembedding|b32|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 486.07676843427606,
+   "samples": [
+    482.0604575097569,
+    524.2263061724681,
+    486.07676843427606
+   ],
+   "load_ms": 615.624799975194,
+   "peak_rss_mb": 203.875,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b32|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 343.23251369253916,
+   "samples": [
+    348.69459727201274,
+    318.39949488559387,
+    343.23251369253916
+   ],
+   "load_ms": 8747.955299913883,
+   "peak_rss_mb": 540.2734375,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b32|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 333.0271038048661,
+   "samples": [
+    333.0271038048661,
+    331.72796899238523,
+    354.6078793850062
+   ],
+   "load_ms": 952.0731000229716,
+   "peak_rss_mb": 226.8515625,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b64|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 544.3253375784388,
+   "samples": [
+    544.3253375784388,
+    507.07650620006376,
+    545.8578450774611
+   ],
+   "load_ms": 597.2720999270678,
+   "peak_rss_mb": 203.8203125,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b64|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 321.5198784837246,
+   "samples": [
+    325.5636165472354,
+    321.5198784837246,
+    279.41739907492524
+   ],
+   "load_ms": 8324.701500008814,
+   "peak_rss_mb": 552.80078125,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b64|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 269.5822744543875,
+   "samples": [
+    268.7920520165178,
+    273.874038098556,
+    269.5822744543875
+   ],
+   "load_ms": 943.7017999589443,
+   "peak_rss_mb": 255.3515625,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b64|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 488.70430851228775,
+   "samples": [
+    488.70430851228775,
+    522.1036495889657,
+    414.96508504723647
+   ],
+   "load_ms": 676.5198999783024,
+   "peak_rss_mb": 204.5,
+   "process_threads": 21
+  },
+  "dense|minilm|sentence-transformers|b64|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 268.8268878503006,
+   "samples": [
+    249.14064539715213,
+    268.8268878503006,
+    341.4419187825903
+   ],
+   "load_ms": 56948.55670002289,
+   "peak_rss_mb": 559.703125,
+   "process_threads": 43,
+   "torch_threads": 8
+  },
+  "dense|minilm|fastembed|b64|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 280.0592728687641,
+   "samples": [
+    291.3201680337906,
+    239.64558527230386,
+    280.0592728687641
+   ],
+   "load_ms": 1042.7985999267548,
+   "peak_rss_mb": 253.234375,
+   "process_threads": 29
+  },
+  "dense|minilm|libembedding|b64|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 488.94796684396596,
+   "samples": [
+    456.0871327054979,
+    488.94796684396596,
+    515.896526011161
+   ],
+   "load_ms": 648.1287999777123,
+   "peak_rss_mb": 204.02734375,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b64|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 307.52986569388565,
+   "samples": [
+    261.74146015778945,
+    307.52986569388565,
+    338.3181352956521
+   ],
+   "load_ms": 19471.170599921606,
+   "peak_rss_mb": 551.82421875,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b64|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 325.02297262173875,
+   "samples": [
+    325.02297262173875,
+    326.43124923770574,
+    314.75353696375294
+   ],
+   "load_ms": 918.8968000235036,
+   "peak_rss_mb": 255.84765625,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b128|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 496.52566098204056,
+   "samples": [
+    496.52566098204056,
+    453.99047181737785,
+    505.5673838533113
+   ],
+   "load_ms": 609.1676000505686,
+   "peak_rss_mb": 203.95703125,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b128|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 313.8688901251634,
+   "samples": [
+    313.8688901251634,
+    314.30818551936045,
+    309.6836689702827
+   ],
+   "load_ms": 19366.314199985936,
+   "peak_rss_mb": 600.171875,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b128|t0|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 299.86229423033626,
+   "samples": [
+    299.86229423033626,
+    313.05541900833475,
+    297.19194918001006
+   ],
+   "load_ms": 974.4390000123531,
+   "peak_rss_mb": 314.8359375,
+   "process_threads": 25
+  },
+  "dense|minilm|libembedding|b128|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 442.0759781730962,
+   "samples": [
+    505.94643910801483,
+    442.0759781730962,
+    376.10939578311405
+   ],
+   "load_ms": 662.358499947004,
+   "peak_rss_mb": 204.62890625,
+   "process_threads": 21
+  },
+  "dense|minilm|sentence-transformers|b128|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 330.2199971850403,
+   "samples": [
+    330.2199971850403,
+    334.75227009412254,
+    310.55744377011774
+   ],
+   "load_ms": 19388.743999996223,
+   "peak_rss_mb": 614.6953125,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|minilm|fastembed|b128|t8|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 278.44935120566464,
+   "samples": [
+    291.5931366018434,
+    278.44935120566464,
+    226.96337619418813
+   ],
+   "load_ms": 985.2350999135524,
+   "peak_rss_mb": 314.921875,
+   "process_threads": 29
+  },
+  "dense|minilm|libembedding|b128|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "libembedding",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 535.6667835571578,
+   "samples": [
+    542.419305104618,
+    535.6667835571578,
+    441.65577101338266
+   ],
+   "load_ms": 691.1861000116915,
+   "peak_rss_mb": 203.98046875,
+   "process_threads": 17
+  },
+  "dense|minilm|sentence-transformers|b128|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "sentence-transformers",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 300.6492430224612,
+   "samples": [
+    329.88662291370935,
+    300.6492430224612,
+    282.9439091475887
+   ],
+   "load_ms": 50636.59990008455,
+   "peak_rss_mb": 599.953125,
+   "process_threads": 35,
+   "torch_threads": 4
+  },
+  "dense|minilm|fastembed|b128|t4|r0": {
+   "kind": "dense",
+   "model": "minilm",
+   "lib": "fastembed",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 304.21596170344685,
+   "samples": [
+    297.07607919802246,
+    305.044307224699,
+    304.21596170344685
+   ],
+   "load_ms": 994.5734000066295,
+   "peak_rss_mb": 315.9609375,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b1|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 160.66519503635382,
+   "samples": [
+    160.66519503635382,
+    160.2691727154021,
+    160.95533558465743
+   ],
+   "load_ms": 901.3331000460312,
+   "peak_rss_mb": 246.7109375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b1|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 143.22863496895073,
+   "samples": [
+    147.73016370538994,
+    138.15796417918585,
+    143.22863496895073
+   ],
+   "load_ms": 769.8557999683544,
+   "peak_rss_mb": 221.875,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b1|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 235.5289150377739,
+   "samples": [
+    235.5289150377739,
+    234.89298123271496,
+    249.84010858059804
+   ],
+   "load_ms": 780.4542999947444,
+   "peak_rss_mb": 106.640625,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b1|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 52.17508267296699,
+   "samples": [
+    49.37751982759436,
+    52.666193109743354,
+    52.17508267296699
+   ],
+   "load_ms": 19700.685399933718,
+   "peak_rss_mb": 546.390625,
+   "process_threads": 32,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b1|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 1,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 138.86576966692033,
+   "samples": [
+    143.431436178718,
+    136.67110410280713,
+    138.86576966692033
+   ],
+   "load_ms": 1179.052499937825,
+   "peak_rss_mb": 243.6328125,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b1|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 123.72648330739557,
+   "samples": [
+    115.65203268747216,
+    123.72648330739557,
+    124.47224390833019
+   ],
+   "load_ms": 867.7725000306964,
+   "peak_rss_mb": 247.46484375,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-fp16|b1|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 100.84504517429139,
+   "samples": [
+    115.44317393492128,
+    100.84504517429139,
+    91.2300248668028
+   ],
+   "load_ms": 946.0366000421345,
+   "peak_rss_mb": 222.1484375,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-int8|b1|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 193.8961868175273,
+   "samples": [
+    194.91073263748515,
+    193.8961868175273,
+    157.74995559378854
+   ],
+   "load_ms": 734.0832999907434,
+   "peak_rss_mb": 107.578125,
+   "process_threads": 21
+  },
+  "dense|bge-small|sentence-transformers|b1|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 40.727018495889574,
+   "samples": [
+    40.246092783497794,
+    42.377258783249005,
+    40.727018495889574
+   ],
+   "load_ms": 14154.170299996622,
+   "peak_rss_mb": 546.765625,
+   "process_threads": 43,
+   "torch_threads": 8
+  },
+  "dense|bge-small|fastembed|b1|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 1,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 109.42916179262821,
+   "samples": [
+    108.30158039274299,
+    110.58276508915108,
+    109.42916179262821
+   ],
+   "load_ms": 1237.720400094986,
+   "peak_rss_mb": 244.27734375,
+   "process_threads": 29
+  },
+  "dense|bge-small|libembedding|b1|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 153.76612922327246,
+   "samples": [
+    153.76612922327246,
+    153.0572801404529,
+    156.55407203833448
+   ],
+   "load_ms": 761.2797999754548,
+   "peak_rss_mb": 246.93359375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b1|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 146.47360118139474,
+   "samples": [
+    154.53785577846958,
+    142.14873448592314,
+    146.47360118139474
+   ],
+   "load_ms": 794.2529999418184,
+   "peak_rss_mb": 221.58984375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b1|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 266.595311545777,
+   "samples": [
+    266.595311545777,
+    266.42715220503237,
+    276.05406551916883
+   ],
+   "load_ms": 667.3270000610501,
+   "peak_rss_mb": 106.62109375,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b1|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 51.49934922065552,
+   "samples": [
+    51.34366657813771,
+    52.22226686660197,
+    51.49934922065552
+   ],
+   "load_ms": 9752.545700059272,
+   "peak_rss_mb": 549.3203125,
+   "process_threads": 35,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b1|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 1,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 145.0228141197333,
+   "samples": [
+    145.41781132756515,
+    139.02768292705085,
+    145.0228141197333
+   ],
+   "load_ms": 1086.3566999323666,
+   "peak_rss_mb": 242.8828125,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b8|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 241.6851312085022,
+   "samples": [
+    246.43268966851178,
+    241.6851312085022,
+    234.24104706298803
+   ],
+   "load_ms": 893.112099962309,
+   "peak_rss_mb": 247.01953125,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b8|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 144.2015815845546,
+   "samples": [
+    144.2015815845546,
+    148.7568413074436,
+    142.97204336092184
+   ],
+   "load_ms": 803.8602999877185,
+   "peak_rss_mb": 221.609375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b8|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 263.4806446515597,
+   "samples": [
+    262.94670009885687,
+    266.14080082723757,
+    263.4806446515597
+   ],
+   "load_ms": 681.5296000568196,
+   "peak_rss_mb": 106.6640625,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b8|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 129.6061641928979,
+   "samples": [
+    137.6211666645007,
+    124.80308413451779,
+    129.6061641928979
+   ],
+   "load_ms": 19841.291300021112,
+   "peak_rss_mb": 559.72265625,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b8|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 8,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 173.02966834140932,
+   "samples": [
+    174.26785282566644,
+    173.02966834140932,
+    171.67115552571255
+   ],
+   "load_ms": 1084.9886999931186,
+   "peak_rss_mb": 244.90234375,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b8|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 194.48195947370417,
+   "samples": [
+    194.48195947370417,
+    207.7237938274749,
+    184.73002067910932
+   ],
+   "load_ms": 766.8095000553876,
+   "peak_rss_mb": 247.58984375,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-fp16|b8|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 112.83067822888913,
+   "samples": [
+    113.8754568044452,
+    112.83067822888913,
+    105.02868191486303
+   ],
+   "load_ms": 969.953800085932,
+   "peak_rss_mb": 222.1953125,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-int8|b8|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 201.38451045109622,
+   "samples": [
+    204.14805159706148,
+    201.38451045109622,
+    191.26853038007917
+   ],
+   "load_ms": 697.0834999810904,
+   "peak_rss_mb": 107.6484375,
+   "process_threads": 21
+  },
+  "dense|bge-small|sentence-transformers|b8|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 129.8636063322838,
+   "samples": [
+    129.8636063322838,
+    135.41600073176917,
+    120.10275463178537
+   ],
+   "load_ms": 19711.58469992224,
+   "peak_rss_mb": 563.50390625,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|bge-small|fastembed|b8|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 8,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 157.46973349134535,
+   "samples": [
+    154.64300306988827,
+    157.46973349134535,
+    157.80607640675385
+   ],
+   "load_ms": 1123.7846999429166,
+   "peak_rss_mb": 247.5625,
+   "process_threads": 29
+  },
+  "dense|bge-small|libembedding|b8|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 220.59236328684923,
+   "samples": [
+    220.59236328684923,
+    246.1175631228291,
+    218.3419080575185
+   ],
+   "load_ms": 871.0028000641614,
+   "peak_rss_mb": 246.8828125,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b8|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 148.09878408043167,
+   "samples": [
+    145.69607458028025,
+    154.1689551768573,
+    148.09878408043167
+   ],
+   "load_ms": 844.9510000646114,
+   "peak_rss_mb": 221.71484375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b8|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 259.1620926670916,
+   "samples": [
+    242.96849184851965,
+    259.1620926670916,
+    260.82551065448973
+   ],
+   "load_ms": 648.8105000462383,
+   "peak_rss_mb": 106.7734375,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b8|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 123.19510243256062,
+   "samples": [
+    140.58917436345718,
+    110.91156518463252,
+    123.19510243256062
+   ],
+   "load_ms": 10013.074100017548,
+   "peak_rss_mb": 562.19921875,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b8|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 8,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 110.14971946414852,
+   "samples": [
+    136.01208222431157,
+    89.1146737873779,
+    110.14971946414852
+   ],
+   "load_ms": 1003.4444000339136,
+   "peak_rss_mb": 244.6015625,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b32|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 217.6392711783326,
+   "samples": [
+    190.5475568861891,
+    223.65395044227725,
+    217.6392711783326
+   ],
+   "load_ms": 869.5506000658497,
+   "peak_rss_mb": 248.87109375,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-fp16|b32|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 118.47754319206453,
+   "samples": [
+    118.47754319206453,
+    119.80204963528293,
+    113.0281872187221
+   ],
+   "load_ms": 943.8561999704689,
+   "peak_rss_mb": 222.27734375,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-int8|b32|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 179.25057057239624,
+   "samples": [
+    183.45741046982204,
+    179.25057057239624,
+    156.3557257869314
+   ],
+   "load_ms": 691.7688000248745,
+   "peak_rss_mb": 107.625,
+   "process_threads": 21
+  },
+  "dense|bge-small|sentence-transformers|b32|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 165.00485600896778,
+   "samples": [
+    145.0348262692783,
+    165.00485600896778,
+    173.92853673159615
+   ],
+   "load_ms": 40580.423799925484,
+   "peak_rss_mb": 581.93359375,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|bge-small|fastembed|b32|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 130.24865445012748,
+   "samples": [
+    114.28827826135868,
+    139.56252619006705,
+    130.24865445012748
+   ],
+   "load_ms": 1334.797100047581,
+   "peak_rss_mb": 263.12109375,
+   "process_threads": 29
+  },
+  "dense|bge-small|libembedding|b32|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 265.7611864156944,
+   "samples": [
+    266.4423648222405,
+    265.7611864156944,
+    259.64726555475215
+   ],
+   "load_ms": 740.0591999758035,
+   "peak_rss_mb": 246.9140625,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b32|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 147.0801155390478,
+   "samples": [
+    148.8210973084477,
+    147.0801155390478,
+    146.2351946541854
+   ],
+   "load_ms": 797.0550999743864,
+   "peak_rss_mb": 221.94140625,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b32|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 266.27807819167793,
+   "samples": [
+    266.27807819167793,
+    246.86699248768744,
+    266.7637971461843
+   ],
+   "load_ms": 658.9174999389797,
+   "peak_rss_mb": 106.64453125,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b32|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 173.03426414096427,
+   "samples": [
+    173.03426414096427,
+    170.18182907394163,
+    173.9125141787954
+   ],
+   "load_ms": 19698.016099981032,
+   "peak_rss_mb": 577.19140625,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b32|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 32,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 146.8694634321605,
+   "samples": [
+    135.3255399982563,
+    149.46264442748094,
+    146.8694634321605
+   ],
+   "load_ms": 1051.8660000525415,
+   "peak_rss_mb": 250.1953125,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b64|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 262.26543307344747,
+   "samples": [
+    267.6474840668973,
+    247.92952196799172,
+    262.26543307344747
+   ],
+   "load_ms": 791.2866999395192,
+   "peak_rss_mb": 246.9765625,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b64|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 152.44392769427466,
+   "samples": [
+    150.5585503919141,
+    152.44392769427466,
+    153.60446313138974
+   ],
+   "load_ms": 771.0602999432012,
+   "peak_rss_mb": 221.94140625,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b64|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 269.7423989829231,
+   "samples": [
+    266.8031133315565,
+    269.7423989829231,
+    273.1302689860639
+   ],
+   "load_ms": 634.7772000590339,
+   "peak_rss_mb": 106.51171875,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b64|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 172.94126993914605,
+   "samples": [
+    172.74039157435726,
+    172.94126993914605,
+    176.0357808890188
+   ],
+   "load_ms": 29554.103099973872,
+   "peak_rss_mb": 592.703125,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b64|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 64,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 137.39545751273207,
+   "samples": [
+    137.39545751273207,
+    137.52733011864908,
+    125.72572661068443
+   ],
+   "load_ms": 1000.2984999446198,
+   "peak_rss_mb": 278.87890625,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b64|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 220.5740682740722,
+   "samples": [
+    251.8208029045599,
+    219.4790077556526,
+    220.5740682740722
+   ],
+   "load_ms": 801.1583000188693,
+   "peak_rss_mb": 247.4921875,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-fp16|b64|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 111.51200171379679,
+   "samples": [
+    107.82813265317863,
+    115.79111121385053,
+    111.51200171379679
+   ],
+   "load_ms": 916.6014000074938,
+   "peak_rss_mb": 222.1328125,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-int8|b64|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 188.92376253310877,
+   "samples": [
+    194.23979178371962,
+    183.9954366184745,
+    188.92376253310877
+   ],
+   "load_ms": 667.0654999325052,
+   "peak_rss_mb": 107.58203125,
+   "process_threads": 21
+  },
+  "dense|bge-small|sentence-transformers|b64|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 179.50652292699016,
+   "samples": [
+    179.52811143658082,
+    179.50652292699016,
+    173.83969824322466
+   ],
+   "load_ms": 20045.831799972802,
+   "peak_rss_mb": 606.625,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|bge-small|fastembed|b64|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 64,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 117.67020801493919,
+   "samples": [
+    107.42802252773376,
+    117.67020801493919,
+    119.72314979380374
+   ],
+   "load_ms": 1130.9604999842122,
+   "peak_rss_mb": 294.3515625,
+   "process_threads": 29
+  },
+  "dense|bge-small|libembedding|b64|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 267.15499750844594,
+   "samples": [
+    253.4816657315978,
+    270.9783660424951,
+    267.15499750844594
+   ],
+   "load_ms": 987.7364999847487,
+   "peak_rss_mb": 246.71875,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b64|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 148.9660534372392,
+   "samples": [
+    148.9660534372392,
+    152.37674271985608,
+    148.88395027582686
+   ],
+   "load_ms": 768.386600073427,
+   "peak_rss_mb": 221.46484375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b64|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 267.77922149521044,
+   "samples": [
+    267.77922149521044,
+    271.3479837959242,
+    260.6639648196529
+   ],
+   "load_ms": 636.1443999921903,
+   "peak_rss_mb": 106.67578125,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b64|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 148.2074201367735,
+   "samples": [
+    139.229858945304,
+    148.2074201367735,
+    162.48751750674674
+   ],
+   "load_ms": 19643.985200091265,
+   "peak_rss_mb": 591.32421875,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b64|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 64,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 136.64415003372147,
+   "samples": [
+    135.70226607912934,
+    136.64415003372147,
+    138.25193342841038
+   ],
+   "load_ms": 1058.7099000113085,
+   "peak_rss_mb": 295.1953125,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b128|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 253.84555711769582,
+   "samples": [
+    237.39149665569968,
+    256.67793200305056,
+    253.84555711769582
+   ],
+   "load_ms": 799.3627999676391,
+   "peak_rss_mb": 246.89453125,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b128|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 153.17352647423053,
+   "samples": [
+    156.21061783951882,
+    149.55616292461906,
+    153.17352647423053
+   ],
+   "load_ms": 804.3847000226378,
+   "peak_rss_mb": 221.484375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b128|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 267.3846336211381,
+   "samples": [
+    270.2587587002842,
+    267.3846336211381,
+    265.5173095002448
+   ],
+   "load_ms": 650.2318999264389,
+   "peak_rss_mb": 106.65234375,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b128|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 158.11067858207778,
+   "samples": [
+    158.11067858207778,
+    156.90359417838087,
+    159.3769965953369
+   ],
+   "load_ms": 19814.671900006942,
+   "peak_rss_mb": 640.50390625,
+   "process_threads": 34,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b128|t0|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 128,
+   "threads": 0,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 126.7042706364346,
+   "samples": [
+    119.38073678146833,
+    126.7042706364346,
+    129.30144197803412
+   ],
+   "load_ms": 1075.852199923247,
+   "peak_rss_mb": 344.0703125,
+   "process_threads": 25
+  },
+  "dense|bge-small|libembedding|b128|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 221.93161510512553,
+   "samples": [
+    261.65421615786045,
+    221.93161510512553,
+    209.90358708576767
+   ],
+   "load_ms": 818.9454999519512,
+   "peak_rss_mb": 247.36328125,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-fp16|b128|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 95.21731609935863,
+   "samples": [
+    76.0593880520844,
+    95.21731609935863,
+    122.25410256071483
+   ],
+   "load_ms": 1001.399299944751,
+   "peak_rss_mb": 222.18359375,
+   "process_threads": 21
+  },
+  "dense|bge-small|libembedding-int8|b128|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 164.31325447844424,
+   "samples": [
+    198.16893881844234,
+    164.31325447844424,
+    149.2613726340217
+   ],
+   "load_ms": 690.3351000510156,
+   "peak_rss_mb": 107.5390625,
+   "process_threads": 21
+  },
+  "dense|bge-small|sentence-transformers|b128|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 150.26895061413623,
+   "samples": [
+    144.26367660764123,
+    150.26895061413623,
+    161.82620483562567
+   ],
+   "load_ms": 19816.21439999435,
+   "peak_rss_mb": 643.2578125,
+   "process_threads": 45,
+   "torch_threads": 8
+  },
+  "dense|bge-small|fastembed|b128|t8|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 128,
+   "threads": 8,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 120.43887879181159,
+   "samples": [
+    115.51700275753437,
+    122.65974558150741,
+    120.43887879181159
+   ],
+   "load_ms": 1111.8255999172106,
+   "peak_rss_mb": 345.21484375,
+   "process_threads": 29
+  },
+  "dense|bge-small|libembedding|b128|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 257.1868221281638,
+   "samples": [
+    257.1868221281638,
+    253.6239501918919,
+    278.7099386491182
+   ],
+   "load_ms": 799.5475000934675,
+   "peak_rss_mb": 246.90234375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-fp16|b128|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-fp16",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 151.39149219065067,
+   "samples": [
+    146.80677141527343,
+    151.39149219065067,
+    153.16105032805208
+   ],
+   "load_ms": 790.2464000508189,
+   "peak_rss_mb": 221.83984375,
+   "process_threads": 17
+  },
+  "dense|bge-small|libembedding-int8|b128|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "libembedding-int8",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 264.0041043156466,
+   "samples": [
+    277.6275118847483,
+    254.04175349352263,
+    264.0041043156466
+   ],
+   "load_ms": 719.7201000526547,
+   "peak_rss_mb": 106.4765625,
+   "process_threads": 17
+  },
+  "dense|bge-small|sentence-transformers|b128|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "sentence-transformers",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 162.3244260451716,
+   "samples": [
+    152.7162835953907,
+    164.3141184431955,
+    162.3244260451716
+   ],
+   "load_ms": 19472.198000061326,
+   "peak_rss_mb": 641.421875,
+   "process_threads": 37,
+   "torch_threads": 4
+  },
+  "dense|bge-small|fastembed|b128|t4|r0": {
+   "kind": "dense",
+   "model": "bge-small",
+   "lib": "fastembed",
+   "batch": 128,
+   "threads": 4,
+   "round": 0,
+   "n_texts": 1000,
+   "status": "ok",
+   "docs_per_s": 126.15151576729117,
+   "samples": [
+    124.37417403118266,
+    128.70683073208113,
+    126.15151576729117
+   ],
+   "load_ms": 1071.738800033927,
+   "peak_rss_mb": 344.11328125,
+   "process_threads": 25
+  }
+ },
+ "machine": {
+  "timestamp": "2026-11-28T11:10:40Z",
+  "git_commit": "463c5de",
+  "git_dirty": false,
+  "libembedding_version": "1.13.0",
+  "python": "3.12.10",
+  "machine": "AMD64",
+  "cpu_model": "Intel(R) Core(TM) i7-1065G7 CPU @ 1.30GHz",
+  "physical_cores": 4,
+  "logical_cores": 8,
+  "ram_mb": 16124,
+  "cpu_features": "AVX,FMA,AVX2,AVX512F",
+  "os": "Windows-11-10.0.26300-SP0",
+  "onnxruntime_version": "1.31.0",
+  "llama_cpp_build": "llama.cpp enabled",
+  "ggml_cpu_features": "SSE3 SSSE3 AVX AVX2 F16C FMA BMI2 AVX512 AVX512_VNNI LLAMAFILE OPENMP REPACK"
+ },
+ "protocol": {
+  "warmup_texts": 50,
+  "runs": 3,
+  "rounds": 3,
+  "grid_rounds": 1,
+  "batch_default": 32
+ },
+ "versions": {
+  "libembedding": "1.13.0",
+  "sentence_transformers": "6.3.0",
+  "fastembed": "0.9.1",
+  "torch": "2.15.0+cpu",
+  "onnxruntime": "1.31.0",
+  "numpy": "2.5.2"
+ }
+}
