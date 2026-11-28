@@ -3,7 +3,7 @@
  * Dynamic batching scheduler for llama.cpp session pool
  *
  * Auteur: David Orel
- * Version: 1.16.7
+ * Version: 1.17.0
  *
  * SPDX-License-Identifier: MIT
  */

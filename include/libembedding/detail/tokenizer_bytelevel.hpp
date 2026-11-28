@@ -10,7 +10,7 @@
  * is the judge of how far that matters.
  *
  * Auteur: David Orel
- * Version: 1.16.7
+ * Version: 1.17.0
  *
  * SPDX-License-Identifier: MIT
  */

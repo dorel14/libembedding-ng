@@ -8,7 +8,7 @@
  * way to copy a measurement into a result, and lets every task report P95.
  *
  * Auteur: David Orel
- * Version: 1.16.7
+ * Version: 1.17.0
  *
  * SPDX-License-Identifier: MIT
  */
