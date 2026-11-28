@@ -4,7 +4,7 @@
  * Include-only header (included from reranker.h when LIBEMBEDDING_IMPLEMENTATION is defined)
  *
  * Auteur: David Orel
- * Version: 1.16.7
+ * Version: 1.17.0
  *
  * SPDX-License-Identifier: MIT
  */

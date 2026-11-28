@@ -3,7 +3,7 @@
  * config.h - Version and feature configuration
  *
  * Auteur: David Orel
- * Version: 1.16.7
+ * Version: 1.17.0
  *
  * SPDX-License-Identifier: MIT
  */
@@ -12,9 +12,9 @@
 #define LIBEMBEDDING_CONFIG_H
 
 #define LIBEMBEDDING_VERSION_MAJOR 1
-#define LIBEMBEDDING_VERSION_MINOR 16
-#define LIBEMBEDDING_VERSION_PATCH 7
-#define LIBEMBEDDING_VERSION_STRING "1.16.7"
+#define LIBEMBEDDING_VERSION_MINOR 17
+#define LIBEMBEDDING_VERSION_PATCH 0
+#define LIBEMBEDDING_VERSION_STRING "1.17.0"
 
 /* Feature toggles (can be defined before including headers) */
 
