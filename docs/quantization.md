@@ -94,6 +94,28 @@ Ces refus sont remontés par `LEMBED_ERROR_UNSUPPORTED` avec le détail dans `le
 
 Cette liste concerne le **sparse GGUF**. Elle ne dit rien des quantifications acceptées par le backend dense llama.cpp, qui lit les GGUF via llama.cpp lui-même.
 
+## Qualité par variante
+
+Qualité de recherche mesurée sur BEIR SciFact (test : 5183 documents, 300 requêtes), similarité cosinus exhaustive, sans mesure de temps. La colonne « Cosinus vs FP32 » est le cosinus moyen entre l'embedding d'un document et celui de l'entrée FP32 du même modèle.
+
+| Modèle | Entrée du registre | Quantification | nDCG@10 | MRR@10 | Recall@100 | Cosinus vs FP32 |
+|---|---|---|---:|---:|---:|---:|
+| bge-small-en-v1.5 | Xenova/bge-small-en-v1.5 | none | 0,7127 | 0,6822 | 0,9417 | 1,00000 |
+| bge-small-en-v1.5 | onnx-community/bge-small-en-v1.5-ONNX | dynamic | 0,7077 | 0,6766 | 0,9467 | 0,99831 |
+| bge-small-en-v1.5 | Qdrant/bge-small-en-v1.5-onnx-Q | fp16 | 0,7127 | 0,6822 | 0,9417 | 1,00000 |
+| all-MiniLM-L6-v2 | Qdrant/all-MiniLM-L6-v2-onnx | none | 0,6541 | 0,6071 | 0,9317 | 1,00000 |
+| all-MiniLM-L6-v2 | Xenova/all-MiniLM-L6-v2 | dynamic | 0,6519 | 0,6077 | 0,9367 | 0,99336 |
+
+Une variante du registre est un autre dépôt, donc potentiellement un autre export du modèle : le tableau mesure l'entrée que l'utilisateur obtient, pas le seul effet du quantificateur. Mesuré sur un i7-1065G7, ONNX Runtime 1.31.0, une seule exécution (pas d'intervalle de confiance : les écarts de l'ordre de 0,005 sur 300 requêtes ne sont pas significatifs).
+
+Reproduire :
+
+```powershell
+python benchmarks/quantization/bench_quality.py --models BAAI/bge-small-en-v1.5 sentence-transformers/all-MiniLM-L6-v2
+```
+
+Le script écrit `quality_results.json` et `quality_results.md` dans `benchmarks/quantization/` (option `--out`), avec les métadonnées de la machine.
+
 ## Mesurer
 
 Une quantification plus petite n'est pas forcément plus rapide : cela dépend du CPU, du modèle, du batch et de la longueur des séquences. Avant de choisir :

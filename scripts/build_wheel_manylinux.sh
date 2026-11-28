@@ -55,8 +55,30 @@ cmake --version | sed -n 1p
 ldd --version | sed -n 1p
 
 echo "== system dependencies"
-# bzip2 and xz unpack the curl and mbedTLS source archives.
-dnf install -y bzip2 xz
+# bzip2 and xz unpack the curl and mbedTLS source archives. Both live in
+# BaseOS: only that repository is enabled, because an AppStream mirror outage
+# ("Failed to download metadata for repo 'appstream'") failed the aarch64 job
+# although nothing was needed from it. Nothing is installed when the image
+# already ships both tools, and a transient mirror error is retried.
+missing=""
+command -v bzip2 > /dev/null || missing="$missing bzip2"
+command -v xz > /dev/null || missing="$missing xz"
+if [ -n "$missing" ]; then
+    for attempt in 1 2 3; do
+        # shellcheck disable=SC2086
+        dnf install -y --setopt=retries=10 --setopt=timeout=60 \
+            --disablerepo='*' --enablerepo=baseos $missing && break
+        if [ "$attempt" = 3 ]; then
+            echo "ERROR: dnf install$missing failed 3 times" >&2
+            exit 1
+        fi
+        echo "WARNING: dnf install attempt $attempt failed, retrying" >&2
+        # Drop possibly half-downloaded metadata so the next try refetches it
+        # (a 404 on a mirror often means a stale mirrorlist).
+        dnf clean all > /dev/null 2>&1 || true
+        sleep 10
+    done
+fi
 
 echo "== ONNX Runtime ${ONNXRUNTIME_VERSION} (${ort_arch})"
 # GitHub release asset, NuGet fallback (see fetch_onnxruntime.sh).

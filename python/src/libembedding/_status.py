@@ -7,7 +7,9 @@ Version: 1.16.7
 from ._binding import ffi, lib
 from .exceptions import (
     BatchSizeError,
+    CacheMissError,
     DownloadError,
+    GgufError,
     InvalidArgumentError,
     IOError,
     LembedError,
@@ -30,6 +32,8 @@ _STATUS_MAP = {
     8: UnsupportedError,
     9: BatchSizeError,
     10: LlamaError,
+    11: CacheMissError,
+    12: GgufError,
 }
 
 

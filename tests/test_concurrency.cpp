@@ -76,6 +76,25 @@ static void run_text_shared(const char* label, lembed_text_embedding_t* ctx, boo
         return;
     }
     const int dim = ref.dim;
+
+    /* The threads below are compared with this reference, so a reference that
+     * is itself garbage would make the whole test vacuous. v1.16.0 forced RANK
+     * pooling on every GGUF: the pooled vector was one float and embed_tokens()
+     * copied n_embd floats out of it, a heap over-read that every later
+     * comparison reproduced identically. Text embeddings are L2-normalised, so
+     * a finite unit-norm row is a cheap, backend-independent sanity check. */
+    bool sane = (ref.num_embeddings == kNumTexts && dim > 0);
+    for (int i = 0; sane && i < ref.num_embeddings; i++) {
+        double norm_sq = 0.0;
+        for (int j = 0; j < dim; j++) {
+            const double v = ref.data[(size_t)i * dim + j];
+            if (!std::isfinite(v)) { sane = false; break; }
+            norm_sq += v * v;
+        }
+        if (sane && std::fabs(std::sqrt(norm_sq) - 1.0) > 1e-2) sane = false;
+    }
+    CONC_CHECK(sane, "reference embeddings are finite and unit-norm");
+
     std::atomic<int> mismatches{0};
 
     conc_run(kThreads, [&](int) {

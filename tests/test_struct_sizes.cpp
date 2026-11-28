@@ -50,6 +50,12 @@ int main(void) {
     ASSERT_SIZE(lembed_embeddings_t, 16);
     ASSERT_SIZE(lembed_sparse_embedding_t, 24);
     ASSERT_SIZE(lembed_rerank_result_t, 8);
+    /* ptr + provider + device_id (16), 9 ints (36) = 52, padded to 56,
+     * cache_dir ptr (8) + 2 ints (8) = 72 */
+    ASSERT_SIZE(lembed_multivector_options_t, 72);
+    /* 2 ptrs (16), 2 ints (8), int64 */
+    ASSERT_SIZE(lembed_multivectors_t, 32);
+    ASSERT_SIZE(lembed_mv_mode_t, 4);
     ASSERT_SIZE(lembed_cache_config_t, 24);
     ASSERT_SIZE(lembed_text_options_t, 88);
     ASSERT_SIZE(lembed_text_options_v2_t, 96);
@@ -87,6 +93,12 @@ int main(void) {
         /* 2 ptrs + int */
         ASSERT_SIZE(lembed_sparse_embedding_t, 12);
         ASSERT_SIZE(lembed_rerank_result_t, 8);
+        /* ptr + provider + device_id (12), 9 ints (36) = 48, no padding,
+         * cache_dir ptr (4) + 2 ints (8) = 60 */
+        ASSERT_SIZE(lembed_multivector_options_t, 60);
+        /* 2 ptrs (8), 2 ints (8) = 16, int64 @16 */
+        ASSERT_SIZE(lembed_multivectors_t, 24);
+        ASSERT_SIZE(lembed_mv_mode_t, 4);
         /* size_t, size_t, int */
         ASSERT_SIZE(lembed_cache_config_t, 12);
         /* model, provider, device_id (12) + cache_dir ptr (16) + 15 ints/enums
@@ -130,6 +142,15 @@ int main(void) {
         ASSERT(offsetof(lembed_sparse_embedding_t, values) == 4,
                "sparse.values offset");
         ASSERT(offsetof(lembed_sparse_embedding_t, length) == 8, "sparse.length offset");
+        ASSERT(offsetof(lembed_multivector_options_t, num_threads) == 12,
+               "multivector_options.num_threads offset");
+        ASSERT(offsetof(lembed_multivector_options_t, attend_to_expansion) == 44,
+               "multivector_options.attend_to_expansion offset");
+        ASSERT(offsetof(lembed_multivector_options_t, cache_dir) == 48,
+               "multivector_options.cache_dir offset");
+        ASSERT(offsetof(lembed_multivectors_t, num_docs) == 8, "multivectors.num_docs offset");
+        ASSERT(offsetof(lembed_multivectors_t, total_vectors) == 16,
+               "multivectors.total_vectors offset");
         ASSERT(offsetof(lembed_cache_config_t, current_size) == 4,
                "cache_config.current_size offset");
         ASSERT(offsetof(lembed_cache_config_t, ttl_seconds) == 8,

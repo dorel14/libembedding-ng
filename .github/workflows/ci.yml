@@ -46,3 +46,11 @@ jobs:
     name: Wheel checks
     needs: [python-tests]
     uses: ./.github/workflows/wheel-checks.yml
+
+  # Only the Linux x86_64 wheel is needed: a failure on another platform must
+  # not skip the measurement. Without that wheel the job fails, non-blocking.
+  perf-smoke:
+    name: Perf smoke
+    needs: [python-tests]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/perf-smoke.yml

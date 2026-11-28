@@ -237,6 +237,21 @@ et les autres noms du modèle ONNX chargent toujours le modèle ONNX.
 
 ---
 
+## Modèles multi-vecteurs (1 modèle)
+
+| HuggingFace name | Dim | Max tokens (document) | Taille | Description | Licence |
+|------------------|-----|-----------------------|--------|-------------|---------|
+| `answerdotai/answerai-colbert-small-v1` | 96 | 300 | 127 Mo | ColBERT (interaction tardive), anglais, ONNX FP32 (`vespa_colbert.onnx`) | Apache-2.0 |
+
+`MultiVectorEmbedding("answerdotai/answerai-colbert-small-v1")` télécharge
+`vespa_colbert.onnx`, `tokenizer.json` et `onnx_config.json` dans le cache au premier
+usage (mêmes options `cache_dir`, `offline`, `show_download_progress` que les autres
+modèles). Un répertoire local existant du même nom l'emporte sur le registre. Liste :
+`libembedding.list_multivector_models()` ou `MultiVectorEmbedding.list_supported_models()` ;
+en C : `lembed_list_multivector_models()`, `lembed_ensure_multivector_model()`.
+
+---
+
 ## Matrice de compatibilité (validation par référence)
 
 Un modèle n'est *validé* que lorsque libembedding reproduit une référence. La référence
@@ -255,8 +270,9 @@ La troncature est fixée à 512 des deux côtés. Mesuré avec la correction de 
 WordPiece de la PR #62 (0 écart d'ids avec HF sur le corpus).
 
 Statut selon le cosinus minimal : **validé** >= 0,999, **dégradé** 0,99 à 0,999,
-**cassé** < 0,99. Mesuré le 2026-11-17 ; les variantes quantifiées sont dans la même
-ligne.
+**cassé** < 0,99. Mesuré le 2026-11-22, après les tokenizers Unigram (PR #68),
+BPE byte-level (PR #79) et BPE `Whitespace` (PR #97) ; les variantes quantifiées sont
+dans la même ligne.
 
 | Modèle | Famille de tokenizer | Cosinus min / moyen (tous) | Anglais min | Statut |
 |---|---|---|---|---|
@@ -267,16 +283,16 @@ ligne.
 | gte-base-en-v1.5, gte-large-en-v1.5 (quantifié) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
 | snowflake-arctic-embed-xs / s / m / m-long / l | WordPiece | 1,000 / 1,000 | 1,000 | validé |
 | Splade_PP_en_v1 (sparse, cosinus des vecteurs) | WordPiece | 1,000 / 1,000 | 1,000 | validé |
-| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 0,021 / 0,347 | 0,034 | cassé |
-| multilingual-e5-small | Unigram (SentencePiece) | 0,768 / 0,823 | 0,768 | cassé |
-| clip-vit-base-patch32 (texte) | BPE byte-level | 0,295 / 0,763 | 0,316 | cassé |
-| jina-reranker-v1-turbo-en (reranker, Pearson des scores) | BPE (non byte-level) | 0,42-0,46 | n/d | cassé |
+| paraphrase-multilingual-MiniLM-L12-v2 | Unigram (SentencePiece) | 1,000 / 1,000 | 1,000 | validé |
+| multilingual-e5-small | Unigram (SentencePiece) | 1,000 / 1,000 | 1,000 | validé |
+| clip-vit-base-patch32 (texte) | BPE byte-level | 1,000 / 1,000 | 1,000 | validé |
+| jina-reranker-v1-turbo-en (reranker, Pearson des scores ; quantifié 0,99996) | BPE (non byte-level, `Whitespace`) | 1,000 | n/d | validé |
 
-Lecture : **tous les modèles WordPiece mesurés reproduisent la référence** sur tout le
-corpus multilingue (plus petit cosinus minimal 0,9999999999999984). Unigram (XLM-R) et
-BPE byte-level (CLIP, ModernBERT) sont cassés même en anglais : ils demandent leur propre
-tokenizer (T38). Le reranker (ONNX et GGUF) encode désormais une vraie paire,
-comme HF (le GGUF la construit depuis les tokens spéciaux du vocabulaire).
+Lecture : **tous les modèles mesurés reproduisent la référence** sur tout le corpus
+multilingue, quelle que soit la famille de tokenizer (WordPiece, Unigram, BPE byte-level,
+BPE `Whitespace`). Le reranker (ONNX et GGUF) encode une vraie paire, comme HF (le GGUF
+la construit depuis les tokens spéciaux du vocabulaire) ; sa référence est le logit brut
+sur 8 paires, dont russe et chinois.
 
 Non mesurés (absents du cache local ou de plus de 560 Mo ; la famille vient de
 l'architecture, pas du `tokenizer.json`) : all-mpnet-base-v2, bge-large-en-v1.5,
@@ -297,6 +313,7 @@ text_models = libembedding.list_text_models()
 sparse_models = libembedding.list_sparse_models()
 image_models = libembedding.list_image_models()
 reranker_models = libembedding.list_reranker_models()
+multivector_models = libembedding.list_multivector_models()
 
 # Inspecter un modèle
 for m in text_models:

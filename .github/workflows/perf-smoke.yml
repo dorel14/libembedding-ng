@@ -1,0 +1,56 @@
+name: Perf smoke (reusable)
+
+# Non-blocking performance smoke test (T16, decision D7: no controlled runner,
+# so only ratios that cancel the machine out are compared). It runs after
+# build-wheel.yml in the same workflow run, on the Linux x86_64 wheel it
+# uploaded, and reports a ::warning:: when a ratio drops beyond the threshold
+# of benchmarks/perf_smoke.py. It never fails the run on a slowdown.
+
+on:
+  workflow_call:
+
+jobs:
+  perf-smoke:
+    name: Perf smoke (linux-x86_64)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Download Linux x86_64 wheel
+        uses: actions/download-artifact@v8
+        with:
+          name: wheel-ubuntu-22.04
+          path: dist/
+
+      # Same key as build-wheel.yml: the model is already there, no download.
+      - name: Restore downloaded models
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/libembedding-models
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
+
+      - name: Install wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip install dist/*manylinux*.whl
+
+      # Step-level env: the runner context is not available in job-level env.
+      - name: Run perf smoke
+        env:
+          LIBEMBEDDING_CACHE_DIR: ${{ runner.temp }}/libembedding-models
+        run: |
+          python benchmarks/perf_smoke.py --platform linux-x86_64 --out perf-smoke.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-smoke-linux-x86_64
+          path: perf-smoke.json
+          if-no-files-found: ignore
+          retention-days: 90

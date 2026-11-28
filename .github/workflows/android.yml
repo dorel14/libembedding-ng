@@ -30,13 +30,24 @@ jobs:
       matrix:
         abi: [arm64-v8a, x86_64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # The AAR is the same for both ABIs: cache it on the ORT version so a
+      # Maven Central 429 does not fail the job when it is already known.
+      - name: Cache ONNX Runtime Android AAR
+        id: aar-cache
+        uses: actions/cache@v6
+        with:
+          path: onnxruntime-android-${{ env.ONNXRUNTIME_VERSION }}.aar
+          key: ort-android-aar-${{ env.ONNXRUNTIME_VERSION }}
 
       - name: Fetch ONNX Runtime Android AAR
         run: |
           aar="onnxruntime-android-${ONNXRUNTIME_VERSION}.aar"
-          curl -fsSL -o "$aar" \
-            "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ONNXRUNTIME_VERSION}/$aar"
+          if [ ! -s "$aar" ]; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o "$aar" \
+              "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ONNXRUNTIME_VERSION}/$aar"
+          fi
           mkdir -p ort-aar ort/include ort/lib
           unzip -q "$aar" -d ort-aar
           cp ort-aar/headers/*.h ort/include/
@@ -86,7 +97,7 @@ jobs:
           # Every shipped object must target the requested ABI.
           file stage/libembedding.so stage/libggml-cpu-*.so | sed 's/,.*BuildID.*//'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-${{ matrix.abi }}
           path: stage/
@@ -102,9 +113,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: android-x86_64
           path: stage/

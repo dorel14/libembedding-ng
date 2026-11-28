@@ -146,6 +146,11 @@ typedef enum {
     LEMBED_RERANKER_MODEL_COUNT,
 } lembed_reranker_model_t;
 
+typedef enum {
+    LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1 = 0,
+    LEMBED_MULTIVECTOR_MODEL_COUNT,
+} lembed_multivector_model_t;
+
 /* ═══ Structs ══════════════════════════════════════════════════════ */
 
 typedef struct {
@@ -369,6 +374,51 @@ void lembed_sparse_text_embedding_free(lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_backend_name(const lembed_sparse_embedding_ctx_t* ctx);
 const char* lembed_sparse_text_embedding_effective_provider(const lembed_sparse_embedding_ctx_t* ctx);
 
+/* ═══ Functions: Multi-vector (ColBERT) embedding ═══════════════════ */
+
+typedef struct lembed_multivector lembed_multivector_t;
+
+typedef enum {
+    LEMBED_MV_DOCUMENT = 0,
+    LEMBED_MV_QUERY = 1
+} lembed_mv_mode_t;
+
+typedef struct {
+    const char* model_dir;
+    lembed_execution_provider_t provider;
+    int device_id;
+    int num_threads;
+    int batch_size;
+    int max_tokens_per_batch;
+    int query_maxlen;
+    int doc_maxlen;
+    int normalize;
+    int mask_punctuation;
+    int query_expansion;
+    int attend_to_expansion;
+    const char* cache_dir;
+    int show_download_progress;
+    int offline;
+} lembed_multivector_options_t;
+
+typedef struct {
+    float*   data;
+    int64_t* offsets;
+    int      num_docs;
+    int      dim;
+    int64_t  total_vectors;
+} lembed_multivectors_t;
+
+lembed_multivector_options_t lembed_multivector_options_default(void);
+lembed_status_t lembed_multivector_create(const lembed_multivector_options_t* options, lembed_multivector_t** out);
+lembed_status_t lembed_multivector_embed(lembed_multivector_t* mv, const char* const* texts, int n, lembed_mv_mode_t mode, lembed_multivectors_t* out);
+void lembed_multivectors_free(lembed_multivectors_t* result);
+int lembed_multivector_dim(const lembed_multivector_t* mv);
+const lembed_model_desc_t* lembed_multivector_desc(const lembed_multivector_t* mv);
+const char* lembed_multivector_backend_name(const lembed_multivector_t* mv);
+void lembed_multivector_stats(const lembed_multivector_t* mv, lembed_stats_t* out);
+void lembed_multivector_free(lembed_multivector_t* mv);
+
 /* ═══ Functions: Image embedding ════════════════════════════════════ */
 
 lembed_status_t lembed_image_embedding_create(const lembed_image_options_t* options, lembed_image_embedding_t** out);
@@ -409,14 +459,17 @@ lembed_status_t lembed_get_text_model_info(lembed_text_model_t model, lembed_mod
 lembed_status_t lembed_get_sparse_model_info(lembed_sparse_model_t model, lembed_model_info_t* out);
 lembed_status_t lembed_get_image_model_info(lembed_image_model_t model, lembed_model_info_t* out);
 lembed_status_t lembed_get_reranker_model_info(lembed_reranker_model_t model, lembed_model_info_t* out);
+lembed_status_t lembed_get_multivector_model_info(lembed_multivector_model_t model, lembed_model_info_t* out);
 lembed_status_t lembed_list_text_models(const lembed_model_info_t** out, int* count);
 lembed_status_t lembed_list_sparse_models(const lembed_model_info_t** out, int* count);
 lembed_status_t lembed_list_image_models(const lembed_model_info_t** out, int* count);
 lembed_status_t lembed_list_reranker_models(const lembed_model_info_t** out, int* count);
+lembed_status_t lembed_list_multivector_models(const lembed_model_info_t** out, int* count);
 int lembed_find_text_model_by_code(const char* model_code);
 int lembed_find_sparse_model_by_code(const char* model_code);
 int lembed_find_reranker_model_by_code(const char* model_code);
 int lembed_find_image_model_by_code(const char* model_code);
+int lembed_find_multivector_model_by_code(const char* model_code);
 int lembed_find_text_model_variant(const char* model_name, int quantization);
 
 /* Accepts the HuggingFace repo (model_code) or the canonical registry name
@@ -424,6 +477,7 @@ int lembed_find_text_model_variant(const char* model_name, int quantization);
 int lembed_resolve_text_model(const char* model);
 int lembed_resolve_reranker_model(const char* model);
 int lembed_resolve_sparse_model(const char* model);
+int lembed_resolve_multivector_model(const char* model);
 
 /* Download size (MB) of a registry (model_code, model_file) pair, -1 if unknown. */
 int lembed_model_download_size_mb(const char* model_code, const char* model_file);
@@ -436,6 +490,7 @@ lembed_status_t lembed_ensure_text_model(lembed_text_model_t model, const char* 
 lembed_status_t lembed_ensure_sparse_model(lembed_sparse_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
 lembed_status_t lembed_ensure_image_model(lembed_image_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
 lembed_status_t lembed_ensure_reranker_model(lembed_reranker_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
+lembed_status_t lembed_ensure_multivector_model(lembed_multivector_model_t model, const char* cache_dir, int show_progress, int offline, char** model_dir_out);
 lembed_status_t lembed_ensure_gguf_model(const char* repo, const char* filename, const char* cache_dir, int show_progress, int offline, char** model_path_out);
 void lembed_free_string(char* s);
 
@@ -460,6 +515,11 @@ lembed_status_t lembed_cleanup_model_cache_except(
 float lembed_cosine_similarity(const float* a, const float* b, int dim);
 float lembed_dot_product(const float* a, const float* b, int dim);
 float lembed_euclidean_distance(const float* a, const float* b, int dim);
+lembed_status_t lembed_maxsim(const float* q, int nq, const float* d, int nd,
+                              int dim, float* out_score);
+lembed_status_t lembed_maxsim_batch(const float* q, int nq, const float* docs,
+                                    const int64_t* offsets, int num_docs,
+                                    int dim, float* out_scores);
 
 /* ═══ Functions: Memory free ══════════════════════════════════════ */
 

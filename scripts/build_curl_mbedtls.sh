@@ -66,7 +66,7 @@ sha256_check() {  # sha256 file
 
 fetch() {  # url file sha256
     if [ ! -f "$src/$2" ]; then
-        curl -fsSL --retry 3 -o "$src/$2.part" "$1"
+        curl -fsSL --retry 5 --retry-delay 5 -o "$src/$2.part" "$1"
         mv "$src/$2.part" "$src/$2"
     fi
     sha256_check "$3" "$src/$2"

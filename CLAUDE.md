@@ -103,23 +103,36 @@ La CI wheel exige une couverture Python ≥ 40 % (`--cov-fail-under=40`).
 - GPU (CUDA, DirectML, CoreML, TensorRT, Vulkan, Metal) : hors périmètre jusqu'après 1.x.
 - Ne jamais présumer qu'une quantification est plus rapide : mesurer.
 
-## 6. État de la roadmap (au 2026-11-01)
+## 6. État de la roadmap (au 2026-11-26)
+
+Le détail vit dans `.kilo/plans/roadmap.md` et `.kilo/plans/le11-corrections.md` ;
+cette section n'en est qu'un résumé.
 
 Fait : API C/C++/Python stable, autotune (texte, reranker, sparse, quantization auto),
-cache LRU, backend llama.cpp dense + reranker, sparse ONNX avec `top_k`/`min_weight`,
-benchmark 4 backends (colonne Sparse GGUF encore `unavailable`), audit llama.cpp v0.6.0
-(merge conditionnel : sparse +8,6 % débit, dense légère régression dans le bruit).
+cache LRU, backend llama.cpp dense + reranker, sparse ONNX (`top_k`/`min_weight`) et
+sparse GGUF (LE-9.4), ONNX Runtime 1.31.0, tokenizers HF-exacts (WordPiece, Unigram,
+BPE byte-level, `Whitespace`), tests Linux en CI, smoke-test de perf en CI (non
+bloquant), audit llama.cpp v0.6.0.
+- **P2.6 — CPU dispatch runtime** : phases 0 à 2 closes (Windows, puis Linux x64 et
+  aarch64, PR #102). Les wheels embarquent toutes les variantes ggml. Suite : phase
+  macOS/ARM selon `.kilo/plans/rfc-cpu-dispatch.md`, validée par la CI (pas de matériel
+  Apple Silicon / AMD).
+- **Wheels** : 7 wheels publiées à chaque release (manylinux x86_64, aarch64 et armv7l,
+  macOS arm64, Windows amd64, Android arm64-v8a et x86_64).
+- **LE-11** : benchmarks concurrentiels faits ; leurs écarts sont traités dans
+  `.kilo/plans/le11-corrections.md`.
+- **Train 1.16.x** (correctifs depuis `main`) : 1.16.4 (validation des enums de l'API C),
+  1.16.5 (texte coréen en GGUF WordPiece, T45), 1.16.6 (lots de séquences en GGUF dense,
+  +50 % de débit dès 8 textes).
 
-En cours / ouvert :
-- **P2.6 — CPU dispatch runtime** (baseline/AVX2/AVX-512/NEON/SVE) : XL, phases 0→6.
-  Phase 0 = compléter `rfc-cpu-dispatch.md` (stub). Questions ouvertes : périmètre
-  (kernels ORT ou seulement SIMD maison), priorité AVX-512 sur CPU hybrides, stratégie
-  de wheels, baseline minimale.
-- **Fix chargement `libembedding.dylib` sur macOS** : implémenté, validation sur runner
-  `macos-14` et doc `python/README.md` restantes.
-- **ONNX Runtime 1.20.1 → 1.31.0** : planifié (3 workflows, `third_party/onnxruntime/`,
-  adaptation éventuelle de `onnx_session_impl.hpp`).
-- **LE-9.4 sparse GGUF** : P1.5b→P1.5e (représentation des têtes, runtime ggml,
-  post-traitement SPLADE, validation ONNX ↔ GGUF), puis 1 entrée registry `SPLADE-PP-En-v1`.
-- **LE-8.8 / LE-1.11** : wheels multi-plateformes complètes ; **LE-1.10** : tests Linux CI.
-- **LE-11** : benchmarks concurrentiels vs SentenceTransformers et FastEmbed.
+Sur `dev`, pour la 1.17 (release sur feu vert explicite de David) : ColBERT
+(`lembed_multivector_*`, `lembed_maxsim`, binding Python, entrée registry
+answerai-colbert-small-v1) et le routeur de sessions Python (`TextEmbeddingRouter`,
+asyncio).
+
+Ouvert :
+- LE-11 corrections restantes : E7 (profil de l'écart ONNX dense), E10 (cellules de
+  bench perturbées, machine calme).
+- Suites du routeur : harnais T32 dans `benchmarks/concurrency/`, A/B file vs routeur
+  vs asyncio.
+- T44 (llama.cpp v1.0.0, revérifier T45), T14b (SIMD de `lembed_maxsim`).

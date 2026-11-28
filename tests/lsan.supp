@@ -1,0 +1,4 @@
+# LeakSanitizer suppressions for .github/workflows/asan.yml.
+# One comment per entry, naming the proof (CI log) that the leak is third-party.
+# Never suppress a libembedding symbol (lembed_*, lembed::): report and fix it.
+# Currently empty: no third-party leak has been observed.

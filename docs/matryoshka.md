@@ -100,4 +100,20 @@ if (lembed_text_embedding_embed(ctx, texts, n, 0, &emb) == LEMBED_OK) {
 
 ## Qualité par dimension (nDCG@10, BEIR SciFact)
 
-NDCG_TABLE_FR
+nDCG@10 sur BEIR SciFact (split test, 5 183 documents, 300 requêtes, `max_length` 512, ONNX fp32). Entre parenthèses, la part de la qualité obtenue à la dimension native.
+
+| Modèle | 1024 | 768 | 512 | 256 | 128 | 64 |
+|---|---|---|---|---|---|---|
+| `nomic-ai/nomic-embed-text-v1.5` | — | 0,7032 (natif) | 0,7007 (99,6 %) | 0,6825 (97,1 %) | 0,6425 (91,4 %) | 0,5274 (75,0 %) |
+| `mixedbread-ai/mxbai-embed-large-v1` | 0,7389 (natif) | 0,7316 (99,0 %) | 0,7277 (98,5 %) | 0,6932 (93,8 %) | 0,6714 (90,9 %) | 0,5985 (81,0 %) |
+
+En pratique, 512 dimensions conservent plus de 98 % de la qualité pour 1,5 à 2 fois moins de mémoire, et 256 dimensions plus de 93 %. En dessous de 128, la perte devient nette.
+
+Mesuré le 2026-11-24 sur un Intel Core i7-1065G7 (4 cœurs, Windows 11), ONNX Runtime 1.31.0, commit `071b1ce` de `dev`. Pour reproduire :
+
+```bash
+python benchmarks/matryoshka/bench_matryoshka_ndcg.py \
+  --beir ~/.cache/libembedding/datasets/beir-scifact/scifact \
+  --model nomic-ai/nomic-embed-text-v1.5 \
+  --model mixedbread-ai/mxbai-embed-large-v1
+```

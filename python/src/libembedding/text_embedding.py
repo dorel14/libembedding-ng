@@ -3,7 +3,6 @@
 # pyright: reportAttributeAccessIssue=false,reportCallIssue=false
 from __future__ import annotations
 
-import mmap
 import os
 import warnings
 
@@ -41,28 +40,6 @@ _MODE_TO_MODEL = {
 _VALID_DTYPES = ("float32", "float16")
 
 
-def _has_dynamic_quantization(onnx_path: str) -> bool:
-    """True when the ONNX graph quantizes its activations at run time.
-
-    DynamicQuantizeLinear (and ORT's fused DynamicQuantizeMatMul) compute their
-    scale over the whole input tensor. In a padded batch that tensor holds every
-    text of the batch, so a text's vector depends on its neighbours (measured:
-    cosine 0.95 to 0.98 against the same text run alone). Such models keep one
-    text per ORT run. Op types are stored as plain strings in the protobuf, so
-    a byte search is enough. An unreadable file counts as quantized: one text
-    per run is the conservative choice.
-    """
-    try:
-        with open(onnx_path, "rb") as f:
-            m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            try:
-                return m.find(b"DynamicQuantize") != -1
-            finally:
-                m.close()
-    except (OSError, ValueError):
-        return True
-
-
 def _validate_output_dtype(dtype: str) -> str:
     """Validate the dtype requested by the caller."""
     if dtype not in _VALID_DTYPES:
@@ -91,7 +68,7 @@ class TextEmbedding:
             for llama.cpp backend.
         cache_size: Size of LRU embedding cache (0 = disabled).
         quantization: Override model quantization mode ("none", "static",
-            "dynamic"). If None, uses the model's default.
+            "dynamic", "auto", "fp16"). If None, uses the model's default.
         preferred_quantization: Auto-select best quantization ("auto"),
             or one of "none", "static", "dynamic".
         truncate_dim: Matryoshka truncation. Keep only the first
@@ -289,11 +266,10 @@ class TextEmbedding:
                 # Local ONNX model directory. Start from the C defaults: a
                 # zero-filled struct means batch_strategy 0, i.e.
                 # LEMBED_BATCH_SEQUENTIAL (one ORT call per text, batch_size
-                # ignored).
+                # ignored). A dynamic int8 graph is detected by the C core,
+                # which then keeps one text per ORT run (T46).
                 opts = ffi.new("lembed_text_options_t *")
                 opts[0] = lib.lembed_text_options_default()
-                if _has_dynamic_quantization(os.path.join(model_name, "model.onnx")):
-                    opts.batch_strategy = lib.LEMBED_BATCH_SEQUENTIAL
                 opts.backend = backend_enum
                 opts.provider = _PROVIDER_MAP[provider]
                 opts.num_threads = threads
@@ -318,7 +294,7 @@ class TextEmbedding:
                 opts[0] = lib.lembed_text_options_default_v2()
                 # Only FP32 weights are batch-invariant. Quantized variants
                 # (dynamic int8 scales are computed over the whole batch, see
-                # _has_dynamic_quantization), FP16 and an unresolved "auto"
+                # detail/onnx_quant_detect.hpp), FP16 and an unresolved "auto"
                 # keep one text per ORT run, as before.
                 if resolved_quant != lib.LEMBED_QUANTIZATION_NONE:
                     opts.base.batch_strategy = lib.LEMBED_BATCH_SEQUENTIAL

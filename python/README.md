@@ -201,6 +201,52 @@ Reranker(model_name="BAAI/bge-reranker-base", ...)
 
 All classes support context managers (`with TextEmbedding(...) as model:`).
 
+### Concurrent requests: TextEmbeddingRouter
+
+A native context runs one call at a time. To serve many concurrent requests
+(web server, `asyncio`), `TextEmbeddingRouter` owns several `TextEmbedding`
+sessions and hands each request to a free one in strict FIFO order, with a
+bounded queue and an optional wait timeout. Dense text only (ONNX and GGUF).
+
+```python
+import asyncio
+from libembedding import RouterBusyError, TextEmbeddingRouter
+
+router = TextEmbeddingRouter(
+    "BAAI/bge-small-en-v1.5",
+    policy="balanced",        # "latency" (default) | "balanced" | "indexing"
+    max_queue=64,             # request 65 raises RouterBusyError at once
+    acquire_timeout=2.0,      # TimeoutError if no session frees up in time
+)
+
+vectors = router.embed(["a query"])             # any thread
+
+async def handler(texts):
+    try:
+        return await router.aembed(texts)       # never blocks the event loop
+    except RouterBusyError:
+        ...                                     # e.g. HTTP 503
+
+router.close()                                  # or: await router.aclose()
+```
+
+| Policy | ONNX sessions x threads (P = physical cores) | T32 (P = 4, bge-small, batch 1) |
+|--------|----------------------------------------------|---------------------------------|
+| `latency` (default) | 1 x P | p95 9 ms, 243 MB |
+| `balanced` | 2 x P/2 | +25-27 % throughput, p95 13-15 ms, 382 MB |
+| `indexing` | min(P, 8) x 1 | +50-70 % throughput, p95 24 ms, 658 MB |
+
+GGUF models use 1 thread per session. Numbers come from one machine (i7-1065G7,
+4 physical cores); other core counts and ARM are assumed, not measured. A
+`RuntimeWarning` is emitted when `sessions x threads` exceeds P.
+
+`aembed` cancellation: while waiting, the request is withdrawn; during the
+native call `CancelledError` is raised at once but the call cannot be
+interrupted, so the session is only freed when it finishes (bound `batch_size`
+on the server). For `Reranker`, `SparseTextEmbedding` or `MultiVectorEmbedding`
+use `await asyncio.to_thread(obj.method, ...)` (shared default executor, no
+FIFO, no backpressure). Full guide: `docs/concurrency.md`.
+
 ### Similarity Functions
 
 ```python

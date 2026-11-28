@@ -87,6 +87,22 @@ pool.close()
 
 > **Golden rule**: `workers × threads ≤ CPU core count`
 
+**Count physical cores, not logical threads.** With hyperthreading (SMT), a
+4-core processor reports 8 logical threads, but two threads on one core share its
+vector units. Measured on an i7-1065G7 (4 cores, 8 logical threads) with ONNX
+Runtime: going from 4 to 8 threads loses 20 to 30 % of throughput instead of
+gaining any. Keep `workers × threads` at or below the number of **physical
+cores**.
+
+Defaults when `threads` is not set (`threads=0`):
+
+- **ONNX**: the library does not set a thread count and lets ONNX Runtime
+  choose. On the measurement machine, that choice is already right (4).
+- **GGUF (llama.cpp)**: a fixed 4 threads, whatever the processor. On a machine
+  with 2 physical cores, or with several workers, pass `threads=` explicitly.
+- **Autotune and `TextEmbeddingRouter`**: they start from the detected number of
+  physical cores, so they already follow this rule.
+
 ---
 
 ## Auto-Tuning
@@ -264,7 +280,7 @@ Reranker: threads (physical and logical cores in QUICK; + 1, 2, P/2 in FULL) ×
 whose result struct is unchanged; `lembed_sparse_autotune_v2()` also returns
 `workers`, `max_batch_tokens` and `from_cache`) also accept the sparse GGUF registry name (`"SPLADE-PP-En-v1-GGUF"`, already
 cached locally: the tuner never downloads) or a path ending in `.gguf`; the
-backend is chosen by the name, there is no `backend=` parameter. The grid is
+backend is chosen by the name (the `backend` option exists only for the reranker and dense text, not for sparse). The grid is
 threads × workers (graphs sharing the weights) × batch × `max_batch_tokens`
 (token budget per batch, 512 by default). `top_k` and `min_weight` are never
 tuned. The default configuration is point 0 of the grid and is returned when no
@@ -693,10 +709,21 @@ benchmark does not measure.
   `Reranker(quantization=...)` does not resolve a variant either: pass the name of
   the quantized entry, `jinaai/jina-reranker-v1-turbo-en-quantized`.
 
-- **Accuracy is not measured here.** Dynamic INT8 embeddings vary slightly with
-  batch composition (cosine ~0.984 vs the FP32 baseline). Validate on your own
-  corpus before switching a quality-critical index; static INT8 (`_Q`) is the safer
-  default.
+- **Dynamic INT8 runs one text per ONNX call.** `DynamicQuantizeLinear`
+  computes its int8 scale over the whole batch tensor, so in a padded batch a
+  text's vector depends on its neighbours (cosine down to 0.970 against the same
+  text run alone, gte-base). Since 1.17 the library detects the operator in the
+  graph (registry entries, local directories and in-memory models alike) and
+  keeps one text per run whatever `batch_strategy` asks for; the switch is logged
+  under `LIBEMBEDDING_VERBOSE=1`. Embeddings are then reproducible: a text gets
+  the same vector alone, in any batch, or from the LRU cache. Measured on SciFact
+  (2026-11-27, 4 threads, batch 32): batching these models changes nDCG@10 by at
+  most 0.003 and gains nothing on documents, +27 to +90 % on short queries. If you
+  need that throughput on short texts, FP32 with batching is the reproducible
+  option. The quality loss comes from the quantization itself: nDCG@10 FP32 vs
+  INT8 is 0.7127 vs 0.7077 on bge-small-en-v1.5 and 0.7679 vs 0.7429 on
+  gte-base-en-v1.5. Validate on your own corpus before switching a
+  quality-critical index.
 
 Full report, machine block included, archived verbatim in
 `docs/archive/benchmarks/quantization-2026-10-01/` — every figure published above

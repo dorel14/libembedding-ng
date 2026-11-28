@@ -29,6 +29,8 @@
   url: en/gguf_sparse_runtime.html
 - title: Advanced usage
   url: en/advanced_usage.html
+- title: Concurrent requests
+  url: en/concurrency.html
 - title: Quantization
   url: en/quantization.html
 - title: Model routing
@@ -39,6 +41,8 @@
   url: en/troubleshooting.html
 - title: C API — Similarity
   url: en/c_api/similarity.html
+- title: C API — Multi-vector (ColBERT)
+  url: en/c_api/multivector_embedding.html
 - title: C API — Embedding Modes
   url: en/c_api/embedding_mode.html
 - title: C API — Embedding Cache

@@ -32,7 +32,14 @@ from .benchmark import (
     detect_hardware,
 )
 from .cache import EmbeddingCache, cache_config_default
-from .exceptions import LembedError, LlamaError
+from .exceptions import (
+    CacheMissError,
+    GgufError,
+    LembedError,
+    LlamaError,
+    RouterBusyError,
+    RouterClosedError,
+)
 from .gguf_inspect import (
     SPARSE_FORMULA_SCALAR,
     SPARSE_FORMULA_SPLADE,
@@ -44,11 +51,13 @@ from .gguf_inspect import (
 from .image_embedding import ImageEmbedding, image_autotune
 from .models import (
     list_image_models,
+    list_multivector_models,
     list_reranker_models,
     list_sparse_models,
     list_text_models,
     mobile_model_limit_mb,
 )
+from .multivector import LateInteractionTextEmbedding, MultiVectorEmbedding
 from .reranker import (
     Reranker,
     clear_reranker_autotune_cache,
@@ -58,7 +67,14 @@ from .reranker import (
     reranker_autotune_constrained,
     reranker_autotune_custom,
 )
-from .similarity import cosine_similarity, dot_product, euclidean_distance
+from .router import RouterStats, TextEmbeddingRouter
+from .similarity import (
+    cosine_similarity,
+    dot_product,
+    euclidean_distance,
+    maxsim,
+    maxsim_batch,
+)
 from .sparse_text_embedding import (
     SparseTextEmbedding,
     sparse_autotune,
@@ -154,30 +170,38 @@ __all__ = [
     "SPARSE_FORMULA_UNKNOWN",
     "Benchmark",
     "BenchmarkResult",
+    "CacheMissError",
     "ComparisonResult",
     "CorpusType",
     "EmbeddingCache",
     "GgufCapabilities",
     "GgufDesc",
+    "GgufError",
     "HardwareInfo",
     "ImageEmbedding",
     "ImageTuningResult",
+    "LateInteractionTextEmbedding",
     "LembedError",
     "LlamaError",
     "Metrics",
     "ModelDesc",
     "ModelInfo",
     "ModelSelectionResult",
+    "MultiVectorEmbedding",
     "Objective",
     "RerankResult",
     "Reranker",
     "RerankerTuningResult",
+    "RouterBusyError",
+    "RouterClosedError",
+    "RouterStats",
     "SparseEmbedding",
     "SparseTextEmbedding",
     "SparseTuningResult",
     "Stats",
     "TextEmbedding",
     "TextEmbeddingPool",
+    "TextEmbeddingRouter",
     "TuningResult",
     "UnifiedTuningResult",
     "auto_select_model",
@@ -200,9 +224,12 @@ __all__ = [
     "image_autotune",
     "inspect_gguf",
     "list_image_models",
+    "list_multivector_models",
     "list_reranker_models",
     "list_sparse_models",
     "list_text_models",
+    "maxsim",
+    "maxsim_batch",
     "mobile_model_limit_mb",
     "reranker_auto_config",
     "reranker_auto_config_profile",

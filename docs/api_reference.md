@@ -303,6 +303,85 @@ for r in ranked:
 
 ---
 
+### MultiVectorEmbedding
+
+Embeddings multi-vecteurs (interaction tardive, ColBERT) : une matrice float32
+`[n_tokens, dim]` par texte. Backend ONNX Runtime uniquement. Le modèle est soit un
+**répertoire local** (`model.onnx` ou `vespa_colbert.onnx`, `tokenizer.json`, et
+`onnx_config.json` optionnel), soit une **entrée du registre**
+(`"answerdotai/answerai-colbert-small-v1"`, téléchargée dans le cache au premier
+usage ; un répertoire existant l'emporte). La lib embarque ; elle n'indexe ni ne recherche :
+le scoring se fait avec `maxsim` / `maxsim_batch`. Alias :
+`LateInteractionTextEmbedding` (nommage FastEmbed). API C :
+`multivector_embedding.h` (`lembed_multivector_*`).
+
+#### Constructeur
+
+```python
+MultiVectorEmbedding(
+    model_dir, *, provider="cpu", threads=0, batch_size=0,
+    query_maxlen=None, doc_maxlen=None, normalize=True,
+    query_expansion=None, attend_to_expansion=None,
+    cache_dir=None, offline=False, show_download_progress=False,
+)
+```
+
+`cache_dir` / `offline` / `show_download_progress` : modèles du registre uniquement.
+`MultiVectorEmbedding.list_supported_models()` liste le registre.
+`query_maxlen` / `doc_maxlen` : surcharge des longueurs (défaut modèle : 32 / 300).
+`query_expansion` : padding des requêtes avec `[MASK]` (`None` = activé).
+`attend_to_expansion` : `None` = suit le modèle.
+
+#### Méthodes et propriétés
+
+| Membre | Type | Description |
+|--------|------|-------------|
+| `embed(texts, *, mode="document")` | `list[np.ndarray]` | Une matrice `[n_i, dim]` par texte ; `mode` = `"document"` ou `"query"` |
+| `query_embed(query)` | `Iterator[np.ndarray]` | Requête(s) (`str` ou liste), mode `query` |
+| `passage_embed(texts)` | `Iterator[np.ndarray]` | Documents, mode `document` |
+| `dim` | `int` (property) | Dimension des vecteurs |
+| `backend` | `str` (property) | `"onnxruntime"` |
+| `info()` / `stats()` | `ModelDesc` / `Stats` | Descripteur et statistiques |
+| `close()` | `None` | Libère les ressources (idempotent) ; utilisable avec `with` |
+
+Les erreurs sont des sous-classes de `LembedError` (répertoire ou fichier
+manquant : `IOError` ; chemin `.gguf` : `UnsupportedError` ; téléchargement du
+registre impossible : `DownloadError`).
+
+#### Exemple
+
+```python
+from libembedding import MultiVectorEmbedding, maxsim
+
+with MultiVectorEmbedding("/chemin/vers/answerai-colbert-small-v1") as mv:
+    (q,) = mv.query_embed("what is the capital of France?")   # (32, 96)
+    docs = list(mv.passage_embed(["Paris is the capital of France.",
+                                  "Bananas grow in tropical climates."]))
+    scores = [maxsim(q, d) for d in docs]                      # le 1er est le plus haut
+```
+
+Pour beaucoup de documents, `embed_ragged()` renvoie une paire `(data, offsets)` (un seul
+tableau float32 `(total, dim)` et des offsets int64 `n + 1`) que `maxsim_batch(q, (data, offsets))`
+transmet au code natif sans aucune copie ; passer une liste de matrices oblige à les
+concaténer à chaque appel (environ 90 Mo pour 1000 documents longs).
+
+```python
+    data, offsets = mv.embed_ragged(texts)       # document i = data[offsets[i]:offsets[i + 1]]
+    scores = maxsim_batch(q, (data, offsets))    # zéro copie
+```
+
+#### Performances
+
+Mesuré contre pylate (même modèle, mêmes longueurs 32 / 300) sur i7-1065G7, 3 rounds :
+`MultiVectorEmbedding` est 1,14 à 1,5 fois plus rapide à batch 32 (documents courts
+242 contre 160 textes/s, SciFact 10,8 contre 9,5), jusqu'à 3 fois plus rapide à batch 1,
+charge le modèle en 0,9 s contre 8,5 s et consomme 247 à 493 Mo contre 553 à 1021 Mo.
+Les scores MaxSim concordent avec pylate (Spearman 1,0000). Le noyau `maxsim` est
+mono-thread : sur des documents longs (236 vecteurs) il est plus lent que numpy/BLAS.
+Protocole et limites : `benchmarks/multivector/results.md`.
+
+---
+
 ## Types de données
 
 ### TextEmbeddingPool
@@ -639,6 +718,8 @@ Comparaison native de vecteurs d'embedding.
 | `cosine_similarity(a, b)` | Similarité cosinus |
 | `dot_product(a, b)` | Produit scalaire |
 | `euclidean_distance(a, b)` | Distance euclidienne (L2) |
+| `maxsim(query, doc)` | Score MaxSim (ColBERT) : somme sur les lignes de `query` du produit scalaire max avec les lignes de `doc` (matrices float32 2-D) |
+| `maxsim_batch(query, docs)` | Un score MaxSim par document (`docs` : séquence de matrices float32, ou paire `(data, offsets)` transmise sans copie, voir `MultiVectorEmbedding.embed_ragged`), dans l'ordre d'entrée |
 
 ```python
 from libembedding import cosine_similarity, dot_product, euclidean_distance

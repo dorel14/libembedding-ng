@@ -222,6 +222,83 @@ print(embeddings.shape)  # (2, 512)
 
 ---
 
+### MultiVectorEmbedding
+
+Multi-vector (late interaction, ColBERT) embeddings: one float32 matrix
+`[n_tokens, dim]` per text. ONNX Runtime only. The model is either a **local
+directory** (`model.onnx` or `vespa_colbert.onnx`, `tokenizer.json`, and an optional
+`onnx_config.json`) or a **registry entry**
+(`"answerdotai/answerai-colbert-small-v1"`, downloaded into the cache on first use;
+an existing directory wins). The library embeds; it does not index or search: score with
+`maxsim` / `maxsim_batch`. Alias: `LateInteractionTextEmbedding` (FastEmbed
+naming). C API: `multivector_embedding.h` (`lembed_multivector_*`).
+
+#### Constructor
+
+```python
+MultiVectorEmbedding(
+    model_dir, *, provider="cpu", threads=0, batch_size=0,
+    query_maxlen=None, doc_maxlen=None, normalize=True,
+    query_expansion=None, attend_to_expansion=None,
+    cache_dir=None, offline=False, show_download_progress=False,
+)
+```
+
+`cache_dir` / `offline` / `show_download_progress`: registry models only.
+`MultiVectorEmbedding.list_supported_models()` lists the registry.
+`query_maxlen` / `doc_maxlen`: length overrides (model defaults: 32 / 300).
+`query_expansion`: pad queries with `[MASK]` (`None` = on).
+`attend_to_expansion`: `None` = follow the model.
+
+#### Methods and properties
+
+| Member | Type | Description |
+|--------|------|-------------|
+| `embed(texts, *, mode="document")` | `list[np.ndarray]` | One `[n_i, dim]` matrix per text; `mode` is `"document"` or `"query"` |
+| `query_embed(query)` | `Iterator[np.ndarray]` | Query or queries (`str` or list), `query` mode |
+| `passage_embed(texts)` | `Iterator[np.ndarray]` | Documents, `document` mode |
+| `dim` | `int` (property) | Vector dimension |
+| `backend` | `str` (property) | `"onnxruntime"` |
+| `info()` / `stats()` | `ModelDesc` / `Stats` | Descriptor and usage statistics |
+| `close()` | `None` | Release resources (idempotent); works with `with` |
+
+Errors are `LembedError` subclasses (missing directory or file: `IOError`;
+`.gguf` path: `UnsupportedError`; registry download failure: `DownloadError`).
+
+#### Example
+
+```python
+from libembedding import MultiVectorEmbedding, maxsim
+
+with MultiVectorEmbedding("/path/to/answerai-colbert-small-v1") as mv:
+    (q,) = mv.query_embed("what is the capital of France?")   # (32, 96)
+    docs = list(mv.passage_embed(["Paris is the capital of France.",
+                                  "Bananas grow in tropical climates."]))
+    scores = [maxsim(q, d) for d in docs]                      # first is highest
+```
+
+For many documents, `embed_ragged()` returns a `(data, offsets)` pair (one float32
+`(total, dim)` array and `n + 1` int64 offsets) that `maxsim_batch(q, (data, offsets))`
+hands to the native code with no copy at all; passing a list of matrices forces a
+concatenation on every call (about 90 MB for 1000 long documents).
+
+```python
+    data, offsets = mv.embed_ragged(texts)       # document i = data[offsets[i]:offsets[i + 1]]
+    scores = maxsim_batch(q, (data, offsets))    # zero copy
+```
+
+#### Performance
+
+Measured against pylate (same model, same lengths 32 / 300) on an i7-1065G7, 3 rounds:
+`MultiVectorEmbedding` is 1.14 to 1.5 times faster at batch 32 (short documents 242
+against 160 texts/s, SciFact 10.8 against 9.5), up to 3 times faster at batch 1, loads the
+model in 0.9 s against 8.5 s and uses 247 to 493 MB against 553 to 1021 MB. MaxSim scores
+agree with pylate (Spearman 1.0000). The `maxsim` kernel is single-threaded: on long
+documents (236 vectors) it is slower than numpy/BLAS. Protocol and limits:
+`benchmarks/multivector/results.md`.
+
+---
+
 ### Reranker
 
 Scores and sorts documents by relevance to a query (cross-encoder).
@@ -430,6 +507,8 @@ cache.clear()
 | `cosine_similarity(a, b)` | Cosine similarity between two vectors |
 | `dot_product(a, b)` | Dot product between two vectors |
 | `euclidean_distance(a, b)` | L2 distance between two vectors |
+| `maxsim(query, doc)` | MaxSim (ColBERT) score: sum over `query` rows of the max dot product with `doc` rows (2-D float32 matrices) |
+| `maxsim_batch(query, docs)` | One MaxSim score per document (`docs`: sequence of float32 matrices, or a `(data, offsets)` pair passed without copy, see `MultiVectorEmbedding.embed_ragged`), in input order |
 | `detect_backend(model_name, backend="auto")` | Detect which backend to use |
 
 ---

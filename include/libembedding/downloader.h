@@ -50,6 +50,15 @@ lembed_status_t lembed_ensure_reranker_model(
     int offline,
     char** model_dir_out);
 
+/* Multi-vector (ColBERT) model: vespa_colbert.onnx, tokenizer.json and
+ * onnx_config.json, in the same cache layout as the other kinds. */
+lembed_status_t lembed_ensure_multivector_model(
+    lembed_multivector_model_t model,
+    const char* cache_dir,
+    int show_progress,
+    int offline,
+    char** model_dir_out);
+
 lembed_status_t lembed_ensure_gguf_model(
     const char* repo,
     const char* filename,
@@ -167,6 +176,25 @@ lembed_status_t lembed_ensure_sparse_model(
     try {
         std::string dir = lembed::detail::ensure_model_by_kind(
             (int)model, LEMBED__MODEL_TYPE_SPARSE,
+            cache_dir, show_progress != 0, offline != 0);
+        *model_dir_out = strdup(dir.c_str());
+        return LEMBED_OK;
+    } catch (const lembed::detail::model_refused_error& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_UNSUPPORTED;
+    } catch (const std::exception& e) {
+        lembed::detail::set_error(e.what());
+        return LEMBED_ERROR_DOWNLOAD;
+    }
+}
+
+lembed_status_t lembed_ensure_multivector_model(
+        lembed_multivector_model_t model, const char* cache_dir,
+        int show_progress, int offline, char** model_dir_out) {
+    if (!model_dir_out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    try {
+        std::string dir = lembed::detail::ensure_model_by_kind(
+            (int)model, LEMBED__MODEL_TYPE_MULTIVECTOR,
             cache_dir, show_progress != 0, offline != 0);
         *model_dir_out = strdup(dir.c_str());
         return LEMBED_OK;

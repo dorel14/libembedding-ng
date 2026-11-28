@@ -70,6 +70,17 @@ lembed_ggml_cpu_features
     lembed_sparse_text_embedding_effective_provider
     lembed_sparse_text_embedding_set_max_batch_tokens
 
+    ; ---- Multi-vector (ColBERT) embedding ----
+    lembed_multivector_options_default
+    lembed_multivector_create
+    lembed_multivector_embed
+    lembed_multivectors_free
+    lembed_multivector_dim
+    lembed_multivector_desc
+    lembed_multivector_backend_name
+    lembed_multivector_stats
+    lembed_multivector_free
+
     ;@IF NOT LIBEMBEDDING_NO_IMAGE
     ; ---- Image embedding ----
     lembed_image_embedding_create
@@ -109,10 +120,13 @@ lembed_ggml_cpu_features
     lembed_get_sparse_model_info
     lembed_get_image_model_info
     lembed_get_reranker_model_info
+    lembed_get_multivector_model_info
     lembed_list_text_models
     lembed_list_sparse_models
     lembed_list_image_models
     lembed_list_reranker_models
+    lembed_list_multivector_models
+    lembed_find_multivector_model_by_code
     lembed_find_text_model_by_code
     lembed_find_sparse_model_by_code
     lembed_find_reranker_model_by_code
@@ -121,6 +135,7 @@ lembed_ggml_cpu_features
 lembed_resolve_text_model
 lembed_resolve_reranker_model
 lembed_resolve_sparse_model
+    lembed_resolve_multivector_model
     lembed_model_download_size_mb
     lembed_mobile_model_limit_mb
 
@@ -131,6 +146,7 @@ lembed_resolve_sparse_model
     lembed_ensure_image_model
 ;@ENDIF
     lembed_ensure_reranker_model
+    lembed_ensure_multivector_model
     lembed_ensure_gguf_model
     lembed_free_string
     lembed_cleanup_model_cache
@@ -140,6 +156,8 @@ lembed_resolve_sparse_model
     lembed_cosine_similarity
     lembed_dot_product
     lembed_euclidean_distance
+    lembed_maxsim
+    lembed_maxsim_batch
 
     ; ---- Memory free ----
     lembed_embeddings_free

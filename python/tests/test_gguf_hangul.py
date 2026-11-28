@@ -12,6 +12,7 @@ Author: David Orel
 SPDX-License-Identifier: MIT
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +21,12 @@ import pytest
 from libembedding import TextEmbedding
 from libembedding.exceptions import LembedError
 
-GGUF_DIR = Path.home() / ".cache" / "libembedding" / "gguf"
+# Same directory the library uses: CI pins it with LIBEMBEDDING_CACHE_DIR
+# (scripts/ci_prefetch_models.py puts the GGUF files there).
+GGUF_DIR = (
+    Path(os.environ.get("LIBEMBEDDING_CACHE_DIR") or Path.home() / ".cache" / "libembedding")
+    / "gguf"
+)
 ONNX_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 # (file, minimum cosine vs ONNX). Q4_K_M quantization noise alone costs ~1 % on
 # every text (0.987 on Chinese, which was never affected); the bug gave 0.2-0.7.

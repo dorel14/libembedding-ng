@@ -1,6 +1,6 @@
 # libembedding-ng
 
-> Version 1.16.1 — C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
+> Version 1.16.7 — C/C++ and Python library for generating dense, sparse, and image embeddings from ONNX and GGUF (llama.cpp) models.
 
 **Local-first embedding and reranking engine for C/C++ and Python.**
 
@@ -126,6 +126,8 @@ lembed_text_embedding_free(embedder);
 - [Architecture decision records](https://dorel14.github.io/libembedding-ng/adr/README.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/adr/README.md)
 - [Conventions de l'API](https://dorel14.github.io/libembedding-ng/api_conventions.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/api_conventions.md)
 - [Méthodologie des benchmarks](https://dorel14.github.io/libembedding-ng/benchmark_methodology.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/benchmark_methodology.md)
+- [Multi-vecteurs (ColBERT) C API](https://dorel14.github.io/libembedding-ng/c_api/multivector_embedding.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/c_api/multivector_embedding.md)
+- [Requêtes concurrentes : `TextEmbeddingRouter`](https://dorel14.github.io/libembedding-ng/concurrency.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/concurrency.md)
 - [GGUF sparse embedding convention](https://dorel14.github.io/libembedding-ng/gguf_sparse_convention.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_convention.md)
 - [Runtime sparse GGUF](https://dorel14.github.io/libembedding-ng/gguf_sparse_runtime.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/gguf_sparse_runtime.md)
 - [Troncature Matryoshka](https://dorel14.github.io/libembedding-ng/matryoshka.html) — [source](https://github.com/dorel14/libembedding/blob/main/docs/matryoshka.md)

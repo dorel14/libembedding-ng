@@ -38,7 +38,7 @@ jobs:
     name: Static checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Encoding check
         run: |
@@ -70,8 +70,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ONNXRUNTIME_VERSION: "1.31.0"
+      PIP_RETRIES: "5"
+      PIP_TIMEOUT: "60"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -95,7 +97,7 @@ jobs:
             -DLIBEMBEDDING_BUILD_SHARED=ON \
             -DLIBEMBEDDING_INTEGRATION_TESTS=OFF \
             -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
-          cmake --build . --parallel 2 --target test_model_registry test_pooling test_similarity test_local_loading test_cache test_cache_cleanup test_offline_cache test_concurrency test_struct_sizes test_enum_validation test_cpp_wrappers test_quantization_auto test_autotune_core test_tokenizer test_tokenizer_fidelity test_tokenizer_unigram test_tokenizer_bytelevel test_gguf_inspect test_sparse_gguf test_matryoshka test_lifecycle_memory test_backend_introspection test_text_max_length
+          cmake --build . --parallel 2 --target lembed_unit_tests
 
       - name: Run C++ unit tests
         run: |
@@ -123,12 +125,11 @@ jobs:
 
       # Same model cache as build-wheel.yml (shared key, same runner OS/arch).
       - name: Restore downloaded models
-        uses: actions/cache/restore@v4
+        id: models
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
-          restore-keys: |
-            models-${{ runner.os }}-${{ runner.arch }}-v1-
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
       - name: Run Python tests
         env:
@@ -138,16 +139,18 @@ jobs:
           cd python
           pip install -e .[dev]
           pip install pytest-timeout
+          # Prefetch with retries (no-op on a cache hit), see build-wheel.yml.
+          python ../scripts/ci_prefetch_models.py
           # 600 s: network tests download models of several hundred MB.
           pytest tests/ -v --timeout=600 --cov=libembedding --cov-fail-under=40
 
       # Saved even when the tests fail, so a slow download is not repeated.
       - name: Save downloaded models
-        if: always()
-        uses: actions/cache/save@v4
+        if: always() && steps.models.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/libembedding-models
-          key: models-${{ runner.os }}-${{ runner.arch }}-v1-${{ github.run_id }}
+          key: models-${{ runner.os }}-${{ runner.arch }}-v3
 
   # -----------------------------------------------------------------------
   # 3) Determine the next version and create the release (AFTER tests pass)
@@ -161,13 +164,13 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       released: ${{ steps.resolve.outputs.released }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -330,7 +333,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wheel-*
           merge-multiple: true

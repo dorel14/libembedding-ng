@@ -18,9 +18,11 @@ This module provides interaction with the llama.cpp backend for GGUF models.
 > to detect a version.
 >
 > There is **no** `lembed_llama_set_logging()` and no
-> `lembed_llama_get_n_gpu_layers()` in this API. GPU layers are set through the
-> model options (`LEMBED_BACKEND_LLAMACPP` and `n_gpu_layers`), and logging
-> through llama.cpp's own configuration.
+> `lembed_llama_get_n_gpu_layers()` in this API. The
+> `llama_n_gpu_layers` field of `lembed_text_options_t` exists (0 = CPU, -1 = all),
+> but GPU is out of scope: the shipped builds have no ggml GPU device, and the
+> llama.cpp reranker always loads with 0 layers. Logging is set through
+> `llama_verbose` or llama.cpp's own configuration.
 
 ## Example
 

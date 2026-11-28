@@ -179,6 +179,10 @@ def list_reranker_models() -> list[ModelInfo]:
     return _list_models(lib.lembed_list_reranker_models)
 
 
+def list_multivector_models() -> list[ModelInfo]:
+    return _list_models(lib.lembed_list_multivector_models)
+
+
 def _c_string(ptr) -> str:
     """Decode a C string owned by the library ("" for NULL)."""
     return ffi.string(ptr).decode("utf-8", errors="replace") if ptr else ""

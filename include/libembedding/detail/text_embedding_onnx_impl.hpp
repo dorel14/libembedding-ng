@@ -39,6 +39,7 @@ extern "C++" {
 /* Returns std::vector: needs C++ linkage, like the helper above. */
 #include "sparse_batching.hpp"
 #include "gguf_lookup.hpp"
+#include "onnx_quant_detect.hpp"
 #ifdef __cplusplus
 }
 extern "C" {
@@ -106,6 +107,20 @@ static lembed_status_t lembed__text_create_gguf_equivalent(
     s = lembed_text_embedding_create_from_gguf_path(path, options, out);
     lembed_free_string(path);
     return s;
+}
+
+/* T46: a graph with DynamicQuantizeLinear runs one text per ORT call, whatever
+ * batch_strategy the caller asked for (see detail/onnx_quant_detect.hpp: its
+ * int8 scale spans the whole batch, so batching makes a text's vector depend
+ * on its neighbours). Logged under LIBEMBEDDING_VERBOSE=1. */
+static void lembed__text_keep_dynamic_quant_sequential(lembed_text_embedding_t* ctx,
+                                                       bool dynamic_quant) {
+    if (!dynamic_quant || ctx->batch_strategy == LEMBED_BATCH_SEQUENTIAL) return;
+    ctx->batch_strategy = LEMBED_BATCH_SEQUENTIAL;
+    lembed::detail::log_info(
+        "libembedding: text model '%s': dynamic int8 graph, batching disabled "
+        "(one text per ONNX run keeps embeddings reproducible)\n",
+        ctx->model_name_str.c_str());
 }
 
 lembed_status_t lembed_text_embedding_create(
@@ -184,6 +199,13 @@ lembed_status_t lembed_text_embedding_create(
                                           options->num_threads,
                                           (int)options->provider,
                                           (int)ctx->quantization);
+        /* Registry FP32 entries are not scanned: reading a large FP32 file
+         * would cost model creation for nothing. Every other registry entry
+         * is (quantized files are small and the marker sits in the graph
+         * nodes, serialized before the weights). */
+        lembed__text_keep_dynamic_quant_sequential(
+            ctx.get(), ctx->quantization != LEMBED_QUANTIZATION_NONE &&
+                           lembed::detail::onnx_file_uses_dynamic_quantization(onnx_path));
 
         std::string tok_path = model_dir + "/tokenizer.json";
         ctx->onnx.tokenizer.load_from_file(tok_path, ctx->max_length);
@@ -342,6 +364,9 @@ lembed_status_t lembed_text_embedding_create_custom(
 
         ctx->onnx.session.load_from_memory(model->onnx_data, model->onnx_data_size,
                                             num_threads, (int)provider);
+        lembed__text_keep_dynamic_quant_sequential(
+            ctx.get(), lembed::detail::onnx_bytes_use_dynamic_quantization(
+                           model->onnx_data, model->onnx_data_size));
         std::string tok_blob((const char*)model->tokenizer_json, model->tokenizer_json_size);
         ctx->onnx.tokenizer.load_from_blob(tok_blob, ctx->max_length);
 

@@ -85,3 +85,42 @@ Scripts already wired: `benchmarks/sparse/bench_sparse_backend_comparison.py`
   `third_party/README.md`.
 - A p95 over few iterations (5) interpolates between the two largest samples; it only
   becomes statistically meaningful from about twenty rounds.
+
+## 5. Performance smoke test in CI
+
+GitHub-hosted runners are shared machines whose absolute speed varies by tens of
+percent between runs, and no controlled runner is available yet. The CI therefore
+does not compare docs/s. After the wheels are built, the `perf-smoke.yml` job runs
+`benchmarks/perf_smoke.py` on the Linux x86_64 wheel and reports only ratios that
+cancel most of the machine out:
+
+| Metric | Definition |
+|---|---|
+| `dense_b32_per_gflop` | docs/s at batch 32 divided by the GFLOP/s of a 512×512 float32 matrix product measured in the same process |
+| `dense_b1_per_gflop` | the same at batch 1 |
+| `batch_gain` | docs/s at batch 32 over docs/s at batch 1 |
+
+Each value is compared with `benchmarks/perf_smoke_baseline.json`. A drop of more
+than 25 % (the run-to-run noise seen on these runners) produces a GitHub warning.
+The job never fails the run: a warning asks for a measurement on a quiet machine,
+following sections 1 to 3. The JSON report is kept as the `perf-smoke-linux-x86_64`
+artifact for 90 days.
+
+To update the baseline after an intended change, copy the three values printed by
+the job into `perf_smoke_baseline.json`, under the `linux-x86_64` key.
+
+## 6. Comparative (LE-11) and multi-vector campaigns
+
+Two full campaigns are replayed on a quiet machine (on mains, nothing else running),
+one subprocess per measurement, with peak RSS, a separate warmup, three timed passes
+(median) and the library order rotated between rounds. Each script rewrites its JSON
+after every cell and resumes where it stopped.
+
+| Campaign | Script | Results |
+|---|---|---|
+| libembedding against SentenceTransformers and FastEmbed (dense, sparse, quality on 100 BEIR pairs, batch 1 to 128, 3 thread settings) | `benchmarks/competitive/bench_competitive.py full` | `benchmarks/competitive/results.md` and `results.json` |
+| `MultiVectorEmbedding` (ColBERT) against pylate, and the MaxSim kernel against numpy | `benchmarks/multivector/bench_multivector.py full` | `benchmarks/multivector/results.md` and `results.json` |
+
+To measure the source tree rather than the PyPI wheel, set `LIBEMBEDDING_LIBRARY` to
+the built library and add `python/src` to `PYTHONPATH` (multi-vector is not in the
+wheel yet).

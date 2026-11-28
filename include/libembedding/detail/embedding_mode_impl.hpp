@@ -20,8 +20,10 @@ namespace lembed { namespace detail {
 
 /* These two return a sentinel rather than a status. The switch is on the raw
  * value so an out-of-range `mode` from a C caller reaches `default` without
- * an enum-typed read (see enum_check.hpp). */
-inline const char* mode_to_string(lembed_embedding_mode_t mode) {
+ * an enum-typed read (see enum_check.hpp). `mode` is taken by reference: a
+ * by-value parameter would copy (load) the caller's enum before enum_raw(),
+ * which UBSan -fsanitize=enum reports for an out-of-range value. */
+inline const char* mode_to_string(const lembed_embedding_mode_t& mode) {
     switch (enum_raw(mode)) {
         case LEMBED_MODE_FAST:     return "fast";
         case LEMBED_MODE_BALANCED: return "balanced";
@@ -30,7 +32,7 @@ inline const char* mode_to_string(lembed_embedding_mode_t mode) {
     }
 }
 
-inline lembed_text_model_t recommended_model_for_mode(lembed_embedding_mode_t mode) {
+inline lembed_text_model_t recommended_model_for_mode(const lembed_embedding_mode_t& mode) {
     switch (enum_raw(mode)) {
         case LEMBED_MODE_FAST:
             return LEMBED_TEXT_PARAPHRASE_ML_MINILM_L12_V2_Q;

@@ -23,6 +23,9 @@ on:
 env:
   ONNXRUNTIME_VERSION: "1.31.0"
   ANDROID_API: "24"
+  # pip got HTTP 429 (humanize) from PyPI: retry with a longer timeout.
+  PIP_RETRIES: "5"
+  PIP_TIMEOUT: "60"
 
 jobs:
   wheel:
@@ -30,11 +33,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -51,7 +54,7 @@ jobs:
           ANDROID_API_LEVEL: ${{ env.ANDROID_API }}
           CIBW_BUILD_FRONTEND: build
           CIBW_BEFORE_BUILD_ANDROID: bash {project}/scripts/build_android_libs.sh
-          CIBW_ENVIRONMENT_ANDROID: PIP_EXTRA_INDEX_URL=https://chaquo.com/pypi-13.1
+          CIBW_ENVIRONMENT_ANDROID: PIP_EXTRA_INDEX_URL=https://chaquo.com/pypi-13.1 PIP_RETRIES=5 PIP_TIMEOUT=60
           # No repair: every native library is already in the package, linked
           # to its siblings through RUNPATH=$ORIGIN, and the wheel is already
           # tagged android_24_*. auditwheel only searches the NDK and failed
@@ -69,7 +72,7 @@ jobs:
           cibuildwheel python --output-dir wheelhouse
           ls -la wheelhouse
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheel-android
           path: wheelhouse/*.whl

@@ -141,6 +141,7 @@ inline void check_mobile_model_limit(const lembed_model_info_t& info, int model_
         case LEMBED__MODEL_TYPE_IMAGE:    lembed_list_image_models(&models, &count);    kind = "image"; break;
 #endif
         case LEMBED__MODEL_TYPE_RERANKER: lembed_list_reranker_models(&models, &count); kind = "reranker"; break;
+        case LEMBED__MODEL_TYPE_MULTIVECTOR: lembed_list_multivector_models(&models, &count); kind = "multivector"; break;
         default: break;
     }
     /* One entry per repo, at its smallest light variant: the thread-local
@@ -209,6 +210,9 @@ inline std::string ensure_model_by_kind(
 #endif
         case LEMBED__MODEL_TYPE_RERANKER:
             s = lembed_get_reranker_model_info((lembed_reranker_model_t)model_enum, &info);
+            break;
+        case LEMBED__MODEL_TYPE_MULTIVECTOR:
+            s = lembed_get_multivector_model_info((lembed_multivector_model_t)model_enum, &info);
             break;
         default:
             throw std::runtime_error("Unknown model type in download manager");

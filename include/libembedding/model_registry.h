@@ -22,18 +22,21 @@ lembed_status_t lembed_get_text_model_info(lembed_text_model_t model, lembed_mod
 lembed_status_t lembed_get_sparse_model_info(lembed_sparse_model_t model, lembed_model_info_t* out);
 lembed_status_t lembed_get_image_model_info(lembed_image_model_t model, lembed_model_info_t* out);
 lembed_status_t lembed_get_reranker_model_info(lembed_reranker_model_t model, lembed_model_info_t* out);
+lembed_status_t lembed_get_multivector_model_info(lembed_multivector_model_t model, lembed_model_info_t* out);
 
 /* List all supported models (returns pointer to static data, do not free) */
 lembed_status_t lembed_list_text_models(const lembed_model_info_t** out, int* count);
 lembed_status_t lembed_list_sparse_models(const lembed_model_info_t** out, int* count);
 lembed_status_t lembed_list_image_models(const lembed_model_info_t** out, int* count);
 lembed_status_t lembed_list_reranker_models(const lembed_model_info_t** out, int* count);
+lembed_status_t lembed_list_multivector_models(const lembed_model_info_t** out, int* count);
 
 /* Lookup model enum from HuggingFace model code string, returns -1 if not found */
 int lembed_find_text_model_by_code(const char* model_code);
 int lembed_find_sparse_model_by_code(const char* model_code);
 int lembed_find_image_model_by_code(const char* model_code);
 int lembed_find_reranker_model_by_code(const char* model_code);
+int lembed_find_multivector_model_by_code(const char* model_code);
 
 /* Resolve a quantization request to the registry entry that provides it.
  *
@@ -77,6 +80,7 @@ int lembed_find_text_model_variant(const char* model_name, int quantization);
 int lembed_resolve_text_model(const char* model);
 int lembed_resolve_reranker_model(const char* model);
 int lembed_resolve_sparse_model(const char* model);
+int lembed_resolve_multivector_model(const char* model);
 
 /* Download size, in MB, of a registry model: model_file plus its external
  * weights (".onnx_data"), as measured on HuggingFace. model_code and model_file
@@ -344,6 +348,22 @@ static const lembed_model_info_t lembed__sparse_models[] = {
 };
 
 /* =========================================================================
+ * Multi-vector (ColBERT) Model Registry Data
+ *
+ * Apache-2.0 (MIT-compatible). model_file is vespa_colbert.onnx: the graph the
+ * multivector loader was validated against; the repo's model.onnx is a second,
+ * unvalidated export and is deliberately not downloaded. dim is the projected
+ * ColBERT vector size, max_tokens the document length (onnx_config.json).
+ * ========================================================================= */
+
+static const lembed_model_info_t lembed__multivector_models[] = {
+    /* LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1 */
+    { "answerdotai/answerai-colbert-small-v1", "answerdotai/answerai-colbert-small-v1",
+      "vespa_colbert.onnx", "answerai-colbert-small-v1, ColBERT late-interaction model (English, 96-dim vectors)",
+      96, 300, 0, LEMBED_QUANTIZATION_NONE },
+};
+
+/* =========================================================================
  * Image Model Registry Data
  * ========================================================================= */
 
@@ -407,7 +427,7 @@ static const lembed_model_info_t lembed__reranker_models[] = {
 
 typedef struct {
     int         model_enum;
-    int         model_type;  /* 0=text, 1=sparse, 2=image, 3=reranker */
+    int         model_type;  /* 0=text, 1=sparse, 2=image, 3=reranker, 4=multivector */
     const char* files[4];    /* NULL-terminated list */
 } lembed__additional_files_entry_t;
 
@@ -417,6 +437,7 @@ typedef struct {
 #define LEMBED__MODEL_TYPE_IMAGE    2
 #endif
 #define LEMBED__MODEL_TYPE_RERANKER 3
+#define LEMBED__MODEL_TYPE_MULTIVECTOR 4
 
 static const lembed__additional_files_entry_t lembed__additional_files[] = {
     { LEMBED_TEXT_BGE_M3,            LEMBED__MODEL_TYPE_TEXT,     { "onnx/model.onnx_data", "onnx/Constant_7_attr__value", NULL } },
@@ -428,6 +449,9 @@ static const lembed__additional_files_entry_t lembed__additional_files[] = {
     { LEMBED_TEXT_BGE_SMALL_EN_V15_INT8, LEMBED__MODEL_TYPE_TEXT, { "onnx/model_quantized.onnx_data", NULL } },
     { LEMBED_SPARSE_BGE_M3,         LEMBED__MODEL_TYPE_SPARSE,   { "onnx/model.onnx_data", "onnx/Constant_7_attr__value", NULL } },
     { LEMBED_RERANKER_BGE_V2_M3,    LEMBED__MODEL_TYPE_RERANKER, { "model.onnx.data", NULL } },
+    /* The multivector loader reads its projection size, marker ids and lengths
+     * from onnx_config.json; the generic downloader does not fetch it. */
+    { LEMBED_MULTIVECTOR_ANSWERAI_COLBERT_SMALL_V1, LEMBED__MODEL_TYPE_MULTIVECTOR, { "onnx_config.json", NULL } },
 };
 
 static const int lembed__additional_files_count =
@@ -511,6 +535,8 @@ static const lembed__model_size_t lembed__model_sizes[] = {
     { "jinaai/jina-reranker-v1-turbo-en", "onnx/model.onnx", 151 },
     { "jinaai/jina-reranker-v2-base-multilingual", "onnx/model.onnx", 1114 },
     { "jinaai/jina-reranker-v1-turbo-en", "onnx/model_quantized.onnx", 38 },
+    /* multivector */
+    { "answerdotai/answerai-colbert-small-v1", "vespa_colbert.onnx", 127 },
 };
 
 static const int lembed__model_sizes_count =
@@ -549,6 +575,21 @@ lembed_status_t lembed_get_reranker_model_info(lembed_reranker_model_t model, le
     lembed_status_t s = lembed::detail::check_reranker_model(model);
     if (s != LEMBED_OK) return s;
     *out = lembed__reranker_models[(int)model];
+    return LEMBED_OK;
+}
+
+lembed_status_t lembed_get_multivector_model_info(lembed_multivector_model_t model, lembed_model_info_t* out) {
+    if (!out) return LEMBED_ERROR_INVALID_ARGUMENT;
+    lembed_status_t s = lembed::detail::check_multivector_model(model);
+    if (s != LEMBED_OK) return s;
+    *out = lembed__multivector_models[(int)model];
+    return LEMBED_OK;
+}
+
+lembed_status_t lembed_list_multivector_models(const lembed_model_info_t** out, int* count) {
+    if (!out || !count) return LEMBED_ERROR_INVALID_ARGUMENT;
+    *out = lembed__multivector_models;
+    *count = LEMBED_MULTIVECTOR_MODEL_COUNT;
     return LEMBED_OK;
 }
 
@@ -682,6 +723,20 @@ int lembed_resolve_sparse_model(const char* model) {
     return lembed__resolve_by_code_or_name(lembed__sparse_models,
                                            LEMBED_SPARSE_MODEL_COUNT,
                                            model, "sparse");
+}
+
+int lembed_resolve_multivector_model(const char* model) {
+    return lembed__resolve_by_code_or_name(lembed__multivector_models,
+                                           LEMBED_MULTIVECTOR_MODEL_COUNT,
+                                           model, "multivector");
+}
+
+int lembed_find_multivector_model_by_code(const char* model_code) {
+    if (!model_code) return -1;
+    for (int i = 0; i < LEMBED_MULTIVECTOR_MODEL_COUNT; i++) {
+        if (strcmp(lembed__multivector_models[i].model_code, model_code) == 0) return i;
+    }
+    return -1;
 }
 
 int lembed_find_sparse_model_by_code(const char* model_code) {

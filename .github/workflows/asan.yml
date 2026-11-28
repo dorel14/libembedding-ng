@@ -1,0 +1,132 @@
+# Auteur: David Orel
+# SPDX-License-Identifier: MIT
+#
+# AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer on the C++ unit
+# tests (T35). tests/test_lifecycle_memory.cpp relies on this job to decide
+# whether any create entry point leaks on its error paths. test_concurrency is
+# ThreadSanitizer's job (tsan.yml) and the slow 10 000-call tests are left out.
+# The models the tests load offline are prefetched with the released wheel
+# (scripts/ci_prefetch_cpp_models.py) and cached between runs, so the
+# model-backed tests run under the sanitizers instead of skipping.
+name: ASan
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "include/**"
+      - "tests/**"
+      - "third_party/llama.cpp/**"
+      - "CMakeLists.txt"
+      - "scripts/**"
+      - ".github/workflows/asan.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: asan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+  CLANG_VERSION: "18"
+  # Models the tests may download (tags: see tests/conc_support.h).
+  LEMBED_TEST_ALLOW_DOWNLOAD: "text,text_gguf,reranker,sparse_gguf,image"
+
+jobs:
+  asan:
+    name: asan-linux-x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libcurl4-openssl-dev \
+            "clang-${CLANG_VERSION}" "libclang-rt-${CLANG_VERSION}-dev"
+          ort_root="$(bash scripts/fetch_onnxruntime.sh linux-x64 "$ONNXRUNTIME_VERSION")"; ort_root="${ort_root##*$'\n'}"
+          echo "ONNXRUNTIME_ROOT=$(cd "$ort_root" && pwd)" >> "$GITHUB_ENV"
+
+      - name: Cache models
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/libembedding
+          key: asan-cpp-models-${{ hashFiles('scripts/ci_prefetch_cpp_models.py') }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Best effort: a failed model is a warning and its tests skip. The
+      # script writes ~/.cache/libembedding/.cpp-prefetch-ok only when every
+      # model is in place.
+      - name: Prefetch the models the tests load from the cache
+        run: |
+          python -m venv "$RUNNER_TEMP/prefetch"
+          "$RUNNER_TEMP/prefetch/bin/python" -m pip install --quiet --retries 5 libembedding-ng \
+            || echo "::warning::libembedding-ng install failed, model-backed tests will skip"
+          "$RUNNER_TEMP/prefetch/bin/python" scripts/ci_prefetch_cpp_models.py \
+            || echo "::warning::model prefetch failed, model-backed tests will skip"
+
+      # CPU dispatch off: one static ggml-cpu, every byte of ggml instrumented.
+      # OpenMP off: an uninstrumented libgomp only adds noise.
+      - name: Configure (clang, ASan + UBSan)
+        run: |
+          # The UBSan "function" check is off: vendored ggml calls
+          # ggml_vec_dot_f32 through a differently typed pointer (third_party
+          # is never patched). The "enum" check is ON: library code reads
+          # caller enums through enum_raw() (detail/enum_check.hpp), and the
+          # tests that pass out-of-range values do it through memcpy or
+          # NO_ENUM_SAN-annotated helpers, so a bad enum read is a real bug.
+          san="-fsanitize=address,undefined -fno-sanitize=function -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          cmake -S . -B build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER="clang-${CLANG_VERSION}" \
+            -DCMAKE_CXX_COMPILER="clang++-${CLANG_VERSION}" \
+            -DCMAKE_C_FLAGS="$san" \
+            -DCMAKE_CXX_FLAGS="$san" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DLIBEMBEDDING_CPU_DISPATCH=OFF \
+            -DGGML_OPENMP=OFF \
+            -DLIBEMBEDDING_BUILD_TESTS=ON \
+            -DLIBEMBEDDING_BUILD_EXAMPLES=OFF \
+            -DLIBEMBEDDING_BUILD_BENCHMARKS=OFF \
+            -DLIBEMBEDDING_BUILD_SHARED=OFF \
+            -DONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
+
+      - name: Build
+        run: cmake --build build-asan --parallel 4
+
+      - name: Run unit tests under ASan/LSan
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1"
+          LSAN_OPTIONS: "suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=0"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: |
+          ctest --test-dir build-asan --output-on-failure --timeout 300 \
+            -E "test_concurrency|test_repeated_calls|test_lifecycle_large_batch"
+
+      # ctest hides the output of a passing test, so a model-backed test that
+      # skipped would go unnoticed. When the prefetch put every model in place,
+      # rerun those tests verbosely and fail on any SKIP line.
+      - name: Check the model-backed tests did not skip
+        shell: bash
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1"
+          LSAN_OPTIONS: "suppressions=${{ github.workspace }}/tests/lsan.supp:print_suppressions=0"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: |
+          if [ ! -f ~/.cache/libembedding/.cpp-prefetch-ok ]; then
+            echo "::warning::model prefetch incomplete, skip check not enforced"
+            exit 0
+          fi
+          ctest --test-dir build-asan --output-on-failure --timeout 300 -V \
+            -R "^(test_text_max_length|test_backend_introspection|test_multivector_fidelity)$" \
+            | tee "$RUNNER_TEMP/model-tests.log"
+          if grep -n "SKIP" "$RUNNER_TEMP/model-tests.log"; then
+            echo "::error::a model-backed test skipped although its model was prefetched"
+            exit 1
+          fi
